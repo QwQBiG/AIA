@@ -1,0 +1,51 @@
+{
+  "appId": "com.ai-vtuber.digital-human",
+  "productName": "AI VTuber Digital Human",
+  "directories": {
+    "output": "dist/installer",
+    "buildResources": "assets"
+  },
+  "files": [
+    "dist/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../packages/server/dist",
+      "to": "server",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "../packages/client/dist",
+      "to": "client",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "assets/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "installerIcon": "assets/installer.ico",
+    "uninstallerIcon": "assets/uninstaller.ico",
+    "installerHeaderIcon": "assets/installer.ico",
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "AI VTuber Digital Human",
+    "perMachine": false,
+    "allowElevation": true,
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false,
+    "include": "build/installer.nsh",
+    "warningsAsErrors": false,
+    "uninstallDisplayName": "AI VTuber Digital Human"
+  }
+}

@@ -1,0 +1,113 @@
+/* 全局样式 */
+:root {
+  --color-bg-primary: #1a1a2e;
+  --color-bg-secondary: #16213e;
+  --color-bg-tertiary: #0f3460;
+  --color-text-primary: #eaeaea;
+  --color-text-secondary: #a0a0a0;
+  --color-accent: #e94560;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+  --border-radius: 8px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --font-size-sm: 12px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+#root {
+  height: 100%;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* 按钮基础样式 */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--border-radius);
+  padding: var(--spacing-sm) var(--spacing-md);
+  transition: all 0.2s ease;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 输入框基础样式 */
+input {
+  font-family: inherit;
+  font-size: inherit;
+  border: 1px solid var(--color-bg-tertiary);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* 代码样式 */
+code {
+  font-family: 'Consolas', 'Monaco', monospace;
+  background-color: var(--color-bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+}
+
+/* 链接样式 */
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}

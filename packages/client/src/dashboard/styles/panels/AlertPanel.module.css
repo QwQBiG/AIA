@@ -1,0 +1,146 @@
+.panel {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.clearButton {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.clearButton:hover {
+  background-color: var(--color-error);
+  color: white;
+}
+
+.alertList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl);
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--border-radius);
+  color: var(--color-text-secondary);
+}
+
+.emptyIcon {
+  font-size: 48px;
+  margin-bottom: var(--spacing-md);
+}
+
+.alert {
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-md);
+  border-left: 4px solid;
+}
+
+.alert.low {
+  border-left-color: var(--color-info);
+}
+
+.alert.medium {
+  border-left-color: var(--color-warning);
+}
+
+.alert.high {
+  border-left-color: #f97316;
+}
+
+.alert.critical {
+  border-left-color: var(--color-error);
+}
+
+.alertHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.severityIcon {
+  font-size: var(--font-size-lg);
+}
+
+.alertCode {
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.alertModule {
+  padding: 2px 6px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.alertTime {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.dismissButton {
+  padding: var(--spacing-xs);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1;
+}
+
+.dismissButton:hover {
+  color: var(--color-error);
+}
+
+.alertMessage {
+  margin-bottom: var(--spacing-sm);
+  line-height: 1.5;
+}
+
+.recovery {
+  padding: var(--spacing-sm);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-sm);
+  color: var(--color-info);
+}
+
+.context {
+  margin-top: var(--spacing-sm);
+}
+
+.context summary {
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.context pre {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-sm);
+  overflow-x: auto;
+}

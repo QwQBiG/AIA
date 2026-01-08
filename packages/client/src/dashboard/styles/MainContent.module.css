@@ -1,0 +1,75 @@
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-bg-tertiary);
+}
+
+.tab {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-tertiary);
+}
+
+.tab.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background-color: rgba(233, 69, 96, 0.1);
+}
+
+.content {
+  flex: 1;
+  padding: var(--spacing-md);
+  overflow: auto;
+}
+
+.activityGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--spacing-md);
+  height: 100%;
+}
+
+.chatSection {
+  grid-row: 1 / 3;
+}
+
+.aiSection {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.gameSection {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+@media (max-width: 1200px) {
+  .activityGrid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+  .chatSection,
+  .aiSection,
+  .gameSection {
+    grid-column: 1;
+    grid-row: auto;
+    min-height: 300px;
+  }
+}

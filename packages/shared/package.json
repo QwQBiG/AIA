@@ -1,0 +1,19 @@
+{
+  "name": "@digital-human/shared",
+  "version": "1.0.0",
+  "description": "Shared types and utilities for AI VTuber Digital Human System",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rimraf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "ajv": "^8.12.0",
+    "ajv-formats": "^3.0.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.7"
+  }
+}

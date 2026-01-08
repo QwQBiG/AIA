@@ -1,0 +1,73 @@
+.sidebar {
+  width: 280px;
+  background-color: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-bg-tertiary);
+  padding: var(--spacing-md);
+  overflow-y: auto;
+}
+
+.title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text-primary);
+}
+
+.moduleList {
+  list-style: none;
+}
+
+.moduleItem {
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius);
+  transition: background-color 0.2s ease;
+}
+
+.moduleItem:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.moduleHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+}
+
+.healthIcon {
+  font-size: var(--font-size-sm);
+}
+
+.moduleName {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.moduleDetails {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.connectionStatus {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.online {
+  background-color: rgba(74, 222, 128, 0.2);
+  color: var(--color-success);
+}
+
+.offline {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: var(--color-error);
+}
+
+.lastHeartbeat {
+  color: var(--color-text-secondary);
+}

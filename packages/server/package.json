@@ -1,0 +1,29 @@
+{
+  "name": "@digital-human/server",
+  "version": "1.0.0",
+  "description": "Server-side modules for AI VTuber Digital Human System",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "start": "node dist/main.js",
+    "start:dev": "ts-node src/main.ts",
+    "dev": "ts-node-dev --respawn src/main.ts",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "@digital-human/shared": "1.0.0",
+    "@types/pg": "^8.16.0",
+    "pg": "^8.16.3",
+    "socket.io": "^4.7.4",
+    "tmi.js": "^1.8.5",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/tmi.js": "^1.8.6",
+    "socket.io-client": "^4.7.4"
+  }
+}

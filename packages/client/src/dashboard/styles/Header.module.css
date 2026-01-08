@@ -1,0 +1,81 @@
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-bg-tertiary);
+}
+
+.logo h1 {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.statusItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.indicator {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.connected {
+  background-color: rgba(74, 222, 128, 0.2);
+  color: var(--color-success);
+}
+
+.disconnected {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: var(--color-error);
+}
+
+.healthy {
+  background-color: rgba(74, 222, 128, 0.2);
+  color: var(--color-success);
+}
+
+.degraded {
+  background-color: rgba(251, 191, 36, 0.2);
+  color: var(--color-warning);
+}
+
+.unhealthy {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: var(--color-error);
+}
+
+.alertBadge {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background-color: rgba(239, 68, 68, 0.2);
+  border-radius: var(--border-radius);
+}
+
+.alertIcon {
+  font-size: var(--font-size-md);
+}
+
+.alertCount {
+  color: var(--color-error);
+  font-weight: 600;
+}
