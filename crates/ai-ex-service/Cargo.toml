@@ -1,0 +1,38 @@
+[package]
+name = "ai-ex-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+native-playback = ["ai-ex-audio/native-playback"]
+native-capture = ["ai-ex-capture/native-capture"]
+
+[dependencies]
+ai-ex-asr = { path = "../ai-ex-asr" }
+ai-ex-audit = { path = "../ai-ex-audit" }
+ai-ex-audio = { path = "../ai-ex-audio" }
+ai-ex-capture = { path = "../ai-ex-capture" }
+ai-ex-config = { path = "../ai-ex-config" }
+ai-ex-control = { path = "../ai-ex-control" }
+ai-ex-core = { path = "../ai-ex-core" }
+ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-duplex = { path = "../ai-ex-duplex" }
+ai-ex-memory = { path = "../ai-ex-memory" }
+ai-ex-koboldcpp = { path = "../ai-ex-koboldcpp" }
+ai-ex-observability = { path = "../ai-ex-observability" }
+ai-ex-ollama = { path = "../ai-ex-ollama" }
+ai-ex-safety = { path = "../ai-ex-safety" }
+ai-ex-tts = { path = "../ai-ex-tts" }
+ai-ex-vts = { path = "../ai-ex-vts" }
+ai-ex-vision = { path = "../ai-ex-vision" }
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "ai-ex-ui-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-observability = { path = "../ai-ex-observability" }
+serde.workspace = true
+
+[lints]
+workspace = true

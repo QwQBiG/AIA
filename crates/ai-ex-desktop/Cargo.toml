@@ -1,0 +1,22 @@
+[package]
+name = "ai-ex-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+ai-ex-config = { path = "../ai-ex-config" }
+ai-ex-control = { path = "../ai-ex-control" }
+ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-observability = { path = "../ai-ex-observability" }
+ai-ex-ui-model = { path = "../ai-ex-ui-model" }
+eframe = { version = "0.35.0", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence"] }
+tokio = { version = "1.47.1", features = ["net", "rt", "sync", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

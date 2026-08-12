@@ -1,0 +1,16 @@
+[package]
+name = "ai-ex-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-text = { path = "../ai-ex-text" }
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

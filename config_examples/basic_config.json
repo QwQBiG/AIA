@@ -1,0 +1,37 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "llama3",
+  "tts_voice": "zh-CN-XiaoxiaoNeural",
+  "vts_port": 8001,
+  "log_level": "INFO",
+  "enable_emotional_intelligence": false,
+  "enable_voice_cloning": false,
+  "enable_expression_control": false,
+  "sovits_url": "http://127.0.0.1:9880",
+  "sovits_timeout": 10.0,
+  "sovits_language": "zh",
+  "fallback_to_edge_tts": true,
+  "emotion_hotkey_map": {
+    "neutral": "",
+    "happy": "",
+    "angry": "",
+    "sad": "",
+    "surprised": ""
+  },
+  "default_emotion": "neutral",
+  "expression_timeout": 0.5,
+  "agent": {
+    "enabled": false,
+    "actions": {
+      "debug_overlay": {
+        "enabled": true,
+        "use_click_through": true,
+        "fallback_to_transient": true
+      }
+    },
+    "safety": {
+      "enable_emergency_hotkey": true,
+      "emergency_key": "<f9>"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "health_monitor": {
+    "enabled": true,
+    "interval": 300,
+    "log_level": "ERROR"
+  },
+  "streaming_ears": {
+    "fallback_mode": true,
+    "disable_funasr_warnings": true
+  },
+  "full_duplex": {
+    "enabled": true,
+    "asr_engine": "whisper",
+    "whisper_model": "base",
+    "vad_threshold": 0.3,
+    "interruption_timeout": 0.2,
+    "min_speech_duration": 0.5,
+    "max_silence_duration": 1.5,
+    "audio_chunk_duration": 0.05,
+    "sample_rate": 16000,
+    "enable_preprocessing": true,
+    "enable_chinese_optimization": true
+  },
+  "audio_devices": {
+    "prefer_headphones": true,
+    "auto_select_device": true,
+    "fallback_to_default": true
+  },
+  "performance": {
+    "enable_gpu": true,
+    "max_concurrent_requests": 2,
+    "audio_buffer_size": 4096
+  },
+  "speech_recognition": {
+    "language": "zh",
+    "enable_vad": true,
+    "vad_aggressiveness": 1,
+    "noise_reduction": true,
+    "auto_gain_control": true,
+    "echo_cancellation": true
+  }
+}

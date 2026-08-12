@@ -1,0 +1,21 @@
+[package]
+name = "ai-ex-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+native-playback = ["dep:rodio"]
+
+[dependencies]
+ai-ex-core = { path = "../ai-ex-core" }
+ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-text = { path = "../ai-ex-text" }
+async-trait.workspace = true
+rodio = { workspace = true, optional = true }
+tokio.workspace = true
+
+[lints]
+workspace = true

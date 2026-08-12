@@ -1,0 +1,16 @@
+[package]
+name = "ai-ex-asr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-duplex = { path = "../ai-ex-duplex" }
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

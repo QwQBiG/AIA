@@ -1,0 +1,18 @@
+{
+  "display_name": "Cookie Clicker",
+  "description": "Incremental clicking game where you click a big cookie to earn cookies and buy upgrades",
+  "vlm_prompts": [
+    "You are playing Cookie Clicker. Your goal is to maximize cookie production by clicking the big cookie and purchasing upgrades.",
+    "Available actions: click the big cookie repeatedly, buy cursor upgrades to automate clicking, buy grandma upgrades for passive production, check your cookies per second (CPS) progress.",
+    "Strategy: Start by clicking manually, then buy cursor upgrades when affordable. Monitor your CPS and decide when to switch from manual clicking to buying production upgrades."
+  ],
+  "default_templates": {
+    "primary_target": "big-cookie.png",
+    "cursor_upgrade": "cursor-upgrade.png",
+    "grandma_upgrade": "grandma-upgrade.png"
+  },
+  "action_cooldowns": {
+    "buy_upgrade": 2.0,
+    "check_progress": 5.0
+  }
+}

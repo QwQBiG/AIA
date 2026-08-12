@@ -1,0 +1,15 @@
+[package]
+name = "ai-ex-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ai-ex-domain = { path = "../ai-ex-domain" }
+serde.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,46 @@
+use serde::{Deserialize, Serialize};
+
+use crate::{ConversationState, Emotion, TurnId};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SystemEvent
+{
+    TurnStarted { turn_id: TurnId, user_text: String },
+    ModelChunk { turn_id: TurnId, text: String },
+    EmotionChanged { turn_id: TurnId, emotion: Emotion },
+    SentenceReady { turn_id: TurnId, text: String },
+    TurnFinished { turn_id: TurnId, full_text: String },
+    TurnInterrupted { turn_id: TurnId, reason: String },
+    StateChanged { from: ConversationState, to: ConversationState },
+    Fault { message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentHealth
+{
+    pub component: String,
+    pub ready: bool,
+    pub detail: String,
+}
+
+impl ComponentHealth
+{
+    pub fn ready(component: impl Into<String>) -> Self
+    {
+        Self {
+            component: component.into(),
+            ready: true,
+            detail: String::new(),
+        }
+    }
+
+    pub fn unavailable(component: impl Into<String>, detail: impl Into<String>) -> Self
+    {
+        Self {
+            component: component.into(),
+            ready: false,
+            detail: detail.into(),
+        }
+    }
+}

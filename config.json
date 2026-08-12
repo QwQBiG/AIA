@@ -1,0 +1,75 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "my-vtuber-model:latest",
+  "tts_voice": "zh-CN-XiaoxiaoNeural",
+  "vts_port": 8001,
+  "log_level": "INFO",
+  "enable_emotional_intelligence": true,
+  "enable_voice_cloning": false,
+  "enable_expression_control": true,
+  "performance": {
+    "enable_streaming": true,
+    "enable_sentence_chunking": true,
+    "stream_chunk_min_size": 12,
+    "max_queue_size": 10,
+    "warmup_enabled": true,
+    "warmup_timeout": 10.0,
+    "enable_interruption": true
+  },
+  "ux": {
+    "show_subtitles": true,
+    "subtitle_font_size": 28,
+    "subtitle_delay": 0.3,
+    "subtitle_show_original": true,
+    "enable_cache": true,
+    "cache_directory": "assets/cache",
+    "aggressive_split": true,
+    "aggressive_min_length": 8,
+    "remove_emoji": false,
+    "remove_markdown": true,
+    "remove_parenthetical": false
+  },
+  "agent": {
+    "enabled": false,
+    "loop_interval": 2.0,
+    "cooldown_period": 1.0,
+    "vision": {
+      "vision_model": "Qwen2-VL-2B:latest",
+      "capture_region": null,
+      "max_image_dimension": 1024
+    },
+    "actions": {
+      "use_directinput": true,
+      "action_delay": 0.1,
+      "click_duration": 0.1,
+      "clamp_region": null
+    },
+    "safety": {
+      "enable_emergency_hotkey": true,
+      "emergency_key": "F9"
+    }
+  },
+  "sovits_url": "http://localhost:9880",
+  "sovits_timeout": 30.0,
+  "sovits_language": "zh",
+  "sovits_ref_audio_path": "D:/GPT-SoVITS-v2-SillyTavern/GPT-SoVITS-v2/参考音频/[步非烟]我当然知道了.wav",
+  "sovits_prompt_text": "我当然知道了",
+  "sovits_prompt_lang": "zh",
+  "fallback_to_edge_tts": true,
+  "emotion_hotkey_map": {
+    "neutral": "F1",
+    "happy": "F2",
+    "angry": "F3",
+    "sad": "F4",
+    "surprised": "F5"
+  },
+  "default_emotion": "neutral",
+  "expression_timeout": 0.8,
+  "enable_memory_features": true,
+  "llm_backend": "ollama",
+  "koboldcpp_url": "http://localhost:5001",
+  "koboldcpp_model": "",
+  "koboldcpp_max_context_length": 2048,
+  "koboldcpp_max_length": 256,
+  "koboldcpp_temperature": 0.7
+}

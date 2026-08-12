@@ -1,0 +1,2 @@
+# This file ensures the cache directory is tracked by git
+# Audio files (*.mp3, *.wav) should be added here for phrase caching

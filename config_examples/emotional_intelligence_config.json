@@ -1,0 +1,23 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "llama3",
+  "tts_voice": "zh-CN-XiaoxiaoNeural",
+  "vts_port": 8001,
+  "log_level": "INFO",
+  "enable_emotional_intelligence": true,
+  "enable_voice_cloning": true,
+  "enable_expression_control": true,
+  "sovits_url": "http://127.0.0.1:9880",
+  "sovits_timeout": 10.0,
+  "sovits_language": "zh",
+  "fallback_to_edge_tts": true,
+  "emotion_hotkey_map": {
+    "neutral": "F5",
+    "happy": "F1",
+    "angry": "F2",
+    "sad": "F3",
+    "surprised": "F4"
+  },
+  "default_emotion": "neutral",
+  "expression_timeout": 0.5
+}

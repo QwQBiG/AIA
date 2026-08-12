@@ -1,384 +1,170 @@
-# AI VTuber Digital Human System
+# AIex
 
-<p align="center">
-  <strong>自主 AI VTuber "数字人"系统</strong><br/>
-  一个能够自主玩游戏、与观众实时聊天、与创作者协作的 AI 驱动虚拟主播平台
-</p>
+AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新架构负责本地 LLM 流式对话、文本分句、持久记忆、语音队列、VTube Studio 控制和可观察性。
 
-<p align="center">
-  <a href="#-快速开始">快速开始</a> •
-  <a href="#-特性">特性</a> •
-  <a href="#-系统架构">架构</a> •
-  <a href="#-开发指南">开发</a> •
-  <a href="#-许可证">许可证</a>
-</p>
+旧 Python 实现位于 `main.py` 与 `src/`，当前仅作为行为参考；不再向旧实现增加新功能。新功能、修复和性能优化全部进入 Cargo workspace。
 
-## ✨ 特性
+## 当前状态
 
-| 功能 | 描述 |
-|------|------|
-| 🤖 **智能对话** | 基于 LLM 的认知引擎，支持云端 (OpenAI/Anthropic) 和本地模型 (Ollama/KoboldCPP) |
-| 🎮 **自主游戏** | 视觉感知 + 游戏控制，支持自主、半自主、手动三种模式 |
-| 💬 **直播互动** | 集成 Twitch IRC、YouTube Live Chat 和 Bilibili 弹幕，实时与观众互动 |
-| 🗣️ **语音合成** | 支持 ElevenLabs、Azure TTS 及本地 VITS/GPT-SoVITS |
-| 🧠 **长期记忆** | 基于向量数据库的语义记忆系统 |
-| 👤 **虚拟形象** | Live2D/3D 角色渲染，支持表情和口型同步 |
-| 🎛️ **控制面板** | Web 端创作者控制台，实时监控和覆盖 AI 决策 |
-| 📦 **一键安装** | Windows 安装包，无需技术背景即可部署 |
+| 能力 | Rust 状态 | 说明 |
+| --- | --- | --- |
+| 配置 | 可用 | TOML、默认值、校验、异步读取 |
+| 对话核心 | 可用 | 显式状态机、运行时 actor、排队、流式打断、结构化事件 |
+| 模型后端 | 可用 | Ollama NDJSON 与 KoboldCpp SSE 流式增量、超时和取消 |
+| VTube Studio | 可用 | WebSocket 认证、嘴型参数、响应情绪到显式热键 ID 的映射 |
+| 文本处理 | 可用 | UTF-8 分句、Markdown/TTS 清理 |
+| 持久记忆 | 可用 | JSONL 持久化、相关性检索、上下文注入 |
+| 语音调度 | 可用 | 有界队列、背压、代际取消、当前播放停止令牌 |
+| 音频合成/播放 | 条件可用 | GPT-SoVITS 与 Rodio 实现完成；本机播放由 feature 控制 |
+| 全双工 ASR/VAD | 条件可用 | Rust VAD、HTTP Whisper、抢话和采集实现完成；原生采集由 feature 控制 |
+| 桌面 UI | 实现中 | UI reducer 与控制客户端已验证；独立 eframe 壳待依赖下载后编译 |
+| 视觉自动化 | 安全核心可用 | 视觉观察、能力许可和持久审计已完成；Windows 动作适配器尚未启用 |
 
-## 🚀 快速开始
+## 快速开始
 
-### 方式一：Windows 一键安装（推荐）
+要求：Rust 1.85 或更高版本；推荐使用仓库已验证的 Rust 1.96。
 
-适合不熟悉技术的用户，安装程序会自动配置所有依赖。
-
-1. 从 [Releases](https://github.com/your-username/ai-vtuber-digital-human/releases) 下载最新的 `AI-VTuber-Setup-x.x.x.exe`
-2. 双击运行安装程序
-3. 按照安装向导完成配置：
-   - 选择安装路径
-   - 配置 LLM 提供者（本地 Ollama/KoboldCPP 或云端 OpenAI/Anthropic）
-   - 配置 TTS 提供者
-   - 配置直播平台（Twitch/YouTube/Bilibili）
-4. 安装完成后，从桌面快捷方式启动应用
-5. 应用会在系统托盘运行，右键托盘图标可打开控制面板
-
-> 💡 **提示**：首次安装本地 LLM 时，需要下载模型文件（约 4-8GB），请确保网络畅通。
-
-### 方式二：手动安装（开发者）
-
-#### 前置要求
-
-- Node.js >= 18.0.0
-- PostgreSQL 15+ (带 pgvector 扩展) 或 SQLite
-- (可选) Ollama - 本地 LLM
-- (可选) KoboldCPP - 本地 LLM (支持 GGUF 模型)
-- (可选) VITS/GPT-SoVITS - 本地 TTS
-
-#### 安装步骤
-
-```bash
-# 克隆仓库
-git clone https://github.com/your-username/ai-vtuber-digital-human.git
-cd ai-vtuber-digital-human
-
-# 安装依赖
-npm install
-
-# 复制环境变量配置
-cp .env.example .env
-# 编辑 .env 填写实际配置
-
-# 构建所有包
-npm run build
+```powershell
+cargo test --workspace
+cargo run -p ai-ex-service -- --check
+cargo run -p ai-ex-service -- --prompt "你好"
 ```
 
-#### 数据库设置
+使用只读视觉分析（需在配置中启用 `[vision]`）：
 
-```sql
--- 创建数据库
-CREATE DATABASE digital_human;
-
--- 连接到数据库后启用 pgvector 扩展
-CREATE EXTENSION IF NOT EXISTS vector;
+```powershell
+cargo run -p ai-ex-service -- --config "config/ai-ex.local.toml" --vision-image "screen.png" --vision-prompt "描述当前界面"
 ```
 
-#### 运行
+启用 GPT-SoVITS 本机播放时使用：
 
-```bash
-# 启动服务端 (Orchestrator + 所有模块)
-npm run start:server
-
-# 启动控制面板 (开发模式)
-npm run start:dashboard
+```powershell
+cargo run -p ai-ex-service --features native-playback -- --config "config/ai-ex.local.toml"
 ```
 
-服务端默认运行在 `ws://localhost:3001`，控制面板运行在 `http://localhost:5173`。
+启用 Windows 原生麦克风与全双工输入时，在本机配置中设置
+`duplex.enabled = true`，并使用：
 
-## 🏗️ 系统架构
-
-```mermaid
-graph TB
-    subgraph Frontend["🖥️ 前端层"]
-        Dashboard["📊 创作者控制面板<br/>(React + TypeScript)"]
-        Avatar["👤 虚拟形象渲染器<br/>(Live2D/Three.js)"]
-    end
-
-    subgraph Orchestrator["🎯 编排器层"]
-        EventLoop["⚡ 事件循环<br/>Listen→Think→Act→Speak"]
-        Router["📨 消息路由"]
-        Registry["📋 模块注册<br/>(健康监控)"]
-    end
-
-    subgraph AI["🤖 AI 服务层"]
-        Cognition["🧠 认知引擎<br/>(LLM)"]
-        Vision["👁️ 视觉模块<br/>(屏幕捕获)"]
-        Memory["💾 记忆系统<br/>(pgvector)"]
-        TTS["🔊 语音合成<br/>(TTS)"]
-    end
-
-    subgraph Integration["🔌 集成层"]
-        Chat["💬 聊天接口<br/>(Twitch/YouTube)"]
-        Game["🎮 游戏控制器<br/>(输入模拟)"]
-    end
-
-    subgraph External["☁️ 外部服务"]
-        CloudLLM["OpenAI / Anthropic"]
-        LocalLLM["Ollama / KoboldCPP"]
-        CloudTTS["ElevenLabs / Azure"]
-        LocalTTS["VITS / GPT-SoVITS"]
-        DB[(PostgreSQL + pgvector)]
-    end
-
-    Dashboard <-->|WebSocket| EventLoop
-    Avatar <-->|WebSocket| EventLoop
-    
-    EventLoop --> Router
-    Router --> Registry
-    
-    Router <-->|WebSocket| Cognition
-    Router <-->|WebSocket| Vision
-    Router <-->|WebSocket| Memory
-    Router <-->|WebSocket| TTS
-    Router <-->|WebSocket| Chat
-    Router <-->|WebSocket| Game
-
-    Cognition --> CloudLLM
-    Cognition --> LocalLLM
-    TTS --> CloudTTS
-    TTS --> LocalTTS
-    Memory --> DB
+```powershell
+cargo run -p ai-ex-service --features native-capture -- --config "config/ai-ex.local.toml"
 ```
 
-### 核心事件循环
+交互模式：
 
-```mermaid
-sequenceDiagram
-    participant 观众 as 💬 观众
-    participant Chat as 聊天接口
-    participant Orch as 编排器
-    participant Memory as 记忆系统
-    participant AI as 认知引擎
-    participant Game as 游戏控制
-    participant TTS as 语音合成
-    participant Avatar as 虚拟形象
-
-    rect rgb(200, 230, 255)
-        Note over Chat,Orch: 1️⃣ Listen 监听
-        观众->>Chat: 发送弹幕
-        Chat->>Orch: 转发消息
-    end
-
-    rect rgb(255, 230, 200)
-        Note over Orch,AI: 2️⃣ Think 思考
-        Orch->>Memory: 查询相关记忆
-        Memory-->>Orch: 返回上下文
-        Orch->>AI: 生成响应
-        AI-->>Orch: AI 回复 + 游戏动作
-    end
-
-    rect rgb(200, 255, 200)
-        Note over Orch,Game: 3️⃣ Act 行动
-        Orch->>Game: 执行游戏操作
-    end
-
-    rect rgb(255, 200, 255)
-        Note over Orch,Avatar: 4️⃣ Speak 说话
-        Orch->>TTS: 合成语音
-        TTS-->>Avatar: 音频流
-        Orch->>Avatar: 表情更新
-        Avatar-->>观众: 虚拟形象说话
-    end
+```powershell
+cargo run -p ai-ex-service
 ```
 
-## 📁 项目结构
+默认读取 `config/ai-ex.example.toml`。本机私有配置应复制为 `config/ai-ex.local.toml` 并通过参数指定：
 
-```
-ai-vtuber-digital-human/
-├── packages/
-│   ├── shared/              # 共享类型定义和消息序列化
-│   ├── server/              # 服务端模块
-│   │   ├── orchestrator/    # 编排器 (WebSocket, 消息路由, 事件循环)
-│   │   ├── cognition/       # 认知引擎 (LLM 集成, 人格配置)
-│   │   ├── memory/          # 记忆系统 (向量存储, 语义检索)
-│   │   ├── vision/          # 视觉模块 (屏幕捕获, 游戏状态分析)
-│   │   ├── tts/             # 语音合成 (多提供者支持)
-│   │   ├── chat/            # 聊天接口 (Twitch/YouTube)
-│   │   └── game-controller/ # 游戏控制器 (输入模拟)
-│   └── client/              # 客户端模块
-│       ├── dashboard/       # 创作者控制面板 (React)
-│       └── avatar/          # 虚拟形象渲染器 (Live2D/Three.js)
-├── installer/               # Windows 安装包构建
-│   ├── electron/            # Electron 主进程代码
-│   ├── wizard/              # 安装向导 UI
-│   ├── assets/              # 图标资源
-│   ├── build/               # NSIS 构建脚本
-│   └── scripts/             # 构建脚本
-├── .env.example             # 环境变量示例
-└── package.json             # 根 package.json (workspaces)
+```powershell
+cargo run -p ai-ex-service -- --config "config/ai-ex.local.toml" --check
 ```
 
-## 🛠️ 技术栈
+`config/ai-ex.local.toml`、`token.json`、运行日志和构建产物已被 `.gitignore` 排除。
 
-| 类别 | 技术 |
-|------|------|
-| 语言 | TypeScript |
-| 前端 | React 18 + Vite + Live2D/Three.js |
-| 后端 | Node.js + Socket.IO |
-| 数据库 | PostgreSQL + pgvector / SQLite |
-| 桌面应用 | Electron + electron-builder |
-| 测试 | Jest + fast-check (属性测试) |
-| 本地 AI | Ollama, KoboldCPP, VITS/GPT-SoVITS |
+`[conversation]` 可设置系统提示、保留的历史轮数和每轮记忆召回上限；默认历史窗口为 12 轮，避免长期运行时上下文无限增长。
 
-## ⚙️ 环境变量配置
+模型可在响应开头返回 `[neutral]`、`[happy]`、`[angry]`、`[sad]` 或 `[surprised]`。标签会转为事件而不会进入语音、字幕或记忆；只有 `[vts.expression_hotkeys]` 中明确配置的映射才会触发 VTS。
 
-复制 `.env.example` 为 `.env` 并配置：
+从旧 `config.json` 生成新的本机配置（目标已存在时拒绝覆盖）：
 
-<details>
-<summary>点击展开完整配置说明</summary>
-
-### 核心配置
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `ORCHESTRATOR_PORT` | WebSocket 服务端口 | `3001` |
-| `CORS_ENABLED` | 是否启用 CORS | `true` |
-
-### 数据库配置
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `POSTGRES_HOST` | PostgreSQL 主机 | `localhost` |
-| `POSTGRES_PORT` | PostgreSQL 端口 | `5432` |
-| `POSTGRES_DB` | 数据库名 | `digital_human` |
-| `POSTGRES_USER` | 数据库用户 | `postgres` |
-| `POSTGRES_PASSWORD` | 数据库密码 | - |
-
-### LLM 配置
-
-| 变量 | 说明 |
-|------|------|
-| `OPENAI_API_KEY` | OpenAI API 密钥 |
-| `ANTHROPIC_API_KEY` | Anthropic API 密钥 |
-| `OLLAMA_ENDPOINT` | Ollama 端点 (默认 `http://localhost:11434`) |
-| `OLLAMA_MODEL` | Ollama 模型名 (默认 `llama3.2`) |
-
-### TTS 配置
-
-| 变量 | 说明 |
-|------|------|
-| `ELEVENLABS_API_KEY` | ElevenLabs API 密钥 |
-| `AZURE_TTS_API_KEY` | Azure TTS API 密钥 |
-| `VITS_ENDPOINT` | 本地 VITS 端点 |
-| `GPT_SOVITS_ENDPOINT` | 本地 GPT-SoVITS 端点 |
-
-### 聊天平台配置
-
-| 变量 | 说明 |
-|------|------|
-| `TWITCH_USERNAME` | Twitch 机器人用户名 |
-| `TWITCH_OAUTH_TOKEN` | Twitch OAuth Token |
-| `TWITCH_CHANNEL` | Twitch 频道名 |
-| `YOUTUBE_API_KEY` | YouTube API 密钥 |
-
-</details>
-
-## 📜 可用脚本
-
-```bash
-# 开发
-npm run build              # 构建所有包
-npm run start:server       # 启动服务端
-npm run start:dashboard    # 启动控制面板
-npm test                   # 运行测试
-npm run lint               # 代码检查
-npm run format             # 格式化代码
-
-# Windows 安装包构建
-cd installer
-npm run build:installer    # 构建完整安装包 (生成 .exe)
-npm run generate:icons     # 生成占位图标
+```powershell
+cargo run -p ai-ex-migrate -- --input "config.json" --output "config/ai-ex.local.toml"
 ```
 
-## 🧪 测试
+迁移器不会自动启用旧 Agent、视觉、全双工或控制端口；这些高风险能力必须在新配置中显式复核后开启。
 
-```bash
-npm test                   # 运行所有测试
-npm run test:watch         # 监听模式
+## 外部服务
+
+- Ollama：默认 `http://127.0.0.1:11434`。
+- KoboldCpp：可选后端，默认 `http://127.0.0.1:5001`；设置 `model.backend = "koboldcpp"` 启用。
+- VTube Studio：默认 `ws://127.0.0.1:8001`，令牌文件结构为 `{ "token": "..." }`。
+- GPT-SoVITS：默认 `http://127.0.0.1:9880`，默认关闭。
+- Whisper 兼容 ASR：默认 `http://127.0.0.1:8000/v1/audio/transcriptions`，默认关闭全双工。
+- VTS 不可用时，服务降级为无头像输出；`--check` 会将其报告为 unavailable。
+- Ollama 不可用时无法完成对话，服务会返回结构化连接错误。
+
+## Rust 工作空间
+
+```text
+crates/
+  ai-ex-domain/   领域类型、错误和事件
+  ai-ex-config/   TOML 配置与校验
+  ai-ex-text/     分句和 TTS 文本清理
+  ai-ex-core/     对话状态机、端口和异步编排
+  ai-ex-ollama/   Ollama 流式 HTTP 适配器
+  ai-ex-koboldcpp/ KoboldCpp 流式 SSE 适配器
+  ai-ex-vts/      VTube Studio WebSocket actor
+  ai-ex-audio/    有界语音队列与取消
+  ai-ex-tts/      GPT-SoVITS HTTP 适配器
+  ai-ex-memory/   Rust 原生持久记忆
+  ai-ex-duplex/   VAD、音频/ASR 端口与全双工指令
+  ai-ex-asr/      Whisper 兼容 HTTP 转写与 WAV 编码
+  ai-ex-capture/  Windows 原生麦克风输入（feature）
+  ai-ex-observability/ 事件广播与运行快照
+  ai-ex-safety/   能力白名单、目标范围和急停许可
+  ai-ex-control/  令牌认证的本地 JSONL 控制协议
+  ai-ex-ui-model/ 框架无关的 UI reducer 与断线补偿
+  ai-ex-vision/   只读视觉观察与 Ollama 多模态适配器
+  ai-ex-automation/ 动作验证、许可、执行阶段与重试语义
+  ai-ex-audit/    启动校验、同步落盘的 JSONL 审计日志
+  ai-ex-migrate/  旧 JSON 到新 TOML 的安全迁移器
+  ai-ex-service/  CLI、组合根和健康检查
 ```
 
-项目包含 20+ 个属性测试，覆盖消息序列化、记忆系统、游戏控制、模块通信等核心功能。
+`crates/ai-ex-desktop/` 是独立的 eframe 原生桌面包。由于 GUI 依赖尚未下载，
+它暂时从默认 workspace 排除，避免破坏核心的离线可重复验证。
 
-## 📦 构建 Windows 安装包
+依赖方向固定为：`domain/text/duplex contracts → core → adapters → service`。网络、设备、数据库和 UI 不得反向进入领域层。
 
-如果你想自己构建安装包：
+## 代码规范
 
-```bash
-cd installer
-npm install
-npm run generate:icons     # 生成占位图标（或替换为自定义图标）
-npm run build:installer    # 构建安装包
+控制流使用 Allman 大括号风格：
+
+```rust
+if is_ready()
+{
+    run();
+}
+else
+{
+    recover();
+}
 ```
 
-构建完成后，安装包位于 `installer/dist/` 目录，同时会生成 SHA256 校验和文件。
+不要运行会把控制流左花括号移回同一行的自动格式化。详细规则见 `CONTRIBUTING.md`。
 
-### 自定义图标
+## 验证
 
-替换 `installer/assets/` 目录下的图标文件：
-- `icon.ico` - 应用主图标
-- `installer.ico` - 安装程序图标
-- `uninstaller.ico` - 卸载程序图标
-- `tray.ico` - 系统托盘图标
+```powershell
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+pwsh -NoProfile -File "tools/check_rust_style.ps1"
+pwsh -NoProfile -File "tools/check_architecture.ps1"
+```
 
-图标应包含 16x16、32x32、48x48、256x256 四种尺寸。
+健康检查在外部服务未启动时返回退出码 1，这是预期行为，不代表配置或 Rust 二进制构建失败。
 
-## 📄 许可证
+## 迁移原则
 
-MIT License
+1. 不翻译旧类结构，按领域、端口和 actor 重建。
+2. 每个外部能力都有超时、健康状态、取消和降级路径。
+3. 自动化默认关闭，急停与授权优先于功能数量。
+4. 迁移完成并通过行为验收后，才删除对应 Python 模块。
 
-## 🤝 贡献
+详细评估和阶段计划见 `docs/CORE_TECHNICAL_BASELINE.md`。
+Python 退役批次和删除门禁见 `docs/LEGACY_RETIREMENT.md`。
 
-欢迎提交 Issue 和 Pull Request！
+交互模式支持 `/status`、`/interrupt`、`/emergency-stop` 和 `/quit`。
+急停一旦触发，只能通过重启服务清除。
 
-## ❓ 常见问题
+桌面客户端通过默认关闭的本地控制端口接入。启用前需创建至少 32 字节的
+`config/control.token`，再设置 `control.enabled = true`。协议定义见
+`docs/CONTROL_PROTOCOL.md`；服务拒绝任何非回环监听地址。
 
-<details>
-<summary>安装时提示"Windows 已保护你的电脑"</summary>
+GUI 依赖可用后启动桌面端：
 
-这是 Windows SmartScreen 的安全提示。点击"更多信息"，然后点击"仍要运行"即可继续安装。
-</details>
-
-<details>
-<summary>本地 LLM 响应很慢</summary>
-
-本地 LLM 的性能取决于你的硬件配置。建议：
-- 使用支持 GPU 加速的显卡（NVIDIA RTX 系列）
-- 选择较小的模型（如 7B 参数）
-- 或者使用云端 LLM（OpenAI/Anthropic）
-</details>
-
-<details>
-<summary>如何完全卸载？</summary>
-
-1. 从控制面板或设置中卸载应用
-2. 卸载时可选择是否保留配置和数据
-3. 如需完全清理，删除 `%APPDATA%/AI-VTuber-Digital-Human` 目录
-</details>
-
-<details>
-<summary>支持哪些直播平台？</summary>
-
-目前支持：
-- **Twitch** - 通过 IRC 协议连接
-- **YouTube** - 通过 YouTube Live Chat API
-- **Bilibili** - 通过弹幕 WebSocket 协议
-</details>
-
-<details>
-<summary>如何切换 LLM 提供者？</summary>
-
-在控制面板的设置页面中可以切换 LLM 提供者。支持：
-- **Ollama** - 本地运行，支持多种开源模型
-- **KoboldCPP** - 本地运行，支持 GGUF 格式模型
-- **OpenAI** - 云端 API，需要 API Key
-- **Anthropic** - 云端 API，需要 API Key
-</details>
+```powershell
+cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --config "config/ai-ex.local.toml"
+```

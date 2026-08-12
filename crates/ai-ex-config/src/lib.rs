@@ -1,0 +1,588 @@
+#![forbid(unsafe_code)]
+
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::path::Path;
+
+use ai_ex_domain::{AppError, Emotion};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppConfig
+{
+    pub model: ModelConfig,
+    pub conversation: ConversationConfig,
+    pub ollama: OllamaConfig,
+    pub koboldcpp: KoboldCppConfig,
+    pub vts: VtsConfig,
+    pub audio: AudioConfig,
+    pub memory: MemoryConfig,
+    pub tts: TtsConfig,
+    pub duplex: DuplexConfig,
+    pub control: ControlConfig,
+    pub vision: VisionConfig,
+    pub safety: SafetyConfig,
+}
+
+impl AppConfig
+{
+    pub async fn load(path: impl AsRef<Path>) -> Result<Self, AppError>
+    {
+        let path = path.as_ref();
+        let content = tokio::fs::read_to_string(path).await.map_err(|error| {
+            AppError::configuration(format!("cannot read {}: {error}", path.display()))
+        })?;
+        Self::parse(&content)
+    }
+
+    pub fn parse(content: &str) -> Result<Self, AppError>
+    {
+        let config: Self = toml::from_str(content).map_err(|error| {
+            AppError::configuration(format!("invalid TOML: {error}"))
+        })?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn validate(&self) -> Result<(), AppError>
+    {
+        self.conversation.validate()?;
+        if self.model.backend == ModelBackend::Ollama
+            && !is_http_url(&self.ollama.base_url)
+        {
+            return Err(AppError::configuration("ollama.base_url must be HTTP or HTTPS"));
+        }
+        if self.model.backend == ModelBackend::Ollama && self.ollama.model.trim().is_empty()
+        {
+            return Err(AppError::configuration("ollama.model must not be empty"));
+        }
+        if self.model.backend == ModelBackend::KoboldCpp
+        {
+            self.koboldcpp.validate()?;
+        }
+        if self.vts.host.trim().is_empty()
+        {
+            return Err(AppError::configuration("vts.host must not be empty"));
+        }
+        if self.vts.enabled && self.vts.token_path.trim().is_empty()
+        {
+            return Err(AppError::configuration("vts.token_path must not be empty"));
+        }
+        for (emotion, hotkey) in &self.vts.expression_hotkeys
+        {
+            if Emotion::parse(emotion).is_none() || hotkey.trim().is_empty()
+            {
+                return Err(AppError::configuration(
+                    "vts.expression_hotkeys contains an invalid mapping",
+                ));
+            }
+        }
+        if self.safety.emergency_hotkey.trim().is_empty()
+        {
+            return Err(AppError::configuration("safety.emergency_hotkey must not be empty"));
+        }
+        if self.safety.automation_enabled && self.safety.audit_path.trim().is_empty()
+        {
+            return Err(AppError::configuration(
+                "enabled automation requires safety.audit_path",
+            ));
+        }
+        if self.memory.enabled && self.memory.path.trim().is_empty()
+        {
+            return Err(AppError::configuration("memory.path must not be empty"));
+        }
+        if self.tts.enabled
+            && (self.tts.base_url.trim().is_empty() || self.tts.ref_audio_path.trim().is_empty())
+        {
+            return Err(AppError::configuration(
+                "enabled TTS requires base_url and ref_audio_path",
+            ));
+        }
+        if self.audio.queue_capacity == 0
+        {
+            return Err(AppError::configuration("audio.queue_capacity must be positive"));
+        }
+        self.duplex.validate()?;
+        self.control.validate()?;
+        self.vision.validate()?;
+        Ok(())
+    }
+}
+
+fn is_http_url(value: &str) -> bool
+{
+    value.starts_with("http://") || value.starts_with("https://")
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelBackend
+{
+    #[default]
+    Ollama,
+    #[serde(rename = "koboldcpp")]
+    KoboldCpp,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelConfig
+{
+    pub backend: ModelBackend,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConversationConfig
+{
+    pub system_prompt: String,
+    pub history_turn_limit: usize,
+    pub memory_recall_limit: usize,
+}
+
+impl ConversationConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if self.system_prompt.chars().count() > 16_384
+            || !(1..=128).contains(&self.history_turn_limit)
+            || self.memory_recall_limit > 64
+        {
+            return Err(AppError::configuration(
+                "conversation policy is outside supported bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ConversationConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            system_prompt: String::new(),
+            history_turn_limit: 12,
+            memory_recall_limit: 6,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OllamaConfig
+{
+    pub base_url: String,
+    pub model: String,
+    pub timeout_seconds: u64,
+}
+
+impl Default for OllamaConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            base_url: "http://127.0.0.1:11434".to_owned(),
+            model: "llama3.2:latest".to_owned(),
+            timeout_seconds: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KoboldCppConfig
+{
+    pub base_url: String,
+    pub timeout_seconds: u64,
+    pub max_context_length: usize,
+    pub max_length: usize,
+    pub temperature: f32,
+}
+
+impl KoboldCppConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if !is_http_url(&self.base_url)
+        {
+            return Err(AppError::configuration(
+                "koboldcpp.base_url must be HTTP or HTTPS",
+            ));
+        }
+        if self.timeout_seconds == 0
+            || self.max_context_length == 0
+            || self.max_length == 0
+        {
+            return Err(AppError::configuration(
+                "KoboldCpp timeout and token limits must be positive",
+            ));
+        }
+        if !self.temperature.is_finite() || !(0.0..=2.0).contains(&self.temperature)
+        {
+            return Err(AppError::configuration(
+                "koboldcpp.temperature must be between 0 and 2",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for KoboldCppConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            base_url: "http://127.0.0.1:5001".to_owned(),
+            timeout_seconds: 120,
+            max_context_length: 2_048,
+            max_length: 256,
+            temperature: 0.7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VtsConfig
+{
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    pub token_path: String,
+    pub plugin_name: String,
+    pub developer: String,
+    pub expression_hotkeys: BTreeMap<String, String>,
+}
+
+impl Default for VtsConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: true,
+            host: "127.0.0.1".to_owned(),
+            port: 8001,
+            token_path: "token.json".to_owned(),
+            plugin_name: "AIex Rust".to_owned(),
+            developer: "AIex contributors".to_owned(),
+            expression_hotkeys: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioConfig
+{
+    pub queue_capacity: usize,
+}
+
+impl Default for AudioConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            queue_capacity: 32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DuplexConfig
+{
+    pub enabled: bool,
+    pub input_device: String,
+    pub capture_queue_capacity: usize,
+    pub start_threshold: f32,
+    pub continue_threshold: f32,
+    pub start_frames: usize,
+    pub end_silence_frames: usize,
+    pub max_utterance_frames: usize,
+    pub asr: AsrConfig,
+}
+
+impl DuplexConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if !self.start_threshold.is_finite()
+            || !self.continue_threshold.is_finite()
+            || !(0.0..=1.0).contains(&self.start_threshold)
+            || !(0.0..=1.0).contains(&self.continue_threshold)
+            || self.continue_threshold > self.start_threshold
+        {
+            return Err(AppError::configuration("duplex VAD thresholds are invalid"));
+        }
+        if self.start_frames == 0
+            || self.end_silence_frames == 0
+            || self.max_utterance_frames == 0
+            || self.capture_queue_capacity == 0
+        {
+            return Err(AppError::configuration("duplex VAD frame counts must be positive"));
+        }
+        if self.enabled
+        {
+            self.asr.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for DuplexConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: false,
+            input_device: String::new(),
+            capture_queue_capacity: 64,
+            start_threshold: 0.025,
+            continue_threshold: 0.012,
+            start_frames: 3,
+            end_silence_frames: 8,
+            max_utterance_frames: 3_000,
+            asr: AsrConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AsrConfig
+{
+    pub endpoint: String,
+    pub model: String,
+    pub language: String,
+    pub timeout_seconds: u64,
+}
+
+impl AsrConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if !self.endpoint.starts_with("http://") && !self.endpoint.starts_with("https://")
+        {
+            return Err(AppError::configuration("duplex.asr.endpoint must be HTTP or HTTPS"));
+        }
+        if self.model.trim().is_empty() || self.timeout_seconds == 0
+        {
+            return Err(AppError::configuration(
+                "duplex ASR requires a model and positive timeout",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for AsrConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            endpoint: "http://127.0.0.1:8000/v1/audio/transcriptions".to_owned(),
+            model: "whisper-1".to_owned(),
+            language: "zh".to_owned(),
+            timeout_seconds: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ControlConfig
+{
+    pub enabled: bool,
+    pub bind: String,
+    pub token_path: String,
+    pub max_message_bytes: usize,
+}
+
+impl ControlConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        let address: SocketAddr = self
+            .bind
+            .parse()
+            .map_err(|error| AppError::configuration(format!("invalid control.bind: {error}")))?;
+        if !address.ip().is_loopback()
+        {
+            return Err(AppError::configuration("control.bind must use a loopback address"));
+        }
+        if self.enabled && self.token_path.trim().is_empty()
+        {
+            return Err(AppError::configuration("enabled control server requires token_path"));
+        }
+        if self.max_message_bytes < 256
+        {
+            return Err(AppError::configuration(
+                "control.max_message_bytes must be at least 256",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ControlConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: false,
+            bind: "127.0.0.1:7878".to_owned(),
+            token_path: "config/control.token".to_owned(),
+            max_message_bytes: 65_536,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VisionConfig
+{
+    pub enabled: bool,
+    pub base_url: String,
+    pub model: String,
+    pub timeout_seconds: u64,
+}
+
+impl VisionConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if self.enabled
+            && ((!self.base_url.starts_with("http://")
+                && !self.base_url.starts_with("https://"))
+                || self.model.trim().is_empty()
+                || self.timeout_seconds == 0)
+        {
+            return Err(AppError::configuration("enabled vision configuration is invalid"));
+        }
+        Ok(())
+    }
+}
+
+impl Default for VisionConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: false,
+            base_url: "http://127.0.0.1:11434".to_owned(),
+            model: "llava:latest".to_owned(),
+            timeout_seconds: 60,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SafetyConfig
+{
+    pub automation_enabled: bool,
+    pub emergency_hotkey: String,
+    pub audit_path: String,
+    pub allowed_capabilities: Vec<String>,
+    pub allowed_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig
+{
+    pub enabled: bool,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TtsConfig
+{
+    pub enabled: bool,
+    pub base_url: String,
+    pub timeout_seconds: u64,
+    pub text_lang: String,
+    pub ref_audio_path: String,
+    pub prompt_text: String,
+    pub prompt_lang: String,
+}
+
+impl Default for TtsConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: false,
+            base_url: "http://127.0.0.1:9880".to_owned(),
+            timeout_seconds: 30,
+            text_lang: "zh".to_owned(),
+            ref_audio_path: String::new(),
+            prompt_text: String::new(),
+            prompt_lang: "zh".to_owned(),
+        }
+    }
+}
+
+impl Default for MemoryConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: true,
+            path: "memory_db/ai-ex.jsonl".to_owned(),
+        }
+    }
+}
+
+impl Default for SafetyConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            automation_enabled: false,
+            emergency_hotkey: "F9".to_owned(),
+            audit_path: "logs/automation-audit.jsonl".to_owned(),
+            allowed_capabilities: Vec::new(),
+            allowed_targets: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn parses_example_configuration()
+    {
+        let config = AppConfig::parse(include_str!("../../../config/ai-ex.example.toml"))
+            .expect("example configuration must parse");
+        assert_eq!(config.vts.port, 8001);
+        assert!(!config.safety.automation_enabled);
+    }
+
+    #[test]
+    fn validates_only_the_selected_model_backend()
+    {
+        let mut config = AppConfig::default();
+        config.model.backend = ModelBackend::KoboldCpp;
+        config.koboldcpp.base_url = "file:///unsafe".to_owned();
+        assert!(config.validate().is_err());
+
+        config.model.backend = ModelBackend::Ollama;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn parses_koboldcpp_backend_name()
+    {
+        let config = AppConfig::parse("[model]\nbackend = \"koboldcpp\"")
+            .expect("KoboldCpp configuration parses");
+
+        assert_eq!(config.model.backend, ModelBackend::KoboldCpp);
+    }
+}

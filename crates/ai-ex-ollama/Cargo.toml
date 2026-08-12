@@ -1,0 +1,19 @@
+[package]
+name = "ai-ex-ollama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ai-ex-core = { path = "../ai-ex-core" }
+ai-ex-domain = { path = "../ai-ex-domain" }
+async-trait.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

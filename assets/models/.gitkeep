@@ -1,0 +1,7 @@
+# Model storage directory for Full-Duplex Conversational Engine
+# This directory will contain:
+# - FunASR Paraformer-streaming models
+# - Silero VAD models
+# - Other audio processing models
+
+# Keep this directory in git even when empty

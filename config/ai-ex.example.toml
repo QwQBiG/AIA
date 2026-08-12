@@ -1,0 +1,81 @@
+[model]
+backend = "ollama"
+
+[conversation]
+system_prompt = ""
+history_turn_limit = 12
+memory_recall_limit = 6
+
+[ollama]
+base_url = "http://127.0.0.1:11434"
+model = "llama3.2:latest"
+timeout_seconds = 120
+
+[koboldcpp]
+base_url = "http://127.0.0.1:5001"
+timeout_seconds = 120
+max_context_length = 2048
+max_length = 256
+temperature = 0.7
+
+[vts]
+enabled = true
+host = "127.0.0.1"
+port = 8001
+token_path = "token.json"
+plugin_name = "AIex Rust"
+developer = "AIex contributors"
+
+[vts.expression_hotkeys]
+# happy = "VTS hotkey ID"
+
+[audio]
+queue_capacity = 32
+
+[duplex]
+enabled = false
+input_device = ""
+capture_queue_capacity = 64
+start_threshold = 0.025
+continue_threshold = 0.012
+start_frames = 3
+end_silence_frames = 8
+max_utterance_frames = 3000
+
+[duplex.asr]
+endpoint = "http://127.0.0.1:8000/v1/audio/transcriptions"
+model = "whisper-1"
+language = "zh"
+timeout_seconds = 30
+
+[control]
+enabled = false
+bind = "127.0.0.1:7878"
+token_path = "config/control.token"
+max_message_bytes = 65536
+
+[vision]
+enabled = false
+base_url = "http://127.0.0.1:11434"
+model = "llava:latest"
+timeout_seconds = 60
+
+[memory]
+enabled = true
+path = "memory_db/ai-ex.jsonl"
+
+[tts]
+enabled = false
+base_url = "http://127.0.0.1:9880"
+timeout_seconds = 30
+text_lang = "zh"
+ref_audio_path = "assets/cache/reference_audio.wav"
+prompt_text = "你好，我是 AIex。"
+prompt_lang = "zh"
+
+[safety]
+automation_enabled = false
+emergency_hotkey = "F9"
+audit_path = "logs/automation-audit.jsonl"
+allowed_capabilities = []
+allowed_targets = []

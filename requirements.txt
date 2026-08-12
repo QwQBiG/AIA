@@ -1,0 +1,73 @@
+# AI VTuber System Dependencies
+# Core dependencies for the AI VTuber automation system
+
+# HTTP requests for Ollama API
+requests>=2.31.0
+
+# WebSocket client for VTube Studio integration
+websockets>=11.0.3
+pyvts>=0.3.3
+
+# Text-to-Speech using Microsoft Edge TTS
+edge-tts>=6.1.8
+
+# Audio playback
+pygame>=2.5.2
+
+# GUI framework (included with Python, but listed for clarity)
+# tkinter - included with Python standard library
+
+# Modern GUI framework for Mission Control dashboard
+customtkinter>=5.0.0
+
+# Vision-Action Agent dependencies
+mss>=9.0.1
+pydirectinput>=1.0.4
+pynput>=1.7.6
+pillow>=10.0.0
+ollama>=0.1.7
+pyautogui>=0.9.54
+
+# Hybrid Vision-Reflex System dependencies
+opencv-python>=4.13.0
+numpy>=2.1.0,<3.0.0
+
+# Async support
+asyncio-mqtt>=0.13.0
+aiohttp>=3.8.5
+
+# Data handling and validation
+dataclasses-json>=0.6.1
+
+# Full-Duplex Conversational Engine dependencies
+# funasr>=1.0.0  # Optional: Advanced speech recognition (requires Python 3.9-3.11)
+# Alternative ASR solution (Whisper) for Python 3.13 compatibility
+openai-whisper>=20231117
+
+sounddevice>=0.4.6
+torch>=2.0.0
+torchaudio>=2.0.0
+pyaudio>=0.2.11
+silero-vad>=4.0.0
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
+hypothesis>=6.82.0
+aioresponses>=0.7.4
+
+# System monitoring and resource management
+psutil>=5.9.0
+
+# Windows API access for overlay click-through functionality
+pywin32>=306
+
+# Memory Core RAG System dependencies
+chromadb>=1.4.0,<2.0.0
+sentence-transformers>=2.2.0
+jsonschema>=4.17.0
+
+# Development dependencies
+black>=23.7.0
+flake8>=6.0.0
+mypy>=1.5.0
