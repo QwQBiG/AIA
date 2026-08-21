@@ -35,3 +35,7 @@ Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 
 ## 独立进程客户端
 
 `ai-ex-plugin::StdioPlugin` 提供 JSON-RPC over stdio 的进程客户端：启动时只接管 stdin/stdout，stderr 保留给开发者日志；支持 `manifest`、`health` 和通用 `request`，进程退出、响应 ID 不匹配、协议版本错误或超过 1 MiB 的单行都会转为明确错误。客户端析构时会尝试终止子进程，插件崩溃不会进入核心状态机。
+
+## 视觉/游戏 typed 契约
+
+`AutomationPluginRequest`/`AutomationPluginResponse` 是视觉与游戏 Provider 的领域协议：`observe` 只返回结构化摘要和可选 `frame_ref`，`execute` 携带目标、理由和已校验的 `AutomationAction`，`interrupt` 用于撤销当前动作。每条消息带 schema 版本和 request UUID；原始 RGBA 不直接塞进 JSON-RPC，避免超过传输上限。
