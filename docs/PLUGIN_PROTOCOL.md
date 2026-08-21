@@ -15,4 +15,6 @@
 
 ai-ex-stage 提供平台无关的 StageAction、StageCapability 和 StageExecutor。VTS、TTS、字幕、OBS 场景和热键都先转换为动作，再由具体适配器执行。DryRunStage 会校验并记录动作，不产生外部副作用，可用于录制回放和桌面端联调。
 
+`ai-ex-stage-obs` 提供 `ObsDryRunStage`：它只接受字幕、场景和热键动作，记录版本化 JSONL，并在急停时清空待执行动作但保留停止记录。真实 OBS WebSocket 连接器以后只需复用 StageExecutor，不会把 OBS SDK 或网络状态带入核心。
+
 动作默认受到长度、数值范围、队列容量和急停边界约束；真实适配器不得绕过这些校验。

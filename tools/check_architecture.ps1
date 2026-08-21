@@ -12,6 +12,7 @@ $allowed = @{
     'ai-ex-protocol' = @('ai-ex-domain')
     'ai-ex-event-bus' = @('ai-ex-domain', 'ai-ex-protocol')
     'ai-ex-stage' = @('ai-ex-domain')
+    'ai-ex-stage-obs' = @('ai-ex-domain', 'ai-ex-stage')
     'ai-ex-bilibili' = @('ai-ex-domain', 'ai-ex-event-bus')
     'ai-ex-plugin' = @('ai-ex-domain')
     'ai-ex-simulator' = @('ai-ex-domain', 'ai-ex-event-bus', 'ai-ex-memory')
