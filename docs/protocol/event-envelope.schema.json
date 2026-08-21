@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aiex.local/schema/event-envelope-v1.json",
+  "title": "AIex EventEnvelope v1",
+  "type": "object",
+  "required": ["schema_version", "event_id", "trace_id", "session_id", "turn_id", "timestamp_ms", "source", "payload"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "event_id": {"type": "string", "format": "uuid"},
+    "trace_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"},
+    "turn_id": {"type": "string", "format": "uuid"},
+    "timestamp_ms": {"type": "integer", "minimum": 0},
+    "source": {"type": "string", "minLength": 1},
+    "payload": {}
+  },
+  "additionalProperties": false
+}
+

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/ai-ex-domain",
+    "crates/ai-ex-protocol",
     "crates/ai-ex-config",
     "crates/ai-ex-core",
     "crates/ai-ex-text",

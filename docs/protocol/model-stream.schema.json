@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aiex.local/schema/model-stream-v1.json",
+  "title": "AIex ModelStreamEvent v1",
+  "oneOf": [
+    {"$ref": "#/$defs/text_delta"},
+    {"$ref": "#/$defs/reasoning_delta"},
+    {"$ref": "#/$defs/tool_call"},
+    {"$ref": "#/$defs/structured_output"},
+    {"$ref": "#/$defs/usage"},
+    {"$ref": "#/$defs/finished"},
+    {"$ref": "#/$defs/failed"}
+  ],
+  "$defs": {
+    "turn_id": {"type": "string", "format": "uuid"},
+    "text_delta": {"type": "object", "required": ["type", "turn_id", "text"], "properties": {"type": {"const": "text_delta"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "text": {"type": "string"}}, "additionalProperties": false},
+    "reasoning_delta": {"type": "object", "required": ["type", "turn_id", "text"], "properties": {"type": {"const": "reasoning_delta"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "text": {"type": "string"}}, "additionalProperties": false},
+    "tool_call": {"type": "object", "required": ["type", "turn_id", "call_id", "name", "arguments"], "properties": {"type": {"const": "tool_call"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "call_id": {"type": "string"}, "name": {"type": "string"}, "arguments": {"type": "object"}}, "additionalProperties": false},
+    "structured_output": {"type": "object", "required": ["type", "turn_id", "value"], "properties": {"type": {"const": "structured_output"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "value": {}}, "additionalProperties": false},
+    "usage": {"type": "object", "required": ["type", "turn_id", "input_tokens", "output_tokens"], "properties": {"type": {"const": "usage"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "input_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+    "finished": {"type": "object", "required": ["type", "turn_id", "finish_reason"], "properties": {"type": {"const": "finished"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "finish_reason": {"type": ["string", "null"]}}, "additionalProperties": false},
+    "failed": {"type": "object", "required": ["type", "turn_id", "error"], "properties": {"type": {"const": "failed"}, "turn_id": {"$ref": "#/$defs/turn_id"}, "error": {"type": "object"}}, "additionalProperties": false}
+  }
+}
+

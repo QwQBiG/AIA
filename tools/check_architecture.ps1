@@ -9,9 +9,10 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $allowed = @{
     'ai-ex-domain' = @()
+    'ai-ex-protocol' = @('ai-ex-domain')
     'ai-ex-config' = @('ai-ex-domain')
     'ai-ex-text' = @('ai-ex-domain')
-    'ai-ex-core' = @('ai-ex-domain', 'ai-ex-text')
+    'ai-ex-core' = @('ai-ex-domain', 'ai-ex-text', 'ai-ex-protocol')
     'ai-ex-duplex' = @('ai-ex-domain')
     'ai-ex-asr' = @('ai-ex-domain', 'ai-ex-duplex')
     'ai-ex-capture' = @('ai-ex-domain', 'ai-ex-duplex')
