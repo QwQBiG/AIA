@@ -52,6 +52,19 @@ impl StageAction
         }
     }
 
+    pub fn required_capability(&self) -> Option<StageCapability>
+    {
+        match self
+        {
+            Self::Speak { .. } => Some(StageCapability::Speech),
+            Self::Expression { .. } => Some(StageCapability::Expression),
+            Self::Mouth { .. } => Some(StageCapability::Mouth),
+            Self::Subtitle { .. } => Some(StageCapability::Subtitle),
+            Self::Scene { .. } => Some(StageCapability::Scene),
+            Self::Hotkey { .. } => Some(StageCapability::Hotkey),
+            Self::Stop => None,
+        }
+    }
     pub fn validate(&self) -> Result<(), AppError>
     {
         match self
@@ -108,7 +121,7 @@ pub enum StageCapability
 }
 
 #[async_trait]
-pub trait StageExecutor: Send
+pub trait StageExecutor: Send + Sync
 {
     fn capabilities(&self) -> BTreeSet<StageCapability>;
 
@@ -119,6 +132,100 @@ pub trait StageExecutor: Send
     async fn interrupt(&mut self) -> Result<(), AppError>;
 }
 
+pub struct StageRouter
+{
+    executors: Vec<Box<dyn StageExecutor>>,
+}
+
+impl StageRouter
+{
+    pub fn new() -> Self
+    {
+        Self {
+            executors: Vec::new(),
+        }
+    }
+
+    pub fn push<E>(&mut self, executor: E)
+    where
+        E: StageExecutor + 'static,
+    {
+        self.executors.push(Box::new(executor));
+    }
+
+    pub fn len(&self) -> usize
+    {
+        self.executors.len()
+    }
+
+    pub fn is_empty(&self) -> bool
+    {
+        self.executors.is_empty()
+    }
+}
+
+impl Default for StageRouter
+{
+    fn default() -> Self
+    {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl StageExecutor for StageRouter
+{
+    fn capabilities(&self) -> BTreeSet<StageCapability>
+    {
+        self.executors
+            .iter()
+            .flat_map(|executor| executor.capabilities())
+            .collect()
+    }
+
+    async fn health(&self) -> ComponentHealth
+    {
+        ComponentHealth {
+            component: "stage-router".to_owned(),
+            ready: !self.executors.is_empty(),
+            detail: format!("{} executor(s) configured", self.executors.len()),
+        }
+    }
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
+    {
+        action.validate()?;
+        let Some(capability) = action.required_capability() else
+        {
+            return self.interrupt().await;
+        };
+        let mut matched = false;
+        for executor in &mut self.executors
+        {
+            if executor.capabilities().contains(&capability)
+            {
+                matched = true;
+                executor.execute(action.clone()).await?;
+            }
+        }
+        if !matched
+        {
+            return Err(AppError::unavailable(format!(
+                "no stage executor supports {}",
+                action.kind(),
+            )));
+        }
+        Ok(())
+    }
+
+    async fn interrupt(&mut self) -> Result<(), AppError>
+    {
+        for executor in &mut self.executors
+        {
+            executor.interrupt().await?;
+        }
+        Ok(())
+    }
+}
 pub struct DryRunStage
 {
     actions: VecDeque<StageAction>,
@@ -265,5 +372,21 @@ mod tests
         let decoded: StageAction =
             serde_json::from_value(encoded["action"].clone()).expect("action parses");
         assert_eq!(decoded, action);
+    }
+    #[tokio::test]
+    async fn router_routes_by_capability_and_broadcasts_interrupt()
+    {
+        let mut router = StageRouter::new();
+        router.push(DryRunStage::new(4).expect("stage creates"));
+        assert!(router.capabilities().contains(&StageCapability::Subtitle));
+        router
+            .execute(StageAction::Subtitle {
+                text: "hello".to_owned(),
+                duration_ms: 500,
+            })
+            .await
+            .expect("subtitle routes");
+        assert!(router.health().await.ready);
+        router.interrupt().await.expect("interrupt broadcasts");
     }
 }
