@@ -31,3 +31,7 @@ Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 
 `ai-ex-automation` 的 `AutomationCoordinator` 是所有视觉观察和游戏动作的安全入口；它固定执行“校验动作 → 持久审计 → SafetyGate 授权 → Permit 复核 → 适配器执行”的顺序。`DryRunAutomationPort` 实现同一接口但不触碰真实桌面：动作只进入有界队列，`CaptureScreen` 返回确定性的 RGBA 帧，Permit 能力不匹配或急停都会被再次拒绝。
 
 视觉插件只应返回 `ScreenFrame` 或结构化观察，游戏插件只应提交白名单内的 `AutomationAction`。真实键鼠、进程启动和截图实现必须位于独立进程或明确的原生适配器边界，默认配置保持 dry-run。
+
+## 独立进程客户端
+
+`ai-ex-plugin::StdioPlugin` 提供 JSON-RPC over stdio 的进程客户端：启动时只接管 stdin/stdout，stderr 保留给开发者日志；支持 `manifest`、`health` 和通用 `request`，进程退出、响应 ID 不匹配、协议版本错误或超过 1 MiB 的单行都会转为明确错误。客户端析构时会尝试终止子进程，插件崩溃不会进入核心状态机。

@@ -1,11 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod client;
+
 use ai_ex_domain::AppError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
+pub use client::{JsonRpcClient, StdioPlugin, read_response, write_request};
+
 pub const JSON_RPC_VERSION: &str = "2.0";
+pub const MAX_JSON_RPC_LINE_BYTES: usize = 1_048_576;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest
@@ -144,20 +149,52 @@ pub struct PluginHealth
     pub detail: String,
 }
 
+pub(crate) async fn read_bounded_line<R>(reader: &mut R) -> Result<Option<Vec<u8>>, AppError>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = Vec::new();
+    loop
+    {
+        let buffer = reader
+            .fill_buf()
+            .await
+            .map_err(|error| AppError::unavailable(format!("plugin stream read failed: {error}")))?;
+        if buffer.is_empty()
+        {
+            break;
+        }
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let take = newline.map_or(buffer.len(), |index| index + 1);
+        if line.len().saturating_add(take) > MAX_JSON_RPC_LINE_BYTES
+        {
+            return Err(AppError::protocol("plugin JSON-RPC line exceeds size limit"));
+        }
+        line.extend_from_slice(&buffer[..take]);
+        reader.consume(take);
+        if newline.is_some()
+        {
+            break;
+        }
+    }
+    if line.is_empty()
+    {
+        return Ok(None);
+    }
+    Ok(Some(line))
+}
+
 pub async fn read_request<R>(reader: &mut R) -> Result<Option<JsonRpcRequest>, AppError>
 where
     R: AsyncBufRead + Unpin,
 {
-    let mut line = String::new();
-    let size = reader
-        .read_line(&mut line)
-        .await
-        .map_err(|error| AppError::unavailable(format!("plugin stdin read failed: {error}")))?;
-    if size == 0
+    let Some(line) = read_bounded_line(reader).await? else
     {
         return Ok(None);
-    }
-    let request: JsonRpcRequest = serde_json::from_str(line.trim_end()).map_err(|error| {
+    };
+    let text = std::str::from_utf8(&line)
+        .map_err(|error| AppError::protocol(format!("plugin request is not UTF-8: {error}")))?;
+    let request: JsonRpcRequest = serde_json::from_str(text.trim_end()).map_err(|error| {
         AppError::protocol(format!("invalid plugin JSON-RPC request: {error}"))
     })?;
     if request.jsonrpc != JSON_RPC_VERSION
@@ -166,13 +203,16 @@ where
     }
     Ok(Some(request))
 }
-
 pub async fn write_response<W>(writer: &mut W, response: &JsonRpcResponse) -> Result<(), AppError>
 where
     W: AsyncWrite + Unpin,
 {
     let payload = serde_json::to_vec(response)
         .map_err(|error| AppError::protocol(format!("plugin response encode failed: {error}")))?;
+    if payload.len().saturating_add(1) > MAX_JSON_RPC_LINE_BYTES
+    {
+        return Err(AppError::protocol("plugin response exceeds size limit"));
+    }
     writer
         .write_all(&payload)
         .await
