@@ -10,6 +10,14 @@ cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20
 
 `--speed 20` 表示按 20 倍时间速度回放。模拟器会打印每个事件的优先级、过滤结果和最终接收数量。
 
+如果希望把回放事件实际写入分类记忆，增加 `--memory`：
+
+```powershell
+cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20 --memory memory_db/simulated-live.jsonl
+```
+
+该模式会通过 `EventBus` 的去重/冷却后再调用 `project_memory`，最终输出 `persisted_memory` 数量。
+
 JSONL 录制文件不包含 API Key、控制令牌或用户长期记忆。真实平台连接器只需要把平台字段转换为 `LiveEvent`，不应把平台 SDK 类型带入核心。
 
 事件进入总线后可以调用 `project_memory` 生成平台无关的记忆投影：观众关系写入 `viewer`，礼物/捐赠和系统事件写入 `live_event`。投影交给 `MemoryStore::remember_projection` 后才会落盘；审核事件和定时器默认不写入记忆。

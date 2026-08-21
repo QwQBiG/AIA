@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 ai-ex-event-bus = { path = "../ai-ex-event-bus" }
+ai-ex-memory = { path = "../ai-ex-memory" }
 ai-ex-domain = { path = "../ai-ex-domain" }
 serde_json.workspace = true
 tokio.workspace = true
