@@ -66,8 +66,18 @@ impl DesktopApp
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
                 WorkerEvent::Health(health) =>
                 {
+                    let details = health
+                        .iter()
+                        .map(|item| {
+                            format!("health {} ready={} {}", item.component, item.ready, item.detail)
+                        })
+                        .collect::<Vec<_>>();
                     self.push_log(format!("health snapshot received: {} component(s)", health.len()));
                     self.health = health;
+                    for detail in details
+                    {
+                        self.push_log(detail);
+                    }
                 }
                 WorkerEvent::Events(events) =>
                 {
@@ -85,6 +95,18 @@ impl DesktopApp
                             } => self.push_log(format!(
                                 "live reaction suggested (automatic={automatic})",
                             )),
+                            ai_ex_domain::SystemEvent::SentenceReady { text, .. } =>
+                            {
+                                let preview = text.replace("\r", " ").replace("\n", " ");
+                                self.push_log(format!(
+                                    "stage speech queued: {}",
+                                    preview.chars().take(120).collect::<String>(),
+                                ));
+                            }
+                            ai_ex_domain::SystemEvent::EmotionChanged { emotion, .. } =>
+                            {
+                                self.push_log(format!("stage expression: {emotion:?}"));
+                            }
                             _ =>
                             {
                             }

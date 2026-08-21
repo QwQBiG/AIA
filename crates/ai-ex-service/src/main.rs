@@ -552,6 +552,7 @@ async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
 async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
 {
     let mut health = vec![
+        obs_stage_health(),
         context.model.health().await,
         context.vts.health().clone(),
         context.speech.health(),
@@ -588,6 +589,15 @@ async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
         health.push(vision.health().await);
     }
     health
+}
+
+fn obs_stage_health() -> ComponentHealth
+{
+    ComponentHealth {
+        component: "obs-dry-run".to_owned(),
+        ready: true,
+        detail: "no external side effects; capabilities=subtitle,scene,hotkey,interrupt".to_owned(),
+    }
 }
 
 async fn run_speech_worker(
