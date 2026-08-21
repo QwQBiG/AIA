@@ -26,5 +26,13 @@ max_message_bytes = 65536
 [vts]
 enabled = false
 
+[obs]
+enabled = false
+host = "127.0.0.1"
+port = 4455
+password_env = "OBS_WEBSOCKET_PASSWORD"
+subtitle_input = "AIexSubtitle"
+timeout_seconds = 10
+
 [memory]
 enabled = false

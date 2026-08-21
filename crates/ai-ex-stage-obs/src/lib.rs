@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
 
+mod websocket;
+
+pub use websocket::{ObsSettings, ObsWebSocketStage};
+
 use std::collections::{BTreeSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 

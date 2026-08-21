@@ -26,7 +26,7 @@ use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
 use ai_ex_ollama::OllamaClient;
 use ai_ex_safety::{Capability, SafetyGate, SafetyPolicy};
-use ai_ex_stage_obs::{ObsDryRunStage, parse_records_jsonl, replay_records};
+use ai_ex_stage_obs::{ObsDryRunStage, ObsSettings, ObsWebSocketStage, parse_records_jsonl, replay_records};
 use ai_ex_tts::{GptSovitsClient, GptSovitsSettings};
 use ai_ex_vts::{VtsClient, VtsSettings};
 use ai_ex_vision::{
@@ -148,6 +148,11 @@ async fn run() -> Result<(), AppError>
     }
     let model = build_model(&config)?;
     let vts = connect_vts(&config).await;
+    let obs_runtime = connect_obs(&config).await;
+    if obs_runtime.stage.is_some()
+    {
+        tracing::info!("OBS WebSocket stage connected");
+    }
     let (speech, receiver) = SpeechQueue::new(config.audio.queue_capacity)?;
     let player = receiver.player();
     let tts = build_tts(&config).await?;
@@ -167,6 +172,7 @@ async fn run() -> Result<(), AppError>
         return run_check(HealthContext {
             model: &model,
             vts: &vts,
+            obs: &obs_runtime.health,
             speech: &speech,
             memory: &memory,
             player: &player,
@@ -182,6 +188,7 @@ async fn run() -> Result<(), AppError>
     let startup_health = collect_health(HealthContext {
         model: &model,
         vts: &vts,
+        obs: &obs_runtime.health,
         speech: &speech,
         memory: &memory,
         player: &player,
@@ -520,10 +527,61 @@ async fn connect_vts(config: &AppConfig) -> VtsClient
     }
 }
 
+struct ObsRuntime
+{
+    stage: Option<ObsWebSocketStage>,
+    health: ComponentHealth,
+}
+
+async fn connect_obs(config: &AppConfig) -> ObsRuntime
+{
+    if !config.obs.enabled
+    {
+        return ObsRuntime {
+            stage: None,
+            health: obs_stage_health(),
+        };
+    }
+    let mut settings = match ObsSettings::new(config.obs.host.clone(), config.obs.port)
+    {
+        Ok(settings) => settings,
+        Err(error) =>
+        {
+            return ObsRuntime {
+                stage: None,
+                health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
+            };
+        }
+    };
+    settings.password = std::env::var(&config.obs.password_env).ok();
+    settings.subtitle_input = Some(config.obs.subtitle_input.clone());
+    settings.timeout = Duration::from_secs(config.obs.timeout_seconds);
+    match ObsWebSocketStage::connect(settings).await
+    {
+        Ok(stage) =>
+        {
+            let health = stage.health().clone();
+            ObsRuntime {
+                stage: Some(stage),
+                health,
+            }
+        }
+        Err(error) =>
+        {
+            tracing::warn!(%error, "OBS WebSocket unavailable; stage output disabled");
+            ObsRuntime {
+                stage: None,
+                health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
+            }
+        }
+    }
+}
+
 struct HealthContext<'a>
 {
     model: &'a ConfiguredModel,
     vts: &'a VtsClient,
+    obs: &'a ComponentHealth,
     speech: &'a SpeechQueue,
     memory: &'a MemoryStore,
     player: &'a AudioPlayer,
@@ -552,9 +610,9 @@ async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
 async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
 {
     let mut health = vec![
-        obs_stage_health(),
         context.model.health().await,
         context.vts.health().clone(),
+        context.obs.clone(),
         context.speech.health(),
         context.memory.health().await,
         context.safety.health(),

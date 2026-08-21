@@ -18,6 +18,7 @@ pub struct AppConfig
     pub ollama: OllamaConfig,
     pub koboldcpp: KoboldCppConfig,
     pub vts: VtsConfig,
+    pub obs: ObsConfig,
     pub audio: AudioConfig,
     pub memory: MemoryConfig,
     pub tts: TtsConfig,
@@ -92,6 +93,18 @@ impl AppConfig
         if self.model.backend == ModelBackend::KoboldCpp
         {
             self.koboldcpp.validate()?;
+        }
+        if self.obs.host.trim().is_empty() || self.obs.port == 0 || self.obs.timeout_seconds == 0
+        {
+            return Err(AppError::configuration("obs host, port, and timeout must be valid"));
+        }
+        if self.obs.enabled && self.obs.password_env.trim().is_empty()
+        {
+            return Err(AppError::configuration("enabled OBS requires password_env"));
+        }
+        if self.obs.subtitle_input.chars().count() > 256
+        {
+            return Err(AppError::configuration("obs.subtitle_input is too long"));
         }
         if self.vts.host.trim().is_empty()
         {
@@ -398,6 +411,32 @@ impl Default for VtsConfig
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ObsConfig
+{
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    pub password_env: String,
+    pub subtitle_input: String,
+    pub timeout_seconds: u64,
+}
+
+impl Default for ObsConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: false,
+            host: "127.0.0.1".to_owned(),
+            port: 4455,
+            password_env: "OBS_WEBSOCKET_PASSWORD".to_owned(),
+            subtitle_input: "AIexSubtitle".to_owned(),
+            timeout_seconds: 10,
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig
@@ -735,9 +774,18 @@ mod tests
         let config = AppConfig::parse(include_str!("../../../config/ai-ex.example.toml"))
             .expect("example configuration must parse");
         assert_eq!(config.vts.port, 8001);
+        assert!(!config.obs.enabled);
         assert!(!config.safety.automation_enabled);
     }
 
+    #[test]
+    fn rejects_enabled_obs_without_password_env()
+    {
+        let mut config = AppConfig::default();
+        config.obs.enabled = true;
+        config.obs.password_env.clear();
+        assert!(config.validate().is_err());
+    }
     #[test]
     fn validates_bilibili_only_when_enabled()
     {

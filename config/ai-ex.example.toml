@@ -44,6 +44,14 @@ developer = "AIex contributors"
 [vts.expression_hotkeys]
 # happy = "VTS hotkey ID"
 
+[obs]
+enabled = false
+host = "127.0.0.1"
+port = 4455
+password_env = "OBS_WEBSOCKET_PASSWORD"
+subtitle_input = "AIexSubtitle"
+timeout_seconds = 10
+
 [audio]
 queue_capacity = 32
 

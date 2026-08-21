@@ -325,9 +325,14 @@ dependencies = [
  "ai-ex-domain",
  "ai-ex-stage",
  "async-trait",
+ "base64",
+ "futures-util",
+ "ring",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]

@@ -193,3 +193,5 @@ crates/
 - 舞台协议：ai-ex-stage 已提供版本化 StageAction、能力声明、动作边界校验和 dry-run 执行器；ai-ex-stage-obs 已提供字幕/场景/热键 JSONL 录制边界，真实 OBS 连接器仍保持在外部边界。
 
 下一步优先把 OBS JSONL 录制回放接入桌面开发者面板，再实现真实 OBS WebSocket 连接器；游戏动作继续保持独立插件边界。
+
+- OBS 适配：ai-ex-stage-obs 同时提供无副作用 JSONL dry-run 和 OBS WebSocket v5 连接器；真实连接默认关闭，密码只从环境变量读取。
