@@ -401,6 +401,107 @@ mod tests
     }
 
     #[test]
+    fn decodes_nested_zlib_packets()
+    {
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let inner = encode_packet(5, 1, b"{\"cmd\":\"LIVE\"}").expect("inner packet builds");
+        let mut first_encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        first_encoder.write_all(&inner).expect("first compression writes");
+        let first = first_encoder.finish().expect("first compression finishes");
+        let nested = encode_packet(5, 2, &first).expect("nested packet builds");
+        let mut second_encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        second_encoder.write_all(&nested).expect("second compression writes");
+        let second = second_encoder.finish().expect("second compression finishes");
+        let packet = encode_packet(5, 2, &second).expect("outer packet builds");
+
+        let decoded = decode_packets(&packet).expect("nested packet decodes");
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].body, b"{\"cmd\":\"LIVE\"}");
+    }
+
+    #[test]
+    fn preserves_batch_order_and_rejects_truncation()
+    {
+        let first = encode_packet(5, 1, b"first").expect("first packet builds");
+        let second = encode_packet(5, 1, b"second").expect("second packet builds");
+        let mut batch = first;
+        batch.extend_from_slice(&second);
+        let decoded = decode_packets(&batch).expect("batch decodes");
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded[0].body, b"first");
+        assert_eq!(decoded[1].body, b"second");
+
+        let truncated = &batch[..10];
+        assert!(decode_packets(truncated).is_err());
+    }
+
+    #[test]
+    fn maps_gift_follow_and_super_chat_events()
+    {
+        let gift = map_message(
+            Uuid::new_v4(),
+            123,
+            json!({
+                "cmd": "SEND_GIFT",
+                "data": {
+                    "giftId": 7,
+                    "uid": 42,
+                    "uname": "小明",
+                    "giftName": "星星",
+                    "num": 2
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("gift parses")
+        .expect("gift maps");
+        assert!(matches!(gift.payload, LiveEvent::Gift { count: 2, .. }));
+
+        let follow = map_message(
+            Uuid::new_v4(),
+            123,
+            json!({
+                "cmd": "INTERACT_WORD",
+                "data": {"msg_type": 2, "uid": 42, "uname": "小明"}
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("follow parses")
+        .expect("follow maps");
+        assert!(matches!(follow.payload, LiveEvent::Follow { .. }));
+
+        let donation = map_message(
+            Uuid::new_v4(),
+            123,
+            json!({
+                "cmd": "SUPER_CHAT_MESSAGE",
+                "data": {
+                    "id": 9,
+                    "uid": 42,
+                    "price": 30,
+                    "message": "支持你",
+                    "user_info": {"uname": "小明"}
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("donation parses")
+        .expect("donation maps");
+        assert!(matches!(
+            donation.payload,
+            LiveEvent::Donation {
+                amount_minor: 3000,
+                ..
+            }
+        ));
+    }
+    #[test]
     fn rejects_brotli_packets_until_codec_is_enabled()
     {
         let packet = encode_packet(5, 3, b"compressed").expect("packet builds");
