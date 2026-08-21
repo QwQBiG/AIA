@@ -31,6 +31,6 @@ live_mode = "controlled"
 - `export_kind`：导出指定分类到独立 JSONL，便于备份和审查。
 - `clear_kind`：清除指定分类并重写原文件，保留其他分类。
 
-这些能力仍然只在 Rust 中间件边界内，不要求模型 Provider 了解存储格式。后续直播事件层会把观众和礼物事件映射到 `viewer` / `live_event`，并继续受权限、冷却和急停策略约束。
+平台无关事件总线提供 `project_memory` 投影：聊天/关注/订阅进入 `viewer`，礼物/付费支持同时产生观众关系和 `live_event` 记录，游戏观察和系统通知进入 `live_event`；审核事件和定时器默认不写入记忆。服务层可以把投影交给 `MemoryStore::remember_projection`，模型 Provider 不需要了解事件或存储格式。所有自动响应仍继续受权限、冷却和急停策略约束。
 
 自动行为继续由 `SafetyGate` 统一拦截：聊天/语音可以自动，外部发言、礼物动作和游戏输入必须经过权限、审计、冷却和急停。

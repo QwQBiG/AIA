@@ -7,9 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ai_ex_core::MemoryPort;
-use ai_ex_domain::{AppError, ComponentHealth, Message, Role, TurnId};
+use ai_ex_domain::{AppError, ComponentHealth, MemoryKind, MemoryProjection, Message, Role, TurnId};
 use async_trait::async_trait;
-pub use record::MemoryKind;
 use record::MemoryRecord;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
@@ -188,6 +187,19 @@ impl MemoryStore
         Ok(())
     }
 
+    pub async fn remember_projection(
+        &mut self,
+        projection: &MemoryProjection,
+    ) -> Result<(), AppError>
+    {
+        self.remember_kind(
+            projection.kind,
+            projection.turn_id.unwrap_or_default(),
+            projection.user_text.clone(),
+            projection.assistant_text.clone(),
+        )
+        .await
+    }
     pub async fn export_kind(
         &self,
         kind: Option<MemoryKind>,
@@ -349,6 +361,25 @@ mod tests
         tokio::fs::remove_file(&export_path).await.expect("temporary export removed");
     }
 
+    #[tokio::test]
+    async fn remembers_a_projected_live_event()
+    {
+        let path = std::env::temp_dir().join(format!("ai-ex-memory-projection-{}.jsonl", Uuid::new_v4()));
+        let mut store = MemoryStore::open(&path).await.expect("store opens");
+        let projection = MemoryProjection {
+            kind: MemoryKind::LiveEvent,
+            event_id: Uuid::new_v4(),
+            turn_id: None,
+            user_text: "收到礼物".to_owned(),
+            assistant_text: "直播事件".to_owned(),
+        };
+        store
+            .remember_projection(&projection)
+            .await
+            .expect("projection persists");
+        assert_eq!(store.count(Some(MemoryKind::LiveEvent)).await, 1);
+        tokio::fs::remove_file(&path).await.expect("projection memory removed");
+    }
     #[tokio::test]
     async fn reads_legacy_records_without_a_kind()
     {

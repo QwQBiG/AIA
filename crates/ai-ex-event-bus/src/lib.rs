@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use ai_ex_domain::{AppError, TurnId};
+use ai_ex_domain::{AppError, MemoryKind, MemoryProjection, TurnId};
 use ai_ex_protocol::{EventEnvelope, SCHEMA_VERSION};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -84,6 +84,103 @@ pub enum LiveEvent
     },
 }
 
+pub fn project_memory(event: &LiveEventEnvelope) -> Vec<MemoryProjection>
+{
+    let projection = |kind: MemoryKind, user_text: String, assistant_text: String|
+    {
+        MemoryProjection {
+            kind,
+            event_id: event.event_id,
+            turn_id: event.turn_id,
+            user_text,
+            assistant_text,
+        }
+    };
+    match &event.payload
+    {
+        LiveEvent::ChatMessage {
+            user_id,
+            display_name,
+            text,
+            ..
+        }
+        | LiveEvent::Mention {
+            user_id,
+            display_name,
+            text,
+            ..
+        } => vec![projection(
+            MemoryKind::Viewer,
+            format!("{display_name}（{user_id}）说：{text}"),
+            "直播聊天事件".to_owned(),
+        )],
+        LiveEvent::Follow {
+            user_id,
+            display_name,
+        } => vec![projection(
+            MemoryKind::Viewer,
+            format!("{display_name}（{user_id}）关注了直播间"),
+            "观众关系事件：关注".to_owned(),
+        )],
+        LiveEvent::Subscription {
+            user_id,
+            display_name,
+            tier,
+        } => vec![projection(
+            MemoryKind::Viewer,
+            format!("{display_name}（{user_id}）订阅等级：{tier}"),
+            "观众关系事件：订阅".to_owned(),
+        )],
+        LiveEvent::Gift {
+            user_id,
+            display_name,
+            gift_name,
+            count,
+            ..
+        } => vec![
+            projection(
+                MemoryKind::Viewer,
+                format!("{display_name}（{user_id}）送出 {gift_name} x{count}"),
+                "观众关系事件：礼物".to_owned(),
+            ),
+            projection(
+                MemoryKind::LiveEvent,
+                format!("收到观众 {display_name} 的礼物：{gift_name} x{count}"),
+                "直播事件：礼物".to_owned(),
+            ),
+        ],
+        LiveEvent::Donation {
+            user_id,
+            display_name,
+            amount_minor,
+            currency,
+            message,
+            ..
+        } => vec![
+            projection(
+                MemoryKind::Viewer,
+                format!("{display_name}（{user_id}）支持了 {amount_minor} {currency}：{message}"),
+                "观众关系事件：付费支持".to_owned(),
+            ),
+            projection(
+                MemoryKind::LiveEvent,
+                format!("收到 {display_name} 的付费支持：{amount_minor} {currency}"),
+                format!("直播事件：{message}"),
+            ),
+        ],
+        LiveEvent::GameObservation { game, observation } => vec![projection(
+            MemoryKind::LiveEvent,
+            format!("游戏 {game} 观察：{observation}"),
+            "直播事件：游戏观察".to_owned(),
+        )],
+        LiveEvent::SystemNotice { level, text } => vec![projection(
+            MemoryKind::LiveEvent,
+            format!("平台通知（{level}）：{text}"),
+            "直播事件：系统通知".to_owned(),
+        )],
+        LiveEvent::Moderation { .. } | LiveEvent::Timer { .. } => Vec::new(),
+    }
+}
 impl LiveEvent
 {
     pub fn priority(&self) -> EventPriority
@@ -378,6 +475,37 @@ mod tests
         assert!(receiver.try_recv().is_ok());
     }
 
+    #[test]
+    fn projects_live_events_to_memory_kinds()
+    {
+        let event = envelope(
+            "bilibili:123",
+            Uuid::new_v4(),
+            LiveEvent::Gift {
+                event_id: "gift-1".to_owned(),
+                user_id: "42".to_owned(),
+                display_name: "小明".to_owned(),
+                gift_name: "星星".to_owned(),
+                count: 2,
+            },
+        );
+        let projections = project_memory(&event);
+        assert_eq!(projections.len(), 2);
+        assert!(projections.iter().any(|item| item.kind == MemoryKind::Viewer));
+        assert!(projections.iter().any(|item| item.kind == MemoryKind::LiveEvent));
+        assert!(projections.iter().all(|item| item.event_id == event.event_id));
+
+        let moderation = envelope(
+            "bilibili:123",
+            Uuid::new_v4(),
+            LiveEvent::Moderation {
+                action: "mute".to_owned(),
+                target_user_id: Some("42".to_owned()),
+                reason: "policy".to_owned(),
+            },
+        );
+        assert!(project_memory(&moderation).is_empty());
+    }
     #[test]
     fn jsonl_recording_round_trips()
     {
