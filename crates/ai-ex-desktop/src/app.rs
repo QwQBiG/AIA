@@ -213,6 +213,55 @@ impl DesktopApp
         });
     }
 
+    fn show_automation_panel(&self, ui: &mut egui::Ui)
+    {
+        ui.collapsing("视觉与游戏安全状态", |ui|
+        {
+            ui.horizontal(|ui|
+            {
+                ui.label("执行模式：");
+                ui.colored_label(egui::Color32::from_rgb(80, 200, 140), "dry-run（无副作用）");
+            });
+            ui.small("真实鼠标、键盘和进程启动不会从桌面界面直接触发。动作必须经过独立插件、白名单、审计和急停。");
+            let relevant = self
+                .health
+                .iter()
+                .filter(|item| {
+                    let component = item.component.to_ascii_lowercase();
+                    component.contains("automation")
+                        || component.contains("vision")
+                        || component.contains("plugin")
+                        || component.contains("stage")
+                        || component.contains("obs")
+                })
+                .collect::<Vec<_>>();
+            if relevant.is_empty()
+            {
+                ui.weak("等待自动化/插件健康信息……");
+                return;
+            }
+            for item in relevant
+            {
+                let color = if item.ready
+                {
+                    egui::Color32::from_rgb(80, 200, 140)
+                }
+                else
+                {
+                    egui::Color32::LIGHT_RED
+                };
+                let state = if item.ready { "就绪" } else { "不可用" };
+                ui.horizontal(|ui|
+                {
+                    ui.colored_label(color, format!("{}：{}", item.component, state));
+                    if !item.detail.is_empty()
+                    {
+                        ui.small(&item.detail);
+                    }
+                });
+            }
+        });
+    }
     fn show_developer_panel(&mut self, ui: &mut egui::Ui)
     {
         if !self.developer_mode
@@ -351,6 +400,7 @@ impl eframe::App for DesktopApp
         self.drain_events();
         self.show_header(ui);
         self.show_health(ui);
+        self.show_automation_panel(ui);
         self.show_developer_panel(ui);
         self.show_conversation(ui);
         self.show_composer(ui);
