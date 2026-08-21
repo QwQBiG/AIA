@@ -74,18 +74,49 @@ impl KoboldCppClient
         let url = format!("{}/api/v1/model", self.base_url);
         match self.client.get(url).send().await
         {
-            Ok(response) if response.status().is_success() => {
-                ComponentHealth::ready("koboldcpp")
-            }
+            Ok(response) if response.status().is_success() => ComponentHealth {
+                component: "koboldcpp".to_owned(),
+                ready: true,
+                detail: "KoboldCpp 服务可用；使用当前已加载的本地模型".to_owned(),
+            },
             Ok(response) => ComponentHealth::unavailable(
                 "koboldcpp",
-                format!("HTTP {}", response.status()),
+                http_failure_detail(response.status().as_u16()),
             ),
-            Err(error) => ComponentHealth::unavailable("koboldcpp", error.to_string()),
+            Err(error) => ComponentHealth::unavailable(
+                "koboldcpp",
+                request_failure_detail(&error),
+            ),
         }
     }
 }
 
+fn http_failure_detail(status: u16) -> String
+{
+    match status
+    {
+        404 => "KoboldCpp 接口不存在（HTTP 404）；检查是否启用了 API 服务或 base_url".to_owned(),
+        408 | 429 => format!("KoboldCpp 请求受限（HTTP {status}）；稍后重试"),
+        500..=599 => format!("KoboldCpp 服务端故障（HTTP {status}）；检查本地模型进程"),
+        _ => format!("KoboldCpp 返回 HTTP {status}"),
+    }
+}
+
+fn request_failure_detail(error: &reqwest::Error) -> String
+{
+    if error.is_timeout()
+    {
+        "KoboldCpp 请求超时；检查本地模型是否仍在加载或调整 timeout_seconds".to_owned()
+    }
+    else if error.is_connect()
+    {
+        "无法连接 KoboldCpp；确认 koboldcpp 已启动并检查 base_url".to_owned()
+    }
+    else
+    {
+        format!("KoboldCpp 请求失败：{error}")
+    }
+}
 #[async_trait]
 impl LanguageModelPort for KoboldCppClient
 {

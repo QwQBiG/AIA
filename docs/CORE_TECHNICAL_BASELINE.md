@@ -205,3 +205,4 @@ crates/
 - 插件运行期监控：已启动 Provider 每 15 秒刷新 health，并检测进程退出；失败只更新桌面/控制协议状态，不自动重启。
 - Typed automation bridge：`PluginAutomationPort` 将安全许可与版本化 observe/execute/interrupt 请求连接起来，服务端 stdio 适配器只负责 JSON-RPC 编解码，核心状态机不感知插件协议。
 - 首次设置连通性检查：桌面向导后台探测 HTTP/HTTPS 地址，不阻塞 UI；DeepSeek 密钥不落盘，服务启动仍做完整 provider health。
+- Provider 健康诊断：DeepSeek、KoboldCpp、Ollama 将 HTTP 鉴权/地址/限流/服务端故障与 timeout/connect 错误转换为可操作中文详情，并保留 provider 原始边界。

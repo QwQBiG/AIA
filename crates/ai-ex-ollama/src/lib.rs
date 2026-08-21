@@ -48,16 +48,49 @@ impl OllamaClient
         let url = format!("{}/api/tags", self.base_url);
         match self.client.get(url).send().await
         {
-            Ok(response) if response.status().is_success() => ComponentHealth::ready("ollama"),
+            Ok(response) if response.status().is_success() => ComponentHealth {
+                component: "ollama".to_owned(),
+                ready: true,
+                detail: format!("Ollama 服务可用；configured model={}", self.model),
+            },
             Ok(response) => ComponentHealth::unavailable(
                 "ollama",
-                format!("HTTP {}", response.status()),
+                http_failure_detail(response.status().as_u16()),
             ),
-            Err(error) => ComponentHealth::unavailable("ollama", error.to_string()),
+            Err(error) => ComponentHealth::unavailable(
+                "ollama",
+                request_failure_detail(&error),
+            ),
         }
     }
 }
 
+fn http_failure_detail(status: u16) -> String
+{
+    match status
+    {
+        404 => "Ollama 接口不存在（HTTP 404）；检查 base_url 是否指向 Ollama 服务".to_owned(),
+        408 | 429 => format!("Ollama 请求受限（HTTP {status}）；稍后重试"),
+        500..=599 => format!("Ollama 服务端故障（HTTP {status}）；检查本地模型进程"),
+        _ => format!("Ollama 返回 HTTP {status}"),
+    }
+}
+
+fn request_failure_detail(error: &reqwest::Error) -> String
+{
+    if error.is_timeout()
+    {
+        "Ollama 请求超时；检查模型加载状态或调整 timeout_seconds".to_owned()
+    }
+    else if error.is_connect()
+    {
+        "无法连接 Ollama；确认 Ollama 已启动并检查 base_url".to_owned()
+    }
+    else
+    {
+        format!("Ollama 请求失败：{error}")
+    }
+}
 #[async_trait]
 impl LanguageModelPort for OllamaClient
 {
@@ -168,4 +201,16 @@ async fn process_line(
         }
     }
     Ok(chunk.done)
+}
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn classifies_missing_service_endpoint()
+    {
+        assert!(http_failure_detail(404).contains("接口不存在"));
+        assert!(http_failure_detail(503).contains("服务端故障"));
+    }
 }

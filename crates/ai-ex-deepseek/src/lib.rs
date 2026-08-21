@@ -78,18 +78,50 @@ impl DeepSeekClient
             .send()
             .await
         {
-            Ok(response) if response.status().is_success() => {
-                ComponentHealth::ready("deepseek")
-            }
+            Ok(response) if response.status().is_success() => ComponentHealth {
+                component: "deepseek".to_owned(),
+                ready: true,
+                detail: format!("API 可用；configured model={}", self.settings.model),
+            },
             Ok(response) => ComponentHealth::unavailable(
                 "deepseek",
-                format!("HTTP {}", response.status()),
+                http_failure_detail(response.status().as_u16()),
             ),
-            Err(error) => ComponentHealth::unavailable("deepseek", error.to_string()),
+            Err(error) => ComponentHealth::unavailable(
+                "deepseek",
+                request_failure_detail(&error),
+            ),
         }
     }
 }
 
+fn http_failure_detail(status: u16) -> String
+{
+    match status
+    {
+        401 | 403 => format!("鉴权失败（HTTP {status}）；检查 DeepSeek API Key"),
+        404 => "接口地址不存在（HTTP 404）；检查 base_url 是否为 DeepSeek API 地址".to_owned(),
+        408 | 429 => format!("请求受限（HTTP {status}）；检查限流、余额或稍后重试"),
+        500..=599 => format!("DeepSeek 服务端故障（HTTP {status}）；稍后重试"),
+        _ => format!("DeepSeek 返回 HTTP {status}"),
+    }
+}
+
+fn request_failure_detail(error: &reqwest::Error) -> String
+{
+    if error.is_timeout()
+    {
+        "请求超时；检查网络、代理和 timeout_seconds".to_owned()
+    }
+    else if error.is_connect()
+    {
+        "无法连接 DeepSeek；检查网络、代理和 base_url".to_owned()
+    }
+    else
+    {
+        format!("DeepSeek 请求失败：{error}")
+    }
+}
 #[async_trait]
 impl LanguageModelPort for DeepSeekClient
 {
@@ -203,5 +235,28 @@ async fn process_event(
         }
         StreamEvent::Done => Ok(true),
         StreamEvent::Ignore => Ok(false),
+    }
+}
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn classifies_auth_and_server_failures()
+    {
+        assert!(http_failure_detail(401).contains("鉴权失败"));
+        assert!(http_failure_detail(503).contains("服务端故障"));
+    }
+
+    #[test]
+    fn classifies_network_failures()
+    {
+        let error = reqwest::Client::new()
+            .get("not a url")
+            .build()
+            .expect_err("invalid request build is not expected");
+        let detail = request_failure_detail(&error);
+        assert!(!detail.is_empty());
     }
 }
