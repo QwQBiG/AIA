@@ -4,12 +4,39 @@ use ai_ex_domain::TurnId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryKind
+{
+    #[default]
+    Conversation,
+    Viewer,
+    Persona,
+    LiveEvent,
+}
+
+impl MemoryKind
+{
+    pub fn as_str(self) -> &'static str
+    {
+        match self
+        {
+            Self::Conversation => "conversation",
+            Self::Viewer => "viewer",
+            Self::Persona => "persona",
+            Self::LiveEvent => "live_event",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryRecord
 {
     pub id: Uuid,
     pub turn_id: TurnId,
     pub created_ms: u128,
+    #[serde(default)]
+    pub kind: MemoryKind,
     pub user_text: String,
     pub assistant_text: String,
 }
@@ -46,4 +73,3 @@ fn terms(text: &str) -> BTreeSet<String>
     }
     result
 }
-
