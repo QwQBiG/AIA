@@ -13,7 +13,7 @@ use ai_ex_audio::{AudioPlayer, SpeechQueue, SpeechReceiver};
 use ai_ex_bilibili::{BilibiliConnector, BilibiliSettings};
 use ai_ex_asr::WhisperHttpTranscriber;
 use ai_ex_audit::JsonlAuditLog;
-use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend};
+use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend, PluginConfig};
 use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
@@ -25,7 +25,7 @@ use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, Publish
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
-use ai_ex_plugin::PluginRegistry;
+use ai_ex_plugin::{PluginHealth, PluginRegistry, StdioPlugin};
 use ai_ex_ollama::OllamaClient;
 use ai_ex_stage::{StageExecutor, StageRouter};
 use ai_ex_safety::{Capability, SafetyGate, SafetyPolicy};
@@ -166,7 +166,7 @@ async fn run() -> Result<(), AppError>
     let tts = build_tts(&config).await?;
     let safety = Arc::new(build_safety(&config)?);
     let audit = build_audit(&config).await?;
-    let plugins = PluginRegistry::new();
+    let plugin_runtime = connect_plugins(&config.plugins).await;
 
     let memory = if config.memory.enabled
     {
@@ -189,7 +189,7 @@ async fn run() -> Result<(), AppError>
             tts: tts.as_ref(),
             safety: safety.as_ref(),
             audit: audit.as_ref(),
-            plugins: &plugins,
+            plugins: &plugin_runtime.registry,
             vision: vision.as_ref(),
             config: &config,
         })
@@ -206,7 +206,7 @@ async fn run() -> Result<(), AppError>
         tts: tts.as_ref(),
         safety: safety.as_ref(),
         audit: audit.as_ref(),
-        plugins: &plugins,
+        plugins: &plugin_runtime.registry,
         vision: vision.as_ref(),
         config: &config,
     })
@@ -604,6 +604,94 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
     }
 }
 
+struct PluginRuntime
+{
+    registry: PluginRegistry,
+    _processes: Vec<StdioPlugin>,
+}
+
+async fn connect_plugins(config: &PluginConfig) -> PluginRuntime
+{
+    let mut registry = PluginRegistry::new();
+    let mut processes = Vec::new();
+    if !config.enabled
+    {
+        return PluginRuntime {
+            registry,
+            _processes: processes,
+        };
+    }
+    for command in &config.commands
+    {
+        let mut plugin = match StdioPlugin::spawn(&command.program, &command.args)
+        {
+            Ok(plugin) => plugin,
+            Err(error) =>
+            {
+                tracing::warn!(plugin = %command.id, %error, "plugin process unavailable");
+                let _ignored = registry.register_unavailable(&command.id, error.to_string());
+                continue;
+            }
+        };
+        let manifest = match tokio::time::timeout(
+            Duration::from_secs(5),
+            plugin.manifest(),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(AppError::connectivity("plugin manifest request timed out")),
+        };
+        let manifest = match manifest
+        {
+            Ok(manifest) if manifest.id == command.id => manifest,
+            Ok(manifest) =>
+            {
+                let detail = format!(
+                    "manifest id mismatch: configured={}, reported={}",
+                    command.id,
+                    manifest.id,
+                );
+                tracing::warn!(plugin = %command.id, "plugin manifest rejected");
+                let _ignored = registry.register_unavailable(&command.id, detail);
+                continue;
+            }
+            Err(error) =>
+            {
+                tracing::warn!(plugin = %command.id, %error, "plugin manifest unavailable");
+                let _ignored = registry.register_unavailable(&command.id, error.to_string());
+                continue;
+            }
+        };
+        if let Err(error) = registry.register(manifest)
+        {
+            tracing::warn!(plugin = %command.id, %error, "plugin registration rejected");
+            let _ignored = registry.register_unavailable(&command.id, error.to_string());
+            continue;
+        }
+        let health = match tokio::time::timeout(Duration::from_secs(5), plugin.health()).await
+        {
+            Ok(Ok(health)) => health,
+            Ok(Err(error)) => PluginHealth {
+                ready: false,
+                detail: error.to_string(),
+            },
+            Err(_) => PluginHealth {
+                ready: false,
+                detail: "plugin health request timed out".to_owned(),
+            },
+        };
+        if let Err(error) = registry.update_health(&command.id, health)
+        {
+            tracing::warn!(plugin = %command.id, %error, "plugin health update rejected");
+        }
+        processes.push(plugin);
+    }
+    PluginRuntime {
+        registry,
+        _processes: processes,
+    }
+}
 struct HealthContext<'a>
 {
     model: &'a ConfiguredModel,

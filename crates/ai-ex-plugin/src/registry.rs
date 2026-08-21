@@ -52,6 +52,37 @@ impl PluginRegistry
         Ok(())
     }
 
+    pub fn register_unavailable(
+        &mut self,
+        id: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Result<(), AppError>
+    {
+        let id = id.into();
+        if id.trim().is_empty() || self.entries.contains_key(&id)
+        {
+            return Err(AppError::configuration(
+                "cannot register unavailable plugin with duplicate or empty id",
+            ));
+        }
+        self.entries.insert(
+            id.clone(),
+            PluginStatus {
+                manifest: PluginManifest {
+                    protocol_version: 1,
+                    id,
+                    version: "unknown".to_owned(),
+                    capabilities: Vec::new(),
+                    config_schema: serde_json::Value::Null,
+                },
+                health: PluginHealth {
+                    ready: false,
+                    detail: detail.into(),
+                },
+            },
+        );
+        Ok(())
+    }
     pub fn update_health(
         &mut self,
         id: &str,

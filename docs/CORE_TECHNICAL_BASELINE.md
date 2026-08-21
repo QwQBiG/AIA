@@ -201,3 +201,4 @@ crates/
 - 插件进程边界：`ai-ex-plugin::StdioPlugin` 已提供带尺寸限制、响应校验和生命周期回收的 JSON-RPC stdio 客户端，真实视觉/游戏 Provider 仍默认关闭。
 - Typed 插件契约：视觉观察与游戏动作统一使用带 schema/request UUID 的 `AutomationPluginRequest/Response`，原始帧通过引用传递，不进入 JSON-RPC 大字段。
 - 插件注册表：组合根创建 `PluginRegistry` 并将注册表/插件健康投影到控制协议，桌面安全面板可直接显示；当前默认 0 个外部插件。
+- 外部插件启动：`[plugins]` 默认关闭；显式启用时按 manifest ID/health 做隔离启动与超时校验，单个插件失败不影响主运行时。

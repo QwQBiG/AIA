@@ -83,6 +83,10 @@ base_url = "http://127.0.0.1:11434"
 model = "llava:latest"
 timeout_seconds = 60
 
+[plugins]
+enabled = false
+# commands = [{ id = "vision.demo", program = "path/to/plugin.exe", args = [] }]
+
 [memory]
 enabled = true
 path = "memory_db/ai-ex.jsonl"

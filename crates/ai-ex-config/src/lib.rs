@@ -25,6 +25,7 @@ pub struct AppConfig
     pub duplex: DuplexConfig,
     pub control: ControlConfig,
     pub vision: VisionConfig,
+    pub plugins: PluginConfig,
     pub bilibili: BilibiliConfig,
     pub safety: SafetyConfig,
 }
@@ -151,6 +152,7 @@ impl AppConfig
         self.duplex.validate()?;
         self.control.validate()?;
         self.vision.validate()?;
+        self.plugins.validate()?;
         self.bilibili.validate()?;
         Ok(())
     }
@@ -604,6 +606,50 @@ impl Default for ControlConfig
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PluginConfig
+{
+    pub enabled: bool,
+    pub commands: Vec<PluginCommandConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginCommandConfig
+{
+    pub id: String,
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+impl PluginConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if self.commands.len() > 32
+        {
+            return Err(AppError::configuration(
+                "plugins.commands must contain at most 32 entries",
+            ));
+        }
+        for command in &self.commands
+        {
+            if command.id.trim().is_empty()
+                || command.id.chars().count() > 128
+                || command.program.trim().is_empty()
+                || command.program.chars().count() > 1_024
+                || command.args.len() > 64
+                || command.args.iter().any(|arg| arg.chars().count() > 4_096)
+            {
+                return Err(AppError::configuration(
+                    "plugin command configuration is outside supported bounds",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VisionConfig
@@ -776,6 +822,7 @@ mod tests
         assert_eq!(config.vts.port, 8001);
         assert!(!config.obs.enabled);
         assert!(!config.safety.automation_enabled);
+        assert!(!config.plugins.enabled);
     }
 
     #[test]
