@@ -9,7 +9,7 @@
     "event_id": {"type": "string", "format": "uuid"},
     "trace_id": {"type": "string", "format": "uuid"},
     "session_id": {"type": "string", "format": "uuid"},
-    "turn_id": {"type": "string", "format": "uuid"},
+    "turn_id": {"type": ["string", "null"], "format": "uuid"},
     "timestamp_ms": {"type": "integer", "minimum": 0},
     "source": {"type": "string", "minLength": 1},
     "payload": {}

@@ -13,7 +13,7 @@
 
 ## EventEnvelope
 
-`EventEnvelope<T>` 提供 `schema_version`、事件/追踪/会话/回合 ID、毫秒时间戳、来源和 payload。外部传输使用 JSON；录制与回放必须保留 envelope 原样，便于跨 Provider 重放。
+`EventEnvelope<T>` 提供 `schema_version`、事件/追踪/会话/回合 ID、毫秒时间戳、来源和 payload。非回合事件的 `turn_id` 使用 `null`，模型回合事件填入具体 ID。外部传输使用 JSON；录制与回放必须保留 envelope 原样，便于跨 Provider 重放。
 
 ## 兼容迁移
 

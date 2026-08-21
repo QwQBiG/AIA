@@ -98,7 +98,7 @@ pub struct EventEnvelope<T>
     pub event_id: Uuid,
     pub trace_id: Uuid,
     pub session_id: Uuid,
-    pub turn_id: TurnId,
+    pub turn_id: Option<TurnId>,
     pub timestamp_ms: u64,
     pub source: String,
     pub payload: T,
@@ -106,7 +106,7 @@ pub struct EventEnvelope<T>
 
 impl<T> EventEnvelope<T>
 {
-    pub fn new(source: impl Into<String>, session_id: Uuid, turn_id: TurnId, payload: T) -> Self
+    pub fn new(source: impl Into<String>, session_id: Uuid, turn_id: Option<TurnId>, payload: T) -> Self
     {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -177,9 +177,9 @@ mod tests
     fn envelope_contains_traceable_identity_and_schema_version()
     {
         let turn_id = TurnId::new();
-        let envelope = EventEnvelope::new("deepseek", Uuid::new_v4(), turn_id, "delta");
+        let envelope = EventEnvelope::new("deepseek", Uuid::new_v4(), Some(turn_id), "delta");
         assert_eq!(envelope.schema_version, SCHEMA_VERSION);
-        assert_eq!(envelope.turn_id, turn_id);
+        assert_eq!(envelope.turn_id, Some(turn_id));
         assert!(!envelope.source.is_empty());
         assert!(envelope.timestamp_ms > 0);
     }
