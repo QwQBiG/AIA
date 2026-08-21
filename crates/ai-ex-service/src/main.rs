@@ -25,6 +25,7 @@ use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, Publish
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
+use ai_ex_plugin::PluginRegistry;
 use ai_ex_ollama::OllamaClient;
 use ai_ex_stage::{StageExecutor, StageRouter};
 use ai_ex_safety::{Capability, SafetyGate, SafetyPolicy};
@@ -165,6 +166,8 @@ async fn run() -> Result<(), AppError>
     let tts = build_tts(&config).await?;
     let safety = Arc::new(build_safety(&config)?);
     let audit = build_audit(&config).await?;
+    let plugins = PluginRegistry::new();
+
     let memory = if config.memory.enabled
     {
         MemoryStore::open(&config.memory.path).await?
@@ -186,6 +189,7 @@ async fn run() -> Result<(), AppError>
             tts: tts.as_ref(),
             safety: safety.as_ref(),
             audit: audit.as_ref(),
+            plugins: &plugins,
             vision: vision.as_ref(),
             config: &config,
         })
@@ -202,6 +206,7 @@ async fn run() -> Result<(), AppError>
         tts: tts.as_ref(),
         safety: safety.as_ref(),
         audit: audit.as_ref(),
+        plugins: &plugins,
         vision: vision.as_ref(),
         config: &config,
     })
@@ -610,6 +615,7 @@ struct HealthContext<'a>
     tts: Option<&'a GptSovitsClient>,
     safety: &'a SafetyGate,
     audit: Option<&'a JsonlAuditLog>,
+    plugins: &'a PluginRegistry,
     vision: Option<&'a OllamaVisionClient>,
     config: &'a AppConfig,
 }
@@ -664,6 +670,8 @@ async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
     {
         health.push(audit.health());
     }
+    health.push(context.plugins.health());
+    health.extend(context.plugins.component_health());
     if let Some(vision) = context.vision
     {
         health.push(vision.health().await);

@@ -39,3 +39,5 @@ Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 
 ## 视觉/游戏 typed 契约
 
 `AutomationPluginRequest`/`AutomationPluginResponse` 是视觉与游戏 Provider 的领域协议：`observe` 只返回结构化摘要和可选 `frame_ref`，`execute` 携带目标、理由和已校验的 `AutomationAction`，`interrupt` 用于撤销当前动作。每条消息带 schema 版本和 request UUID；原始 RGBA 不直接塞进 JSON-RPC，避免超过传输上限。
+
+`PluginRegistry` 在组合根中维护 manifest 与 health 的统一快照，并投影为 `plugin-registry` 及 `plugin:<id>` 组件健康；桌面端只读显示这些状态，插件进程仍由独立客户端管理。

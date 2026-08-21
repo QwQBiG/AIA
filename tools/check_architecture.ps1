@@ -43,6 +43,7 @@ $allowed = @{
         'ai-ex-deepseek',
         'ai-ex-duplex', 'ai-ex-koboldcpp', 'ai-ex-memory', 'ai-ex-observability',
         'ai-ex-ollama',
+        'ai-ex-plugin',
         'ai-ex-safety', 'ai-ex-stage', 'ai-ex-stage-obs', 'ai-ex-tts', 'ai-ex-vision', 'ai-ex-vts'
     )
 }

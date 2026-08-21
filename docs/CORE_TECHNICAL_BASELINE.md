@@ -200,3 +200,4 @@ crates/
 - 视觉/游戏自动化：`DryRunAutomationPort` 已提供确定性屏幕帧、有界动作队列、Permit 能力二次校验和急停拒绝路径；真实桌面适配器尚未启用。
 - 插件进程边界：`ai-ex-plugin::StdioPlugin` 已提供带尺寸限制、响应校验和生命周期回收的 JSON-RPC stdio 客户端，真实视觉/游戏 Provider 仍默认关闭。
 - Typed 插件契约：视觉观察与游戏动作统一使用带 schema/request UUID 的 `AutomationPluginRequest/Response`，原始帧通过引用传递，不进入 JSON-RPC 大字段。
+- 插件注册表：组合根创建 `PluginRegistry` 并将注册表/插件健康投影到控制协议，桌面安全面板可直接显示；当前默认 0 个外部插件。

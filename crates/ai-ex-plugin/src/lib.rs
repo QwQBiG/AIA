@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod client;
+mod registry;
 
 use ai_ex_domain::AppError;
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub use client::{JsonRpcClient, StdioPlugin, read_response, write_request};
+pub use registry::{PluginRegistry, PluginStatus};
 
 pub const JSON_RPC_VERSION: &str = "2.0";
 pub const MAX_JSON_RPC_LINE_BYTES: usize = 1_048_576;
