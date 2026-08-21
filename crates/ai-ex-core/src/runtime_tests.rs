@@ -408,6 +408,24 @@ async fn conversation_policy_controls_prompt_and_memory_budget()
 }
 
 #[tokio::test]
+async fn runtime_accepts_persona_prompt_updates_between_turns()
+{
+    let request = Arc::new(Mutex::new(None));
+    let mut runtime = Runtime::new(
+        CaptureModel(Arc::clone(&request)),
+        TestSpeech(Arc::new(TestState::default())),
+        TestAvatar(Arc::new(TestState::default())),
+        TestMemory(Arc::new(TestState::default())),
+        TestEvents,
+    );
+    runtime
+        .set_system_prompt("new persona")
+        .expect("persona update accepted");
+    runtime.run_turn("hello").await.expect("turn completes");
+    let request = request.lock().await.take().expect("request captured");
+    assert_eq!(request.messages[0], Message::new(Role::System, "new persona"));
+}
+#[tokio::test]
 async fn leading_emotion_tag_controls_avatar_but_not_conversation_text()
 {
     let state = Arc::new(TestState::default());

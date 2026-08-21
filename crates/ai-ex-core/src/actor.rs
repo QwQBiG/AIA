@@ -18,6 +18,10 @@ enum RuntimeCommand
         reason: String,
         response: oneshot::Sender<Result<(), AppError>>,
     },
+    SetSystemPrompt {
+        prompt: String,
+        response: oneshot::Sender<Result<(), AppError>>,
+    },
     Shutdown {
         response: oneshot::Sender<Result<(), AppError>>,
     },
@@ -59,6 +63,21 @@ impl RuntimeHandle
         receiver
             .await
             .map_err(|_| AppError::unavailable("interrupt response dropped"))?
+    }
+
+    pub async fn set_system_prompt(&self, prompt: impl Into<String>) -> Result<(), AppError>
+    {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(RuntimeCommand::SetSystemPrompt {
+                prompt: prompt.into(),
+                response,
+            })
+            .await
+            .map_err(|_| AppError::unavailable("runtime actor stopped"))?;
+        receiver
+            .await
+            .map_err(|_| AppError::unavailable("persona update response dropped"))?
     }
 
     pub async fn shutdown(&self) -> Result<(), AppError>
@@ -148,6 +167,12 @@ where
                                             .map_err(|_| AppError::unavailable("turn control stopped"));
                                         let _ignored = response.send(result);
                                     }
+                                    Some(RuntimeCommand::SetSystemPrompt { response, .. }) =>
+                                    {
+                                        let _ignored = response.send(Err(AppError::invalid_transition(
+                                            "cannot change persona during an active turn",
+                                        )));
+                                    }
                                     Some(RuntimeCommand::Shutdown { response }) =>
                                     {
                                         let result = control
@@ -196,7 +221,11 @@ where
                     "runtime has no active turn",
                 )));
             }
-            RuntimeCommand::Shutdown { response } =>
+            RuntimeCommand::SetSystemPrompt { prompt, response } =>
+            {
+                let _ignored = response.send(runtime.set_system_prompt(prompt));
+            }
+                        RuntimeCommand::Shutdown { response } =>
             {
                 let result = runtime.stop().await;
                 let _ignored = response.send(result);

@@ -279,7 +279,7 @@ impl SetupApp
             .unwrap_or_else(|| PathBuf::from("control.token"));
         let token_path = token_path.to_string_lossy().replace('\\', "/");
         let common = format!(
-            "# AIex generated configuration\n[model]\nbackend = \"{}\"\n\n[persona]\nname = \"{}\"\nsystem_prompt = \"\"\ntone = \"warm, concise, and curious\"\ntaboos = []\nlive_mode = \"controlled\"\n\n[control]\nenabled = true\nbind = \"127.0.0.1:7878\"\ntoken_path = \"{token_path}\"\nmax_message_bytes = 65536\n\n[vts]\nenabled = false\n\n[memory]\nenabled = false\n\n[bilibili]\nenabled = {}\nroom_id = {}\nendpoint = \"wss://broadcastlv.chat.bilibili.com:443/sub\"\ncookie_env = \"{}\"\nreconnect_delay_ms = 2000\nauto_react = false\nresponse_mode = \"suggest\"\nreaction_cooldown_ms = 5000\n",
+            "# AIex generated configuration\n[model]\nbackend = \"{}\"\n\n[persona]\nprofile_id = \"default\"\nrevision = 1\nname = \"{}\"\nsystem_prompt = \"\"\ntone = \"warm, concise, and curious\"\ntaboos = []\nlive_mode = \"controlled\"\n\n[control]\nenabled = true\nbind = \"127.0.0.1:7878\"\ntoken_path = \"{token_path}\"\nmax_message_bytes = 65536\n\n[vts]\nenabled = false\n\n[memory]\nenabled = false\n\n[bilibili]\nenabled = {}\nroom_id = {}\nendpoint = \"wss://broadcastlv.chat.bilibili.com:443/sub\"\ncookie_env = \"{}\"\nreconnect_delay_ms = 2000\nauto_react = false\nresponse_mode = \"suggest\"\nreaction_cooldown_ms = 5000\n",
             self.provider.backend(),
             self.persona_name.replace('"', "'"),
             self.bilibili_enabled,

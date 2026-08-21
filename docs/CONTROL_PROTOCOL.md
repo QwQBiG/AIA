@@ -36,11 +36,13 @@ max_message_bytes = 65536
 {"type":"submit","text":"你好"}
 {"type":"interrupt","reason":"user barge-in"}
 {"type":"status"}
+{"type":"persona"}
+{"type":"set_persona","profile":{"profile_id":"default","revision":2,"name":"AIex","system_prompt":"","tone":"warm, concise, and curious","taboos":[],"live_mode":"controlled"}}
 {"type":"events","after":42,"limit":256}
 {"type":"emergency_stop"}
 ```
 
-`submit` 返回 accepted 后异步执行。客户端通过 `status` 获取最新只读快照，通过
+`persona` 读取当前角色快照；`set_persona` 经过版本/字段校验后更新 Runtime 系统提示词，并广播 `persona_changed` 事件。活动回合期间切换会失败，避免一半回复使用旧人格、一半回复使用新人格。`submit` 返回 accepted 后异步执行。客户端通过 `status` 获取最新只读快照，通过
 `events` 从指定序号之后重放有界事件历史。`limit` 必须位于 1 到 1000；事件带单调递增序号，客户端检测到缺口时必须暂停应用后续事件并重新拉取。
 
 ## 响应

@@ -234,6 +234,7 @@ where
 #[cfg(test)]
 mod tests
 {
+    use ai_ex_domain::PersonaSnapshot;
     use ai_ex_observability::RuntimeSnapshot;
 
     use super::*;
@@ -251,6 +252,7 @@ mod tests
             match command
             {
                 ControlCommand::Status => Ok(ControlPayload::Snapshot(RuntimeSnapshot::default())),
+                ControlCommand::Persona => Ok(ControlPayload::Persona(PersonaSnapshot::default())),
                 _ => Ok(ControlPayload::Accepted),
             }
         }

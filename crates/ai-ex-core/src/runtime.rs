@@ -99,6 +99,21 @@ where
         }
     }
 
+    pub fn set_system_prompt(&mut self, prompt: impl Into<String>) -> Result<(), AppError>
+    {
+        if self.engine.active_turn().is_some()
+        {
+            return Err(AppError::invalid_transition("cannot change persona during an active turn"));
+        }
+        let prompt = prompt.into();
+        if prompt.chars().count() > 16_384
+        {
+            return Err(AppError::configuration("system prompt is too long"));
+        }
+        self.system_prompt = prompt;
+        Ok(())
+    }
+
     pub fn state(&self) -> ConversationState
     {
         self.engine.state()

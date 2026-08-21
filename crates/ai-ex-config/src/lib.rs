@@ -186,6 +186,8 @@ pub struct ModelConfig
 #[serde(default)]
 pub struct PersonaConfig
 {
+    pub profile_id: String,
+    pub revision: u64,
     pub name: String,
     pub system_prompt: String,
     pub tone: String,
@@ -197,7 +199,10 @@ impl PersonaConfig
 {
     fn validate(&self) -> Result<(), AppError>
     {
-        if self.name.trim().is_empty()
+        if self.profile_id.trim().is_empty()
+            || self.profile_id.chars().count() > 128
+            || self.revision == 0
+            || self.name.trim().is_empty()
             || self.name.chars().count() > 128
             || self.system_prompt.chars().count() > 16_384
             || self.tone.chars().count() > 512
@@ -214,6 +219,8 @@ impl Default for PersonaConfig
     fn default() -> Self
     {
         Self {
+            profile_id: "default".to_owned(),
+            revision: 1,
             name: "AIex".to_owned(),
             system_prompt: String::new(),
             tone: "warm, concise, and curious".to_owned(),

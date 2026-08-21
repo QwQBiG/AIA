@@ -42,6 +42,7 @@ pub enum SystemEvent
         text: String,
         automatic: bool,
     },
+    PersonaChanged { profile_id: String, revision: u64 },
     Fault { message: String },
 }
 

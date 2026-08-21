@@ -23,7 +23,7 @@ use ai_ex_core::{
     ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, StageOutput,
     spawn_runtime,
 };
-use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, LiveResponseMode, SystemEvent, TurnId};
+use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, LiveResponseMode, PersonaSnapshot, SystemEvent, TurnId};
 use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, PublishOutcome};
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
@@ -1091,6 +1091,7 @@ struct ServiceControl
     events: EventHub,
     safety: Arc<SafetyGate>,
     health: Arc<RwLock<Vec<ComponentHealth>>>,
+    persona: Arc<RwLock<PersonaSnapshot>>,
 }
 
 #[async_trait::async_trait]
@@ -1132,6 +1133,19 @@ impl ControlBackend for ServiceControl
                 Ok(ControlPayload::Accepted)
             }
             ControlCommand::Status => Ok(ControlPayload::Snapshot(self.events.current())),
+            ControlCommand::Persona => Ok(ControlPayload::Persona(self.persona.read().await.clone())),
+            ControlCommand::SetPersona { profile } =>
+            {
+                profile.validate()?;
+                self.runtime
+                    .set_system_prompt(profile.compiled_system_prompt())
+                    .await?;
+                let profile_id = profile.profile_id.clone();
+                let revision = profile.revision;
+                *self.persona.write().await = profile;
+                self.events.publish_now(SystemEvent::PersonaChanged { profile_id, revision });
+                Ok(ControlPayload::Accepted)
+            },
             ControlCommand::Health => Ok(ControlPayload::Health(self.health.read().await.clone())),
             ControlCommand::Events { after, limit } =>
             {
@@ -1184,11 +1198,22 @@ async fn spawn_control(
     )
     .await?;
     let address = server.local_addr()?;
+    let persona = PersonaSnapshot {
+        profile_id: config.persona.profile_id.clone(),
+        revision: config.persona.revision,
+        name: config.persona.name.clone(),
+        system_prompt: config.persona.system_prompt.clone(),
+        tone: config.persona.tone.clone(),
+        taboos: config.persona.taboos.clone(),
+        live_mode: config.persona.live_mode.clone(),
+    };
+    persona.validate()?;
     let backend = Arc::new(ServiceControl {
         runtime,
         events,
         safety,
         health,
+        persona: Arc::new(RwLock::new(persona)),
     });
     tracing::info!(%address, "local control server ready");
     Ok(Some(tokio::spawn(async move

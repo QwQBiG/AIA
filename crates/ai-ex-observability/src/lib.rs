@@ -148,11 +148,31 @@ impl EventHub
                 }
                 SystemEvent::ModelChunk { .. }
                 | SystemEvent::LiveEventReceived { .. }
-                | SystemEvent::LiveResponseSuggested { .. } =>
+                | SystemEvent::LiveResponseSuggested { .. }
+                | SystemEvent::PersonaChanged { .. } =>
                 {
                 }
             }
         });
+    }
+
+    pub fn publish_now(&self, event: SystemEvent)
+    {
+        let sequence = self.sequence.fetch_add(1, Ordering::AcqRel) + 1;
+        self.update(&event, sequence);
+        let event = SequencedEvent { sequence, event };
+        {
+            let mut history = self
+                .history
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if history.len() == self.capacity
+            {
+                history.pop_front();
+            }
+            history.push_back(event.clone());
+        }
+        let _ignored = self.events.send(event);
     }
 }
 

@@ -4,12 +4,16 @@
 
 ```toml
 [persona]
+profile_id = "default"
+revision = 1
 name = "AIex"
 system_prompt = "你是一个友好的 AI 虚拟主播。"
 tone = "warm, concise, and curious"
 taboos = ["不要泄露密钥", "不要绕过急停"]
 live_mode = "controlled"
 ```
+
+`profile_id` 与 `revision` 组成角色档案版本；服务启动时加载初始版本，控制协议可在无活动回合时热切换。切换失败不会替换当前人格。
 
 ## 本地记忆分类
 
