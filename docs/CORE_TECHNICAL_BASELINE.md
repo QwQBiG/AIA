@@ -206,3 +206,4 @@ crates/
 - Typed automation bridge：`PluginAutomationPort` 将安全许可与版本化 observe/execute/interrupt 请求连接起来，服务端 stdio 适配器只负责 JSON-RPC 编解码，核心状态机不感知插件协议。
 - 首次设置连通性检查：桌面向导后台探测 HTTP/HTTPS 地址，不阻塞 UI；DeepSeek 密钥不落盘，服务启动仍做完整 provider health。
 - Provider 健康诊断：DeepSeek、KoboldCpp、Ollama 将 HTTP 鉴权/地址/限流/服务端故障与 timeout/connect 错误转换为可操作中文详情，并保留 provider 原始边界。
+- 模型清单验证：DeepSeek `/models` 和 Ollama `/api/tags` 在可解析时检查 configured model；非标准兼容响应降级为“已连接但未验证”，不伪造可用状态。

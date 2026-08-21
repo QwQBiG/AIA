@@ -9,6 +9,7 @@ use ai_ex_domain::{AppError, ComponentHealth, TurnId};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use protocol::{StreamEvent, drain_lines, parse_event, request_body};
+use serde_json::Value;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::AbortHandle;
 
@@ -71,30 +72,68 @@ impl DeepSeekClient
     pub async fn health(&self) -> ComponentHealth
     {
         let url = format!("{}/models", self.settings.base_url);
-        match self
+        let response = match self
             .client
             .get(url)
             .bearer_auth(&self.settings.api_key)
             .send()
             .await
         {
-            Ok(response) if response.status().is_success() => ComponentHealth {
+            Ok(response) => response,
+            Err(error) =>
+            {
+                return ComponentHealth::unavailable(
+                    "deepseek",
+                    request_failure_detail(&error),
+                );
+            }
+        };
+        let status = response.status();
+        if !status.is_success()
+        {
+            return ComponentHealth::unavailable(
+                "deepseek",
+                http_failure_detail(status.as_u16()),
+            );
+        }
+        let body = match response.json::<Value>().await
+        {
+            Ok(body) => body,
+            Err(error) =>
+            {
+                return ComponentHealth::unavailable(
+                    "deepseek",
+                    format!("/models 响应无法解析；检查兼容 API：{error}"),
+                );
+            }
+        };
+        match listed_model(&body, &self.settings.model)
+        {
+            Some(true) => ComponentHealth {
                 component: "deepseek".to_owned(),
                 ready: true,
-                detail: format!("API 可用；configured model={}", self.settings.model),
+                detail: format!("API 可用；model={} 已列出", self.settings.model),
             },
-            Ok(response) => ComponentHealth::unavailable(
+            Some(false) => ComponentHealth::unavailable(
                 "deepseek",
-                http_failure_detail(response.status().as_u16()),
+                format!("API 可用但 model={} 未列出；检查模型名称或账户权限", self.settings.model),
             ),
-            Err(error) => ComponentHealth::unavailable(
-                "deepseek",
-                request_failure_detail(&error),
-            ),
+            None => ComponentHealth {
+                component: "deepseek".to_owned(),
+                ready: true,
+                detail: format!("API 可用；model={} 未能通过 /models 验证", self.settings.model),
+            },
         }
     }
 }
 
+fn listed_model(body: &Value, model: &str) -> Option<bool>
+{
+    let entries = body.get("data")?.as_array()?;
+    Some(entries.iter().any(|entry| {
+        entry.get("id").and_then(Value::as_str) == Some(model)
+    }))
+}
 fn http_failure_detail(status: u16) -> String
 {
     match status
@@ -247,6 +286,15 @@ mod tests
     {
         assert!(http_failure_detail(401).contains("鉴权失败"));
         assert!(http_failure_detail(503).contains("服务端故障"));
+    }
+
+    #[test]
+    fn detects_configured_model_in_openai_listing()
+    {
+        let body = serde_json::json!({"data": [{"id": "deepseek-v4-flash"}]});
+        assert_eq!(listed_model(&body, "deepseek-v4-flash"), Some(true));
+        assert_eq!(listed_model(&body, "missing"), Some(false));
+        assert_eq!(listed_model(&serde_json::json!({}), "missing"), None);
     }
 
     #[test]

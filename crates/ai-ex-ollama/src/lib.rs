@@ -10,6 +10,7 @@ use ai_ex_domain::{AppError, ComponentHealth, TurnId};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use protocol::{ChatChunk, ChatRequest, drain_lines};
+use serde_json::Value;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::AbortHandle;
 
@@ -46,25 +47,67 @@ impl OllamaClient
     pub async fn health(&self) -> ComponentHealth
     {
         let url = format!("{}/api/tags", self.base_url);
-        match self.client.get(url).send().await
+        let response = match self.client.get(url).send().await
         {
-            Ok(response) if response.status().is_success() => ComponentHealth {
+            Ok(response) => response,
+            Err(error) =>
+            {
+                return ComponentHealth::unavailable(
+                    "ollama",
+                    request_failure_detail(&error),
+                );
+            }
+        };
+        let status = response.status();
+        if !status.is_success()
+        {
+            return ComponentHealth::unavailable(
+                "ollama",
+                http_failure_detail(status.as_u16()),
+            );
+        }
+        let body = match response.json::<Value>().await
+        {
+            Ok(body) => body,
+            Err(error) =>
+            {
+                return ComponentHealth::unavailable(
+                    "ollama",
+                    format!("/api/tags 响应无法解析：{error}"),
+                );
+            }
+        };
+        match listed_model(&body, &self.model)
+        {
+            Some(true) => ComponentHealth {
                 component: "ollama".to_owned(),
                 ready: true,
-                detail: format!("Ollama 服务可用；configured model={}", self.model),
+                detail: format!("Ollama 服务可用；model={} 已安装", self.model),
             },
-            Ok(response) => ComponentHealth::unavailable(
+            Some(false) => ComponentHealth::unavailable(
                 "ollama",
-                http_failure_detail(response.status().as_u16()),
+                format!("Ollama 服务可用但 model={} 未安装；先执行 ollama pull", self.model),
             ),
-            Err(error) => ComponentHealth::unavailable(
-                "ollama",
-                request_failure_detail(&error),
-            ),
+            None => ComponentHealth {
+                component: "ollama".to_owned(),
+                ready: true,
+                detail: format!("Ollama 服务可用；model={} 未能通过 /api/tags 验证", self.model),
+            },
         }
     }
 }
 
+fn listed_model(body: &Value, model: &str) -> Option<bool>
+{
+    let entries = body.get("models")?.as_array()?;
+    Some(entries.iter().any(|entry| {
+        entry
+            .get("name")
+            .or_else(|| entry.get("model"))
+            .and_then(Value::as_str)
+            == Some(model)
+    }))
+}
 fn http_failure_detail(status: u16) -> String
 {
     match status
@@ -206,6 +249,15 @@ async fn process_line(
 mod tests
 {
     use super::*;
+
+    #[test]
+    fn detects_installed_model()
+    {
+        let body = serde_json::json!({"models": [{"name": "llama3.2:latest"}]});
+        assert_eq!(listed_model(&body, "llama3.2:latest"), Some(true));
+        assert_eq!(listed_model(&body, "missing"), Some(false));
+        assert_eq!(listed_model(&serde_json::json!({}), "missing"), None);
+    }
 
     #[test]
     fn classifies_missing_service_endpoint()
