@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ai_ex_audio::{AudioPlayer, SpeechQueue, SpeechReceiver};
+use ai_ex_automation::{AutomationPluginRequest, AutomationPluginResponse, AutomationPluginTransport};
 use ai_ex_bilibili::{BilibiliConnector, BilibiliSettings};
 use ai_ex_asr::WhisperHttpTranscriber;
 use ai_ex_audit::JsonlAuditLog;
@@ -605,6 +606,37 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
     }
 }
 
+pub struct StdioAutomationTransport
+{
+    plugin: StdioPlugin,
+}
+
+impl StdioAutomationTransport
+{
+    pub fn new(plugin: StdioPlugin) -> Self
+    {
+        Self { plugin }
+    }
+}
+
+#[async_trait]
+impl AutomationPluginTransport for StdioAutomationTransport
+{
+    async fn call(
+        &mut self,
+        request: AutomationPluginRequest,
+    ) -> Result<AutomationPluginResponse, AppError>
+    {
+        request.validate()?;
+        let params = serde_json::to_value(&request)
+            .map_err(|error| AppError::protocol(format!("automation plugin request encode failed: {error}")))?;
+        let value = self.plugin.request("automation", params).await?;
+        let response: AutomationPluginResponse = serde_json::from_value(value)
+            .map_err(|error| AppError::protocol(format!("invalid automation plugin response: {error}")))?;
+        response.validate()?;
+        Ok(response)
+    }
+}
 struct PluginRuntime
 {
     registry: PluginRegistry,

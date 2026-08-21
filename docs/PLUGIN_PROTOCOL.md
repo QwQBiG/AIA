@@ -44,3 +44,4 @@ Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 
 
 服务配置中的 `[plugins]` 默认 `enabled = false`。启用后只启动显式列出的 `id/program/args`，启动时要求 manifest 的 ID 与配置一致，并以 5 秒超时读取 health；单个插件失败只会形成 `plugin:<id>` 不可用状态。
 服务保持已启动的插件进程，并每 15 秒刷新一次 health；检测到进程退出时只更新状态，不自动重启，避免外部插件绕过人工策略反复执行。
+自动化桥接层位于 `ai-ex-automation`：`PluginAutomationPort` 先检查 permit、能力和动作，再通过 `AutomationPluginTransport` 发出 typed 请求；服务端的 `StdioAutomationTransport` 将其映射为 JSON-RPC `automation` 方法，响应必须通过 schema、payload 和 request UUID 校验。

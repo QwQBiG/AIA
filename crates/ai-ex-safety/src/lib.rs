@@ -61,6 +61,7 @@ pub struct Permit
     id: Uuid,
     capability: Capability,
     target: String,
+    rationale: String,
     emergency_stop: Arc<AtomicBool>,
 }
 
@@ -79,6 +80,11 @@ impl Permit
     pub fn target(&self) -> &str
     {
         &self.target
+    }
+
+    pub fn rationale(&self) -> &str
+    {
+        &self.rationale
     }
 
     pub fn ensure_active(&self) -> Result<(), AppError>
@@ -134,6 +140,7 @@ impl SafetyGate
             id: Uuid::new_v4(),
             capability: request.capability,
             target: target.to_owned(),
+            rationale: request.rationale,
             emergency_stop: self.emergency_stop.clone(),
         })
     }
@@ -237,6 +244,7 @@ mod tests
             })
             .expect("authorized request");
 
+        assert_eq!(permit.rationale(), "inspect avatar state");
         permit.ensure_active().expect("active permit");
         gate.trigger_emergency_stop();
         assert!(permit.ensure_active().is_err());
