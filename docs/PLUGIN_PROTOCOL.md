@@ -23,3 +23,5 @@ ai-ex-stage 提供平台无关的 StageAction、StageCapability 和 StageExecuto
 `StageRouter` 按 `StageCapability` 把动作分发给所有匹配的执行器，并把 `Stop`/急停广播到全部执行器；新增 VTS、音频或 OBS 实现不需要修改会话状态机。
 
 Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 桥接到 `StageRouter`。因此会话状态机只面向语音和化身抽象，具体的 VTS、音频、字幕或 OBS Provider 仍留在舞台适配器边界。
+
+当路由器声明 `Subtitle` 能力时，`StageSpeechPort` 会为每个完整句子生成受限时长字幕动作；没有字幕执行器时，语音路径保持兼容。

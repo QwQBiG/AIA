@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use ai_ex_domain::{AppError, Emotion, TurnId};
-use ai_ex_stage::{StageAction, StageExecutor, StageRouter};
+use ai_ex_stage::{StageAction, StageCapability, StageExecutor, StageRouter};
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
@@ -49,13 +49,24 @@ impl crate::SpeechPort for StageSpeechPort
     async fn enqueue(&mut self, turn_id: TurnId, sentence: String) -> Result<(), AppError>
     {
         let mut router = self.router.lock().await;
+        let subtitle_enabled = router.capabilities().contains(&StageCapability::Subtitle);
         router
             .execute(StageAction::Speak {
                 turn_id,
-                text: sentence,
+                text: sentence.clone(),
                 interruptible: true,
             })
-            .await
+            .await?;
+        if subtitle_enabled
+        {
+            router
+                .execute(StageAction::Subtitle {
+                    text: sentence.clone(),
+                    duration_ms: subtitle_duration_ms(&sentence),
+                })
+                .await?;
+        }
+        Ok(())
     }
 
     async fn interrupt(&mut self) -> Result<(), AppError>
@@ -65,6 +76,11 @@ impl crate::SpeechPort for StageSpeechPort
     }
 }
 
+fn subtitle_duration_ms(text: &str) -> u64
+{
+    let characters = text.chars().count() as u64;
+    characters.saturating_mul(72).clamp(1_200, 12_000)
+}
 #[derive(Clone)]
 pub struct StageAvatarPort
 {
