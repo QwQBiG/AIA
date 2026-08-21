@@ -13,6 +13,7 @@ pub struct AppConfig
 {
     pub model: ModelConfig,
     pub conversation: ConversationConfig,
+    pub persona: PersonaConfig,
     pub deepseek: DeepSeekConfig,
     pub ollama: OllamaConfig,
     pub koboldcpp: KoboldCppConfig,
@@ -46,9 +47,34 @@ impl AppConfig
         Ok(config)
     }
 
+    pub fn effective_system_prompt(&self) -> String
+    {
+        let base = if self.persona.system_prompt.trim().is_empty()
+        {
+            self.conversation.system_prompt.trim().to_owned()
+        }
+        else
+        {
+            self.persona.system_prompt.trim().to_owned()
+        };
+        let mut prompt = format!("角色名：{}\n语气：{}", self.persona.name, self.persona.tone);
+        if !base.is_empty()
+        {
+            prompt.push('\n');
+            prompt.push_str(&base);
+        }
+        if !self.persona.taboos.is_empty()
+        {
+            prompt.push_str("\n禁忌：");
+            prompt.push_str(&self.persona.taboos.join("；"));
+        }
+        prompt
+    }
+
     pub fn validate(&self) -> Result<(), AppError>
     {
         self.conversation.validate()?;
+        self.persona.validate()?;
         if self.model.backend == ModelBackend::DeepSeek
         {
             self.deepseek.validate()?;
@@ -137,6 +163,47 @@ pub enum ModelBackend
 pub struct ModelConfig
 {
     pub backend: ModelBackend,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PersonaConfig
+{
+    pub name: String,
+    pub system_prompt: String,
+    pub tone: String,
+    pub taboos: Vec<String>,
+    pub live_mode: String,
+}
+
+impl PersonaConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if self.name.trim().is_empty()
+            || self.name.chars().count() > 128
+            || self.system_prompt.chars().count() > 16_384
+            || self.tone.chars().count() > 512
+            || self.taboos.iter().any(|item| item.chars().count() > 512)
+        {
+            return Err(AppError::configuration("persona configuration is outside supported bounds"));
+        }
+        Ok(())
+    }
+}
+
+impl Default for PersonaConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            name: "AIex".to_owned(),
+            system_prompt: String::new(),
+            tone: "warm, concise, and curious".to_owned(),
+            taboos: Vec::new(),
+            live_mode: "controlled".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

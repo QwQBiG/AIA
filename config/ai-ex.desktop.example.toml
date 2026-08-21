@@ -10,6 +10,13 @@ timeout_seconds = 120
 thinking = false
 reasoning_effort = "high"
 
+[persona]
+name = "AIex"
+system_prompt = ""
+tone = "warm, concise, and curious"
+taboos = []
+live_mode = "controlled"
+
 [control]
 enabled = true
 bind = "127.0.0.1:7878"

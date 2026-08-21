@@ -184,7 +184,7 @@ async fn run() -> Result<(), AppError>
         memory,
         events,
         ConversationPolicy {
-            system_prompt: config.conversation.system_prompt.clone(),
+            system_prompt: config.effective_system_prompt(),
             history_turn_limit: config.conversation.history_turn_limit,
             memory_recall_limit: config.conversation.memory_recall_limit,
         },

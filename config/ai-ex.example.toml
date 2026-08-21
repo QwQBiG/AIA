@@ -14,6 +14,13 @@ system_prompt = ""
 history_turn_limit = 12
 memory_recall_limit = 6
 
+[persona]
+name = "AIex"
+system_prompt = ""
+tone = "warm, concise, and curious"
+taboos = []
+live_mode = "controlled"
+
 [ollama]
 base_url = "http://127.0.0.1:11434"
 model = "llama3.2:latest"
