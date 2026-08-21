@@ -46,6 +46,9 @@ struct SetupApp
     endpoint: String,
     api_key: String,
     persona_name: String,
+    bilibili_enabled: bool,
+    bilibili_room_id: String,
+    bilibili_cookie_env: String,
     start_service: bool,
     status: String,
     result: Arc<Mutex<Option<SetupResult>>>,
@@ -97,6 +100,9 @@ impl SetupApp
             endpoint: "https://api.deepseek.com".to_owned(),
             api_key: String::new(),
             persona_name: "AIex".to_owned(),
+            bilibili_enabled: false,
+            bilibili_room_id: String::new(),
+            bilibili_cookie_env: "BILIBILI_COOKIE".to_owned(),
             start_service: true,
             status: String::new(),
             result,
@@ -141,6 +147,23 @@ impl SetupApp
             self.status = "DeepSeek 需要 API Key；可以粘贴到这里，或先设置 DEEPSEEK_API_KEY 环境变量。密钥不会写入配置文件。".to_owned();
             return;
         }
+        let bilibili_room_id = if self.bilibili_enabled
+        {
+            match self.bilibili_room_id.trim().parse::<u64>()
+            {
+                Ok(room_id) if room_id > 0 => room_id,
+                _ =>
+                {
+                    self.status = "启用 Bilibili 时必须填写大于 0 的房间号。".to_owned();
+                    return;
+                }
+            }
+        }
+        else
+        {
+            0
+        };
+
         let Some(parent) = self.config_path.parent() else
         {
             self.status = "配置路径没有有效目录。".to_owned();
@@ -148,7 +171,7 @@ impl SetupApp
         };
         let token_path = parent.join("control.token");
         let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let config = self.config_text();
+        let config = self.config_text(bilibili_room_id);
         let result = std::fs::create_dir_all(parent)
             .and_then(|_| std::fs::write(&self.config_path, config))
             .and_then(|_| std::fs::write(&token_path, format!("{token}\n")));
@@ -178,7 +201,7 @@ impl SetupApp
         }
     }
 
-    fn config_text(&self) -> String
+    fn config_text(&self, bilibili_room_id: u64) -> String
     {
         let token_path = self
             .config_path
@@ -187,9 +210,12 @@ impl SetupApp
             .unwrap_or_else(|| PathBuf::from("control.token"));
         let token_path = token_path.to_string_lossy().replace('\\', "/");
         let common = format!(
-            "# AIex generated configuration\n[model]\nbackend = \"{}\"\n\n[persona]\nname = \"{}\"\nsystem_prompt = \"\"\ntone = \"warm, concise, and curious\"\ntaboos = []\nlive_mode = \"controlled\"\n\n[control]\nenabled = true\nbind = \"127.0.0.1:7878\"\ntoken_path = \"{token_path}\"\nmax_message_bytes = 65536\n\n[vts]\nenabled = false\n\n[memory]\nenabled = false\n",
+            "# AIex generated configuration\n[model]\nbackend = \"{}\"\n\n[persona]\nname = \"{}\"\nsystem_prompt = \"\"\ntone = \"warm, concise, and curious\"\ntaboos = []\nlive_mode = \"controlled\"\n\n[control]\nenabled = true\nbind = \"127.0.0.1:7878\"\ntoken_path = \"{token_path}\"\nmax_message_bytes = 65536\n\n[vts]\nenabled = false\n\n[memory]\nenabled = false\n\n[bilibili]\nenabled = {}\nroom_id = {}\nendpoint = \"wss://broadcastlv.chat.bilibili.com:443/sub\"\ncookie_env = \"{}\"\nreconnect_delay_ms = 2000\n",
             self.provider.backend(),
             self.persona_name.replace('"', "'"),
+            self.bilibili_enabled,
+            bilibili_room_id,
+            self.bilibili_cookie_env.trim().replace(char::from(34), "'"),
         );
         match self.provider
         {
@@ -260,6 +286,21 @@ impl eframe::App for SetupApp
                     ui.label("DeepSeek API Key");
                     ui.add(egui::TextEdit::singleline(&mut self.api_key).password(true));
                 });
+            }
+            ui.checkbox(&mut self.bilibili_enabled, "接收 Bilibili 直播事件（可稍后开启）");
+            if self.bilibili_enabled
+            {
+                ui.horizontal(|ui|
+                {
+                    ui.label("直播间号");
+                    ui.text_edit_singleline(&mut self.bilibili_room_id);
+                });
+                ui.horizontal(|ui|
+                {
+                    ui.label("Cookie 环境变量名");
+                    ui.text_edit_singleline(&mut self.bilibili_cookie_env);
+                });
+                ui.label("只填写环境变量名，不要把 Cookie 粘贴到配置或聊天窗口。");
             }
             ui.checkbox(&mut self.start_service, "保存后自动启动服务（推荐）");
             ui.add_space(8.0);

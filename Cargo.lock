@@ -270,6 +270,7 @@ dependencies = [
  "ai-ex-asr",
  "ai-ex-audio",
  "ai-ex-audit",
+ "ai-ex-bilibili",
  "ai-ex-capture",
  "ai-ex-config",
  "ai-ex-control",

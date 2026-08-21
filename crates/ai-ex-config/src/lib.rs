@@ -24,6 +24,7 @@ pub struct AppConfig
     pub duplex: DuplexConfig,
     pub control: ControlConfig,
     pub vision: VisionConfig,
+    pub bilibili: BilibiliConfig,
     pub safety: SafetyConfig,
 }
 
@@ -137,6 +138,7 @@ impl AppConfig
         self.duplex.validate()?;
         self.control.validate()?;
         self.vision.validate()?;
+        self.bilibili.validate()?;
         Ok(())
     }
 }
@@ -604,6 +606,48 @@ impl Default for VisionConfig
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct BilibiliConfig
+{
+    pub enabled: bool,
+    pub room_id: u64,
+    pub endpoint: String,
+    pub cookie_env: Option<String>,
+    pub reconnect_delay_ms: u64,
+}
+
+impl BilibiliConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if !self.enabled
+        {
+            return Ok(());
+        }
+        if self.room_id == 0
+            || (!self.endpoint.starts_with("ws://") && !self.endpoint.starts_with("wss://"))
+            || self.reconnect_delay_ms == 0
+        {
+            return Err(AppError::configuration("enabled bilibili configuration is invalid"));
+        }
+        Ok(())
+    }
+}
+
+impl Default for BilibiliConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            enabled: false,
+            room_id: 0,
+            endpoint: "wss://broadcastlv.chat.bilibili.com:443/sub".to_owned(),
+            cookie_env: None,
+            reconnect_delay_ms: 2_000,
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SafetyConfig
 {
     pub automation_enabled: bool,
@@ -689,6 +733,18 @@ mod tests
         assert!(!config.safety.automation_enabled);
     }
 
+    #[test]
+    fn validates_bilibili_only_when_enabled()
+    {
+        let mut config = AppConfig::default();
+        assert!(config.validate().is_ok());
+        config.bilibili.enabled = true;
+        assert!(config.validate().is_err());
+        config.bilibili.room_id = 123;
+        assert!(config.validate().is_ok());
+        config.bilibili.endpoint = "http://127.0.0.1:1".to_owned();
+        assert!(config.validate().is_err());
+    }
     #[test]
     fn validates_only_the_selected_model_backend()
     {

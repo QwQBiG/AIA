@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ai_ex_audio::{AudioPlayer, SpeechQueue, SpeechReceiver};
+use ai_ex_bilibili::{BilibiliConnector, BilibiliSettings};
 use ai_ex_asr::WhisperHttpTranscriber;
 use ai_ex_audit::JsonlAuditLog;
-use ai_ex_config::{AppConfig, ModelBackend};
+use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend};
 use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
@@ -190,6 +191,7 @@ async fn run() -> Result<(), AppError>
     let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player));
     let event_hub = EventHub::new(256)?;
     let events = TeeEventSink::new(ConsoleEvents, event_hub.clone());
+    let live_memory = memory.clone();
     let runtime = Runtime::with_policy(
         model,
         speech,
@@ -211,6 +213,7 @@ async fn run() -> Result<(), AppError>
         return Ok(());
     }
 
+    let bilibili_task = spawn_bilibili(&config.bilibili, live_memory)?;
     let control_task = spawn_control(
         &config,
         runtime.clone(),
@@ -271,6 +274,10 @@ async fn run() -> Result<(), AppError>
             }
         });
     }
+    if let Some(task) = bilibili_task
+    {
+        task.abort();
+    }
     if let Some(task) = duplex_task
     {
         task.abort();
@@ -284,6 +291,58 @@ async fn run() -> Result<(), AppError>
     Ok(())
 }
 
+fn spawn_bilibili(
+    config: &BilibiliConfig,
+    memory: MemoryStore,
+) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
+{
+    if !config.enabled
+    {
+        return Ok(None);
+    }
+    let mut settings = BilibiliSettings::new(config.room_id)?;
+    settings.endpoint = config.endpoint.clone();
+    settings.cookie_env = config.cookie_env.clone().filter(|value| !value.trim().is_empty());
+    settings.reconnect_delay_ms = config.reconnect_delay_ms;
+    let task = tokio::spawn(async move
+    {
+        let mut memory = memory;
+        let mut connector = BilibiliConnector::new(settings);
+        let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
+        loop
+        {
+            match connector.next_events().await
+            {
+                Ok(events) =>
+                {
+                    for event in events
+                    {
+                        if bus.publish(event) != PublishOutcome::Accepted
+                        {
+                            continue;
+                        }
+                        while let Ok(delivered) = receiver.try_recv()
+                        {
+                            for projection in project_memory(&delivered)
+                            {
+                                if let Err(error) = memory.remember_projection(&projection).await
+                                {
+                                    tracing::error!(%error, "bilibili memory projection failed");
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(error) =>
+                {
+                    tracing::warn!(%error, "bilibili event input stopped; retrying");
+                    tokio::time::sleep(Duration::from_millis(2_000)).await;
+                }
+            }
+        }
+    });
+    Ok(Some(task))
+}
 async fn replay_events_to_memory(
     path: &Path,
     memory: &mut MemoryStore,

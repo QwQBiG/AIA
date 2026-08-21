@@ -182,3 +182,13 @@ crates/
 尚未完成：ASR 实机契约、桌面壳依赖编译/视觉验收、视觉/自动化适配器、发布打包和旧 Python 主链删除。`native-playback`、`native-capture` 与 eframe 的外部依赖因下载超时或授权用量限制尚未完成编译；默认 Rust 主线不受影响。
 
 逐批删除条件和精确范围见 `LEGACY_RETIREMENT.md`。
+
+## 11. 当前可用性增量（Phase 13）
+
+- 小白入口：独立 eframe 桌面端首次设置向导可选择 DeepSeek、KoboldCpp、Ollama，生成本地配置与控制令牌，并可选配置 Bilibili 房间号。
+- 开发者入口：桌面开发者面板显示结构化控制事件，启动终端保留服务原始 stdout/stderr；两者共用本地控制协议。
+- Bilibili：服务读取配置后在后台启动隔离连接任务，统一事件先经 EventBus，再写入本地记忆投影；默认关闭，断线只影响平台输入。
+- 并发安全：MemoryStore 的克隆实例共享写锁，运行时与直播输入不会交错破坏 JSONL 文件。
+- 验证：workspace 测试、严格 Clippy、架构门禁、Allman 门禁、git diff 检查，以及独立桌面端离线编译均通过。
+
+下一步优先把已接收的直播事件送入 Agent 编排和受控响应策略，再补 Brotli 解压契约测试；OBS、TTS 舞台编排和游戏动作继续保持独立插件边界。

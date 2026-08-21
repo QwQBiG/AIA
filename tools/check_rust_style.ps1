@@ -13,7 +13,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $resolvedPath = (Resolve-Path -LiteralPath $ScanPath).Path
-$files = Get-ChildItem -LiteralPath $resolvedPath -Recurse -File -Filter '*.rs'
+$files = Get-ChildItem -LiteralPath $resolvedPath -Recurse -File -Filter '*.rs' | Where-Object { $_.FullName -notmatch '[\\/](target|.git)[\\/]' }
 $violations = [System.Collections.Generic.List[object]]::new()
 $sameLineBrace = '^\s*(?:if|else(?:\s+if)?|for|while|loop|match)\b[^\{]*\{\s*$'
 

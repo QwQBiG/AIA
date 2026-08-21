@@ -94,3 +94,11 @@ emergency_hotkey = "F9"
 audit_path = "logs/automation-audit.jsonl"
 allowed_capabilities = []
 allowed_targets = []
+
+[bilibili]
+# Set enabled = true only after configuring a valid room_id.
+enabled = false
+room_id = 0
+endpoint = "wss://broadcastlv.chat.bilibili.com:443/sub"
+cookie_env = ""
+reconnect_delay_ms = 2000

@@ -4,6 +4,7 @@ mod record;
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ai_ex_core::MemoryPort;
@@ -11,13 +12,20 @@ use ai_ex_domain::{AppError, ComponentHealth, MemoryKind, MemoryProjection, Mess
 use async_trait::async_trait;
 use record::MemoryRecord;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct MemoryStore
+{
+    inner: Arc<MemoryInner>,
+}
+
+struct MemoryInner
 {
     path: PathBuf,
     records: RwLock<Vec<MemoryRecord>>,
+    write_lock: Mutex<()>,
     enabled: bool,
 }
 
@@ -45,29 +53,35 @@ impl MemoryStore
             records.push(record);
         }
         Ok(Self {
-            path,
-            records: RwLock::new(records),
-            enabled: true,
+            inner: Arc::new(MemoryInner {
+                path,
+                records: RwLock::new(records),
+                write_lock: Mutex::new(()),
+                enabled: true,
+            }),
         })
     }
 
     pub fn disabled() -> Self
     {
         Self {
-            path: PathBuf::new(),
-            records: RwLock::new(Vec::new()),
-            enabled: false,
+            inner: Arc::new(MemoryInner {
+                path: PathBuf::new(),
+                records: RwLock::new(Vec::new()),
+                write_lock: Mutex::new(()),
+                enabled: false,
+            }),
         }
     }
 
     pub async fn len(&self) -> usize
     {
-        self.records.read().await.len()
+        self.inner.records.read().await.len()
     }
 
     pub async fn count(&self, kind: Option<MemoryKind>) -> usize
     {
-        self.records
+        self.inner.records
             .read()
             .await
             .iter()
@@ -77,12 +91,12 @@ impl MemoryStore
 
     pub async fn is_empty(&self) -> bool
     {
-        self.records.read().await.is_empty()
+        self.inner.records.read().await.is_empty()
     }
 
     pub async fn health(&self) -> ComponentHealth
     {
-        if !self.enabled
+        if !self.inner.enabled
         {
             return ComponentHealth {
                 component: "memory".to_owned(),
@@ -104,11 +118,11 @@ impl MemoryStore
         limit: usize,
     ) -> Result<Vec<Message>, AppError>
     {
-        if !self.enabled
+        if !self.inner.enabled
         {
             return Ok(Vec::new());
         }
-        let records = self.records.read().await;
+        let records = self.inner.records.read().await;
         let mut ranked: Vec<_> = records
             .iter()
             .filter(|record| kind.is_none_or(|expected| record.kind == expected))
@@ -145,11 +159,12 @@ impl MemoryStore
         assistant_text: String,
     ) -> Result<(), AppError>
     {
-        if !self.enabled
+        if !self.inner.enabled
         {
             return Ok(());
         }
-        if let Some(parent) = self.path.parent()
+        let _write_guard = self.inner.write_lock.lock().await;
+        if let Some(parent) = self.inner.path.parent()
         {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -169,7 +184,7 @@ impl MemoryStore
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.path)
+            .open(&self.inner.path)
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
         let line = serde_json::to_string(&record)
@@ -183,7 +198,7 @@ impl MemoryStore
         file.sync_data()
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
-        self.records.write().await.push(record);
+        self.inner.records.write().await.push(record);
         Ok(())
     }
 
@@ -207,6 +222,7 @@ impl MemoryStore
     ) -> Result<usize, AppError>
     {
         let records: Vec<_> = self
+            .inner
             .records
             .read()
             .await
@@ -230,11 +246,12 @@ impl MemoryStore
 
     pub async fn clear_kind(&mut self, kind: MemoryKind) -> Result<usize, AppError>
     {
-        if !self.enabled
+        if !self.inner.enabled
         {
             return Ok(0);
         }
-        let records = self.records.read().await;
+        let _write_guard = self.inner.write_lock.lock().await;
+        let records = self.inner.records.read().await;
         let retained: Vec<_> = records
             .iter()
             .filter(|record| record.kind != kind)
@@ -247,20 +264,20 @@ impl MemoryStore
             return Ok(0);
         }
         let content = serialize_records(&retained)?;
-        let temporary = self.path.with_extension("jsonl.tmp");
+        let temporary = self.inner.path.with_extension("jsonl.tmp");
         tokio::fs::write(&temporary, content)
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
-        match tokio::fs::remove_file(&self.path).await
+        match tokio::fs::remove_file(&self.inner.path).await
         {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(AppError::unavailable(error.to_string())),
         }
-        tokio::fs::rename(&temporary, &self.path)
+        tokio::fs::rename(&temporary, &self.inner.path)
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
-        *self.records.write().await = retained;
+        *self.inner.records.write().await = retained;
         Ok(removed)
     }
 }
@@ -361,6 +378,32 @@ mod tests
         tokio::fs::remove_file(&export_path).await.expect("temporary export removed");
     }
 
+    #[tokio::test]
+    async fn cloned_stores_serialize_concurrent_appends()
+    {
+        let path = std::env::temp_dir().join(format!("ai-ex-memory-shared-{}.jsonl", Uuid::new_v4()));
+        let store = MemoryStore::open(&path).await.expect("store opens");
+        let mut first = store.clone();
+        let mut second = store.clone();
+        let first_write = first.remember_kind(
+            MemoryKind::Viewer,
+            TurnId::new(),
+            "观众甲".to_owned(),
+            "事件一".to_owned(),
+        );
+        let second_write = second.remember_kind(
+            MemoryKind::LiveEvent,
+            TurnId::new(),
+            "礼物".to_owned(),
+            "事件二".to_owned(),
+        );
+        let (first_result, second_result) = tokio::join!(first_write, second_write);
+        first_result.expect("first append succeeds");
+        second_result.expect("second append succeeds");
+        let reopened = MemoryStore::open(&path).await.expect("shared memory reopens");
+        assert_eq!(reopened.len().await, 2);
+        tokio::fs::remove_file(&path).await.expect("shared memory removed");
+    }
     #[tokio::test]
     async fn remembers_a_projected_live_event()
     {

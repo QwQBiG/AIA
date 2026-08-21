@@ -22,6 +22,24 @@ AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新�
 
 ## 快速开始
 
+### 小白用户：打开可视化向导
+
+不熟悉命令行时直接运行桌面端：
+
+~~~powershell
+cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
+~~~
+
+向导会选择 DeepSeek、KoboldCpp 或 Ollama，生成本地配置和控制令牌，也可以配置 Bilibili 房间号。勾选自动启动后，服务会在后台运行；普通界面显示连接、对话和急停状态。
+
+### 开发者：同时看可视化状态和原始日志
+
+~~~powershell
+cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
+~~~
+
+桌面开发者面板显示结构化事件，启动它的终端保留服务 stdout/stderr，适合定位连接、模型和事件问题。
+
 要求：Rust 1.85 或更高版本；推荐使用仓库已验证的 Rust 1.96。
 
 ```powershell
