@@ -4,6 +4,7 @@ members = [
     "crates/ai-ex-protocol",
     "crates/ai-ex-event-bus",
     "crates/ai-ex-bilibili",
+    "crates/ai-ex-plugin",
     "crates/ai-ex-simulator",
     "crates/ai-ex-config",
     "crates/ai-ex-core",

@@ -226,6 +226,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-ex-plugin"
+version = "0.1.0"
+dependencies = [
+ "ai-ex-domain",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ai-ex-protocol"
 version = "0.1.0"
 dependencies = [
