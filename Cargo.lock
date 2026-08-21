@@ -60,6 +60,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-ex-bilibili"
+version = "0.1.0"
+dependencies = [
+ "ai-ex-domain",
+ "ai-ex-event-bus",
+ "futures-util",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
 name = "ai-ex-capture"
 version = "0.1.0"
 dependencies = [
