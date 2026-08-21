@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 use std::env;
+use std::io::Read;
 use std::time::Duration;
 
 use ai_ex_domain::AppError;
+use flate2::read::ZlibDecoder;
 use ai_ex_event_bus::{envelope, LiveEvent, LiveEventEnvelope};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -219,6 +221,18 @@ pub fn encode_packet(operation: u32, version: u16, body: &[u8]) -> Result<Vec<u8
 
 pub fn decode_packets(bytes: &[u8]) -> Result<Vec<BilibiliPacket>, AppError>
 {
+    decode_packets_at_depth(bytes, 0)
+}
+
+fn decode_packets_at_depth(
+    bytes: &[u8],
+    depth: usize,
+) -> Result<Vec<BilibiliPacket>, AppError>
+{
+    if depth > 4
+    {
+        return Err(AppError::protocol("bilibili packet nesting is too deep"));
+    }
     let mut offset = 0_usize;
     let mut packets = Vec::new();
     while offset < bytes.len()
@@ -235,22 +249,43 @@ pub fn decode_packets(bytes: &[u8]) -> Result<Vec<BilibiliPacket>, AppError>
         {
             return Err(AppError::protocol("invalid bilibili packet length"));
         }
-        if version != 0 && version != 1
+        let body = &bytes[offset + header..offset + total];
+        match version
         {
-            return Err(AppError::protocol(format!(
-                "unsupported bilibili packet compression version {version}; enable a boundary decompressor"
-            )));
+            0 | 1 =>
+            {
+                packets.push(BilibiliPacket {
+                    version,
+                    operation,
+                    body: body.to_vec(),
+                });
+            }
+            2 =>
+            {
+                let mut decoder = ZlibDecoder::new(body);
+                let mut decompressed = Vec::new();
+                decoder
+                    .read_to_end(&mut decompressed)
+                    .map_err(|error| AppError::protocol(format!("bilibili zlib decompression failed: {error}")))?;
+                packets.extend(decode_packets_at_depth(&decompressed, depth + 1)?);
+            }
+            3 =>
+            {
+                return Err(AppError::protocol(
+                    "bilibili brotli compression is not enabled in this build",
+                ));
+            }
+            _ =>
+            {
+                return Err(AppError::protocol(format!(
+                    "unsupported bilibili packet version {version}"
+                )));
+            }
         }
-        packets.push(BilibiliPacket {
-            version,
-            operation,
-            body: bytes[offset + header..offset + total].to_vec(),
-        });
         offset += total;
     }
     Ok(packets)
 }
-
 fn map_message(session_id: Uuid, room_id: u64, body: &[u8]) -> Result<Option<LiveEventEnvelope>, AppError>
 {
     let raw: Value = serde_json::from_slice(body)
@@ -348,11 +383,28 @@ mod tests
     }
 
     #[test]
-    fn rejects_compressed_packets_at_boundary()
+    fn decodes_zlib_compressed_inner_packets()
     {
-        let mut packet = encode_packet(5, 2, b"{}").expect("packet builds");
-        packet[6..8].copy_from_slice(&2_u16.to_be_bytes());
-        let error = decode_packets(&packet).expect_err("compression is explicit");
-        assert!(error.to_string().contains("compression version"));
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let inner = encode_packet(5, 1, b"{}").expect("inner packet builds");
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&inner).expect("packet compresses");
+        let compressed = encoder.finish().expect("compression finishes");
+        let packet = encode_packet(5, 2, &compressed).expect("outer packet builds");
+        let decoded = decode_packets(&packet).expect("compressed packet decodes");
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].version, 1);
+        assert_eq!(decoded[0].body, b"{}");
+    }
+
+    #[test]
+    fn rejects_brotli_packets_until_codec_is_enabled()
+    {
+        let packet = encode_packet(5, 3, b"compressed").expect("packet builds");
+        let error = decode_packets(&packet).expect_err("brotli must be explicit");
+        assert!(error.to_string().contains("brotli compression"));
     }
 }
