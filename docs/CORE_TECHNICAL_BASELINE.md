@@ -189,6 +189,7 @@ crates/
 - 开发者入口：桌面开发者面板显示结构化控制事件，启动终端保留服务原始 stdout/stderr；两者共用本地控制协议。
 - Bilibili：服务读取配置后在后台启动隔离连接任务，连接器负责握手、30 秒心跳、zlib 包边界和重连，统一事件先经 EventBus，再写入本地记忆投影；默认关闭，断线只影响平台输入。
 - 并发安全：MemoryStore 的克隆实例共享写锁，运行时与直播输入不会交错破坏 JSONL 文件；Runtime 通过 `MemoryPort::recall_for_context` 使用受限分类上下文，不把 live_event 原始日志直接混入普通对话。
+- 受控响应模式：Bilibili 默认 `suggest`，只有显式 `automatic`（或兼容旧 `auto_react = true`）且通过急停/冷却检查时才提交 Runtime；`confirm` 为人工确认扩展边界。
 - 验证：workspace 测试、严格 Clippy、架构门禁、Allman 门禁、git diff 检查，以及独立桌面端离线编译均通过。
 - 舞台协议：ai-ex-stage 已提供版本化 StageAction、能力声明、动作边界校验和 dry-run 执行器；ai-ex-stage-obs 已提供字幕/场景/热键 JSONL 录制边界，真实 OBS 连接器仍保持在外部边界。
 

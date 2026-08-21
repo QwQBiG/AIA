@@ -31,6 +31,7 @@ endpoint = "wss://broadcastlv.chat.bilibili.com:443/sub"
 cookie_env = "BILIBILI_COOKIE"
 reconnect_delay_ms = 2000
 auto_react = false
+response_mode = "suggest"
 reaction_cooldown_ms = 5000
 ~~~
 
@@ -41,4 +42,4 @@ $env:BILIBILI_COOKIE = "你的 Cookie"
 cargo run -p ai-ex-service -- --config "config/ai-ex.local.toml"
 ~~~
 
-连接器在服务后台运行，收到的弹幕、关注、礼物和醒目留言先经过统一事件总线，再投影到 memory.path。默认 auto_react = false，只在桌面开发者日志和终端显示“建议反应”；开启后也只调用现有 Runtime 生成角色语音/表情反应，不会向 Bilibili 自动发言。reaction_cooldown_ms 用于限制自动反应频率，急停状态会阻止新反应。连接器断线或平台不可用时，核心对话和桌面控制不会被拖垮；真实账号网络连接需要在目标机器上单独验证。
+连接器在服务后台运行，收到的弹幕、关注、礼物和醒目留言先经过统一事件总线，再投影到 memory.path。默认 `response_mode = "suggest"`，只在桌面开发者日志和终端显示“建议反应”；`automatic` 才允许自动提交到本地 Runtime，`confirm` 保留为必须人工确认的扩展模式；旧配置 `auto_react = true` 仍兼容为 `automatic`。开启后也只调用现有 Runtime 生成角色语音/表情反应，不会向 Bilibili 自动发言。reaction_cooldown_ms 用于限制自动反应频率，急停状态会阻止新反应。连接器断线或平台不可用时，核心对话和桌面控制不会被拖垮；真实账号网络连接需要在目标机器上单独验证。

@@ -115,4 +115,5 @@ endpoint = "wss://broadcastlv.chat.bilibili.com:443/sub"
 cookie_env = ""
 reconnect_delay_ms = 2000
 auto_react = false
+response_mode = "suggest"
 reaction_cooldown_ms = 5000

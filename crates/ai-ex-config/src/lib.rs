@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
 
-use ai_ex_domain::{AppError, Emotion};
+use ai_ex_domain::{AppError, Emotion, LiveResponseMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -699,11 +699,24 @@ pub struct BilibiliConfig
     pub cookie_env: Option<String>,
     pub reconnect_delay_ms: u64,
     pub auto_react: bool,
+    pub response_mode: LiveResponseMode,
     pub reaction_cooldown_ms: u64,
 }
 
 impl BilibiliConfig
 {
+    pub fn response_mode(&self) -> LiveResponseMode
+    {
+        if self.auto_react
+        {
+            LiveResponseMode::Automatic
+        }
+        else
+        {
+            self.response_mode
+        }
+    }
+
     fn validate(&self) -> Result<(), AppError>
     {
         if !self.enabled
@@ -732,6 +745,7 @@ impl Default for BilibiliConfig
             cookie_env: None,
             reconnect_delay_ms: 2_000,
             auto_react: false,
+            response_mode: LiveResponseMode::Suggest,
             reaction_cooldown_ms: 5_000,
         }
     }
@@ -833,6 +847,16 @@ mod tests
         config.obs.password_env.clear();
         assert!(config.validate().is_err());
     }
+    #[test]
+    fn supports_explicit_response_modes_and_legacy_auto_react()
+    {
+        let mut config = AppConfig::default();
+        config.bilibili.response_mode = LiveResponseMode::Confirm;
+        assert_eq!(config.bilibili.response_mode(), LiveResponseMode::Confirm);
+        config.bilibili.auto_react = true;
+        assert_eq!(config.bilibili.response_mode(), LiveResponseMode::Automatic);
+    }
+
     #[test]
     fn validates_bilibili_only_when_enabled()
     {

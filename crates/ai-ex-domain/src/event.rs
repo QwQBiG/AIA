@@ -2,6 +2,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ConversationState, Emotion, TurnId};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveResponseMode
+{
+    #[default]
+    Suggest,
+    Automatic,
+    Confirm,
+}
+
+impl LiveResponseMode
+{
+    pub const fn allows_automatic(self) -> bool
+    {
+        matches!(self, Self::Automatic)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SystemEvent

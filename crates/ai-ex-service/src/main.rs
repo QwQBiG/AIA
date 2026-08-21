@@ -23,7 +23,7 @@ use ai_ex_core::{
     ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, StageOutput,
     spawn_runtime,
 };
-use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, SystemEvent, TurnId};
+use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, LiveResponseMode, SystemEvent, TurnId};
 use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, PublishOutcome};
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
@@ -349,7 +349,7 @@ fn spawn_bilibili(
     settings.endpoint = config.endpoint.clone();
     settings.cookie_env = config.cookie_env.clone().filter(|value| !value.trim().is_empty());
     settings.reconnect_delay_ms = config.reconnect_delay_ms;
-    let auto_react = config.auto_react;
+    let response_mode = config.response_mode();
     let reaction_cooldown_ms = config.reaction_cooldown_ms;
     let reconnect_delay_ms = config.reconnect_delay_ms;
     let task = tokio::spawn(async move
@@ -398,7 +398,7 @@ fn spawn_bilibili(
                                 continue;
                             };
                             let automatic = reaction_allowed(
-                                auto_react,
+                                response_mode,
                                 safety.emergency_stop_active(),
                                 last_reaction_ms,
                                 delivered.timestamp_ms,
@@ -442,14 +442,14 @@ fn spawn_bilibili(
     Ok(Some(task))
 }
 fn reaction_allowed(
-    auto_react: bool,
+    response_mode: LiveResponseMode,
     emergency_stop: bool,
     last_reaction_ms: Option<u64>,
     now_ms: u64,
     cooldown_ms: u64,
 ) -> bool
 {
-    auto_react
+    response_mode.allows_automatic()
         && !emergency_stop
         && cooldown_ms > 0
         && last_reaction_ms.is_none_or(|previous| {
@@ -1351,15 +1351,15 @@ async fn run_duplex(
 #[cfg(test)]
 mod tests
 {
-    use super::reaction_allowed;
+    use super::{reaction_allowed, LiveResponseMode};
 
     #[test]
     fn reaction_policy_requires_opt_in_and_cooldown()
     {
-        assert!(!reaction_allowed(false, false, None, 10, 5));
-        assert!(!reaction_allowed(true, true, None, 10, 5));
-        assert!(reaction_allowed(true, false, None, 10, 5));
-        assert!(!reaction_allowed(true, false, Some(8), 10, 5));
-        assert!(reaction_allowed(true, false, Some(4), 10, 5));
+        assert!(!reaction_allowed(LiveResponseMode::Suggest, false, None, 10, 5));
+        assert!(!reaction_allowed(LiveResponseMode::Automatic, true, None, 10, 5));
+        assert!(reaction_allowed(LiveResponseMode::Automatic, false, None, 10, 5));
+        assert!(!reaction_allowed(LiveResponseMode::Automatic, false, Some(8), 10, 5));
+        assert!(reaction_allowed(LiveResponseMode::Automatic, false, Some(4), 10, 5));
     }
 }
