@@ -411,6 +411,14 @@ impl eframe::App for SetupApp
         {
             ui.heading("AIex 首次设置");
             ui.label("不需要命令行知识，按下面几步即可开始。密钥只在本次进程中使用，不会写入配置文件。");
+            ui.horizontal_wrapped(|ui|
+            {
+                ui.strong("1 选择模型");
+                ui.label("→");
+                ui.strong("2 检查连接");
+                ui.label("→");
+                ui.strong("3 保存并开始对话");
+            });
             ui.add_space(12.0);
             ui.horizontal(|ui|
             {

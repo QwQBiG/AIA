@@ -38,7 +38,7 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
 cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
 ~~~
 
-桌面开发者面板显示结构化事件，启动它的终端保留服务 stdout/stderr，适合定位连接、模型和事件问题。
+桌面默认显示新手控制台；点击右上角“开发者诊断”可展开结构化事件，启动它的终端仍保留服务 stdout/stderr，适合定位连接、模型和事件问题。
 
 要求：Rust 1.85 或更高版本；推荐使用仓库已验证的 Rust 1.96。
 

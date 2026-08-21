@@ -5,7 +5,7 @@ AIex 提供两种入口：普通用户使用可视化首次设置向导；开发
 | 使用方式 | 入口 | 能看到什么 |
 | --- | --- | --- |
 | 普通用户 | 直接启动桌面端 | 向导、连接状态、对话、模型/VTS/TTS 健康、急停 |
-| 开发者 | `--developer` 加启动终端 | 桌面事件日志、控制协议错误、服务完整 stdout/stderr |
+| 开发者 | 点击右上角“开发者诊断”（可选 `--developer` 默认展开） | 桌面事件日志、控制协议错误、服务完整 stdout/stderr |
 
 ## 小白模式：一条命令完成初始化
 
@@ -43,7 +43,7 @@ Bilibili 事件会在开发者日志中显示“已接受”和“反应建议�
 cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
 ```
 
-开发者面板会显示桌面端收到的连接变化、健康快照、事件数量、控制命令和失败信息；启动终端仍保留 `ai-ex-service` 的完整 stdout/stderr。两者结合可以同时满足“看得懂”和“查得深”。
+桌面默认先显示新手控制台：连接状态、组件就绪数、对话输入、打断和急停都不需要命令行。点击右上角“开发者诊断”即可展开桌面端收到的连接变化、健康快照、事件数量、控制命令和失败信息；启动终端仍保留 `ai-ex-service` 的完整 stdout/stderr。`--developer` 只用于让诊断面板启动时自动展开，两者结合可以同时满足“看得懂”和“查得深”。
 
 Developer stage replay is available with --replay-stage PATH; the service validates version, sequence, and action capability before printing replay logs.
 

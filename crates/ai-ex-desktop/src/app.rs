@@ -15,7 +15,7 @@ pub struct DesktopApp
     last_error: Option<String>,
     confirm_emergency_stop: bool,
     health: Vec<ComponentHealth>,
-    developer_mode: bool,
+    show_developer: bool,
     logs: VecDeque<String>,
 }
 
@@ -31,7 +31,7 @@ impl DesktopApp
             last_error: None,
             confirm_emergency_stop: false,
             health: Vec::new(),
-            developer_mode,
+            show_developer: developer_mode,
             logs: VecDeque::with_capacity(200),
         }
     }
@@ -167,6 +167,10 @@ impl DesktopApp
             ui.label(format!("状态：{:?}", self.state.runtime.state));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui|
             {
+                if ui.button(if self.show_developer { "隐藏开发者诊断" } else { "开发者诊断" }).clicked()
+                {
+                    self.show_developer = !self.show_developer;
+                }
                 if ui.button("急停").clicked()
                 {
                     self.confirm_emergency_stop = true;
@@ -184,7 +188,37 @@ impl DesktopApp
         ui.separator();
     }
 
-    fn show_health(&self, ui: &mut egui::Ui)
+    fn show_beginner_panel(&self, ui: &mut egui::Ui)
+    {
+        ui.group(|ui|
+        {
+            ui.heading("新手控制台");
+            ui.label("这里可以完成日常使用；需要排查问题时，点击右上角“开发者诊断”。");
+            ui.horizontal_wrapped(|ui|
+            {
+                let (label, color) = match self.state.connection
+                {
+                    ConnectionState::Connected => ("服务已连接，可以开始对话", egui::Color32::from_rgb(80, 200, 140)),
+                    ConnectionState::Connecting => ("正在连接服务，请稍候", egui::Color32::YELLOW),
+                    ConnectionState::Disconnected => ("服务未连接，请确认服务已启动", egui::Color32::LIGHT_RED),
+                };
+                ui.colored_label(color, label);
+                ui.separator();
+                ui.label(format!("运行状态：{:?}", self.state.runtime.state));
+            });
+            let ready = self.health.iter().filter(|item| item.ready).count();
+            let total = self.health.len();
+            if total == 0
+            {
+                ui.weak("正在读取模型、插件和安全状态……");
+            }
+            else
+            {
+                ui.label(format!("组件状态：{ready}/{total} 项就绪"));
+            }
+            ui.small("使用下方输入框发送消息；“打断”停止当前回复；“急停”会撤销自动化许可。AIex 默认不会执行未经授权的外部动作。");
+        });
+    }    fn show_health(&self, ui: &mut egui::Ui)
     {
         ui.collapsing("组件健康状态（实时刷新）", |ui|
         {
@@ -264,11 +298,11 @@ impl DesktopApp
     }
     fn show_developer_panel(&mut self, ui: &mut egui::Ui)
     {
-        if !self.developer_mode
+        if !self.show_developer
         {
             return;
         }
-        ui.collapsing("开发者日志（--developer）", |ui|
+        ui.collapsing("开发者诊断日志", |ui|
         {
             ui.horizontal(|ui|
             {
@@ -399,6 +433,7 @@ impl eframe::App for DesktopApp
     {
         self.drain_events();
         self.show_header(ui);
+        self.show_beginner_panel(ui);
         self.show_health(ui);
         self.show_automation_panel(ui);
         self.show_developer_panel(ui);
