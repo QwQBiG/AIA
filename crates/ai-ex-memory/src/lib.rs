@@ -151,6 +151,46 @@ impl MemoryStore
             .collect())
     }
 
+    pub async fn recall_kinds(
+        &self,
+        kinds: &[MemoryKind],
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Message>, AppError>
+    {
+        if !self.inner.enabled
+        {
+            return Ok(Vec::new());
+        }
+        let records = self.inner.records.read().await;
+        let mut ranked: Vec<_> = records
+            .iter()
+            .filter(|record| kinds.contains(&record.kind))
+            .filter_map(|record|
+            {
+                let score = record.relevance(query);
+                (score > 0).then_some((score, record))
+            })
+            .collect();
+        ranked.sort_by_key(|item| std::cmp::Reverse(item.0));
+        Ok(ranked
+            .into_iter()
+            .take(limit)
+            .map(|(_score, record)|
+            {
+                Message::new(
+                    Role::System,
+                    format!(
+                        "Relevant context memory [{}] — User: {} Assistant: {}",
+                        record.kind.as_str(),
+                        record.user_text,
+                        record.assistant_text
+                    ),
+                )
+            })
+            .collect())
+    }
+
     pub async fn remember_kind(
         &mut self,
         kind: MemoryKind,
@@ -288,6 +328,20 @@ impl MemoryPort for MemoryStore
     async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError>
     {
         self.recall_kind(None, query, limit).await
+    }
+
+    async fn recall_for_context(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Message>, AppError>
+    {
+        self.recall_kinds(
+            &[MemoryKind::Conversation, MemoryKind::Persona, MemoryKind::Viewer],
+            query,
+            limit,
+        )
+        .await
     }
 
     async fn remember(
@@ -437,5 +491,41 @@ mod tests
         let store = MemoryStore::open(&path).await.expect("legacy memory opens");
         assert_eq!(store.count(Some(MemoryKind::Conversation)).await, 1);
         tokio::fs::remove_file(&path).await.expect("legacy memory removed");
+    }
+
+    #[tokio::test]
+    async fn context_recall_excludes_live_event_memory()
+    {
+        let path = std::env::temp_dir().join(format!("ai-ex-memory-context-{}.jsonl", Uuid::new_v4()));
+        let mut store = MemoryStore::open(&path).await.expect("store opens");
+        store
+            .remember_kind(
+                MemoryKind::Conversation,
+                TurnId::new(),
+                "观众喜欢蓝莓".to_owned(),
+                "对话记忆".to_owned(),
+            )
+            .await
+            .expect("conversation memory persists");
+        store
+            .remember_kind(
+                MemoryKind::LiveEvent,
+                TurnId::new(),
+                "观众喜欢蓝莓".to_owned(),
+                "平台事件".to_owned(),
+            )
+            .await
+            .expect("live event memory persists");
+        let context = store
+            .recall_kinds(
+                &[MemoryKind::Conversation, MemoryKind::Persona, MemoryKind::Viewer],
+                "蓝莓",
+                8,
+            )
+            .await
+            .expect("context recall succeeds");
+        assert_eq!(context.len(), 1);
+        assert!(context[0].content.contains("对话记忆"));
+        tokio::fs::remove_file(&path).await.expect("context memory removed");
     }
 }

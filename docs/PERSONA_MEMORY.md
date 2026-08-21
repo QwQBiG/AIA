@@ -24,6 +24,8 @@ live_mode = "controlled"
 
 旧版本没有 `kind` 的 JSONL 记录会自动视为 `conversation`，无需迁移文件。
 
+运行时上下文不会把所有分类无边界地塞给模型：默认上下文只检索 `conversation`、`persona` 和 `viewer`，排除 `live_event` 原始记录；每次仍受 `memory_recall_limit` 上限约束。这样可以保留观众关系，又避免直播事件日志无限扩大上下文。需要审计或回放时，再通过分类 API 单独检索 `live_event`。`MemoryPort::recall_for_context` 是核心的可替换边界，未来可接向量检索或远程记忆而不修改 Runtime。
+
 分类记忆由 `MemoryStore` 提供以下管理能力：
 
 - `recall_kind`：只检索指定分类，避免观众信息污染角色设定。

@@ -132,7 +132,7 @@ where
     {
         let memories = self
             .memory
-            .recall(&input, self.memory_recall_limit)
+            .recall_for_context(&input, self.memory_recall_limit)
             .await?;
         let turn_id = self.engine.begin_turn(&input)?;
         let mut messages = Vec::new();

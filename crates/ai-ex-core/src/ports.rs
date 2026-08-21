@@ -46,9 +46,18 @@ pub trait EventSink: Send
 }
 
 #[async_trait]
-pub trait MemoryPort: Send
+pub trait MemoryPort: Send + Sync
 {
     async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError>;
+
+    async fn recall_for_context(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Message>, AppError>
+    {
+        self.recall(query, limit).await
+    }
 
     async fn remember(
         &mut self,
