@@ -116,6 +116,7 @@ crates/
   ai-ex-ollama/   Ollama 流式 HTTP 适配器
   ai-ex-koboldcpp/ KoboldCpp 流式 SSE 适配器
   ai-ex-vts/      VTube Studio WebSocket actor
+  ai-ex-stage/     舞台动作协议、能力声明和 dry-run 执行器
   ai-ex-audio/    有界语音队列与取消
   ai-ex-tts/      GPT-SoVITS HTTP 适配器
   ai-ex-memory/   Rust 原生持久记忆

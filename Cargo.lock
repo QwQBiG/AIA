@@ -306,6 +306,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-ex-stage"
+version = "0.1.0"
+dependencies = [
+ "ai-ex-domain",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ai-ex-text"
 version = "0.1.0"
 dependencies = [

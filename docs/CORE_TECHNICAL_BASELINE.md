@@ -190,5 +190,6 @@ crates/
 - Bilibili：服务读取配置后在后台启动隔离连接任务，统一事件先经 EventBus，再写入本地记忆投影；默认关闭，断线只影响平台输入。
 - 并发安全：MemoryStore 的克隆实例共享写锁，运行时与直播输入不会交错破坏 JSONL 文件。
 - 验证：workspace 测试、严格 Clippy、架构门禁、Allman 门禁、git diff 检查，以及独立桌面端离线编译均通过。
+- 舞台协议：ai-ex-stage 已提供版本化 StageAction、能力声明、动作边界校验和 dry-run 执行器；真实 VTS/TTS/OBS 适配器仍保持在外部边界。
 
-下一步优先补 Brotli 解压契约测试和真实连接器录制回放；OBS、TTS 舞台编排和游戏动作继续保持独立插件边界。
+下一步优先补 Brotli 解压契约测试和真实连接器录制回放，再把 VTS/TTS/OBS 适配器接入 ai-ex-stage；游戏动作继续保持独立插件边界。
