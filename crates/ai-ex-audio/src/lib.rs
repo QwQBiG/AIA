@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ai_ex_core::SpeechPort;
 use ai_ex_domain::{AppError, ComponentHealth, TurnId};
+use ai_ex_stage::{StageAction, StageCapability, StageExecutor};
 use ai_ex_text::clean_for_speech;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -195,17 +197,86 @@ impl SpeechPort for SpeechQueue
     }
 }
 
+#[async_trait]
+impl StageExecutor for SpeechQueue
+{
+    fn capabilities(&self) -> BTreeSet<StageCapability>
+    {
+        BTreeSet::from([StageCapability::Interrupt, StageCapability::Speech])
+    }
+
+    async fn health(&self) -> ComponentHealth
+    {
+        SpeechQueue::health(self)
+    }
+
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
+    {
+        action.validate()?;
+        match action
+        {
+            StageAction::Speak {
+                turn_id,
+                text,
+                ..
+            } => SpeechPort::enqueue(self, turn_id, text).await,
+            StageAction::Stop => SpeechPort::interrupt(self).await,
+            StageAction::Expression { .. }
+            | StageAction::Mouth { .. }
+            | StageAction::Subtitle { .. }
+            | StageAction::Scene { .. }
+            | StageAction::Hotkey { .. } => Err(AppError::configuration(
+                "audio stage does not support this action",
+            )),
+        }
+    }
+
+    async fn interrupt(&mut self) -> Result<(), AppError>
+    {
+        SpeechPort::interrupt(self).await
+    }
+}
 #[cfg(test)]
 mod tests
 {
     use super::*;
 
     #[tokio::test]
+    async fn stage_executor_routes_speech_and_interrupts()
+    {
+        let (mut queue, mut receiver) = SpeechQueue::new(2).expect("queue created");
+        let capabilities = StageExecutor::capabilities(&queue);
+        assert!(capabilities.contains(&StageCapability::Speech));
+        StageExecutor::execute(
+            &mut queue,
+            StageAction::Speak {
+                turn_id: TurnId::new(),
+                text: "hello".to_owned(),
+                interruptible: true,
+            },
+        )
+        .await
+        .expect("speech action queues");
+        assert_eq!(receiver.receive().await.expect("speech job").text, "hello");
+        StageExecutor::execute(&mut queue, StageAction::Stop)
+            .await
+            .expect("stop interrupts");
+        let error = StageExecutor::execute(
+            &mut queue,
+            StageAction::Scene {
+                scene: "main".to_owned(),
+            },
+        )
+        .await
+        .expect_err("audio stage rejects scene");
+        assert!(error.to_string().contains("audio stage"));
+    }
+    #[tokio::test]
     async fn interruption_invalidates_queued_speech()
     {
         let (mut queue, mut receiver) = SpeechQueue::new(4).expect("queue created");
         queue.enqueue(TurnId::new(), "old".to_owned()).await.expect("queued");
-        queue.interrupt().await.expect("interrupted");
+        SpeechPort::interrupt(&mut queue).await.expect("interrupted");
         queue.enqueue(TurnId::new(), "new".to_owned()).await.expect("queued");
         let job = receiver.receive().await.expect("new job available");
         assert_eq!(job.text, "new");
@@ -221,7 +292,7 @@ mod tests
             .await
             .expect("queued");
         let job = receiver.receive().await.expect("job received");
-        queue.interrupt().await.expect("interrupted");
+        SpeechPort::interrupt(&mut queue).await.expect("interrupted");
 
         player
             .play_wav(&job, vec![1, 2, 3])

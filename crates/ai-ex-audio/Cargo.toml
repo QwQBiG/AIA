@@ -12,6 +12,7 @@ native-playback = ["dep:rodio"]
 [dependencies]
 ai-ex-core = { path = "../ai-ex-core" }
 ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-stage = { path = "../ai-ex-stage" }
 ai-ex-text = { path = "../ai-ex-text" }
 async-trait.workspace = true
 rodio = { workspace = true, optional = true }
