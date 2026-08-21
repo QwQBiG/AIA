@@ -1,5 +1,9 @@
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc::{self, Receiver}, Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use ai_ex_domain::AppError;
 use eframe::egui;
@@ -51,6 +55,9 @@ struct SetupApp
     bilibili_cookie_env: String,
     start_service: bool,
     status: String,
+    status_error: bool,
+    checking: bool,
+    probe_receiver: Option<Receiver<Result<String, String>>>,
     result: Arc<Mutex<Option<SetupResult>>>,
 }
 
@@ -105,6 +112,9 @@ impl SetupApp
             bilibili_cookie_env: "BILIBILI_COOKIE".to_owned(),
             start_service: true,
             status: String::new(),
+            status_error: false,
+            checking: false,
+            probe_receiver: None,
             result,
         }
     }
@@ -131,20 +141,79 @@ impl SetupApp
         }
     }
 
-    fn save(&mut self, context: &egui::Context)
+    fn set_status(&mut self, message: impl Into<String>, error: bool)
     {
-        if self.persona_name.trim().is_empty()
-            || self.endpoint.trim().is_empty()
-            || self.model.trim().is_empty()
+        self.status = message.into();
+        self.status_error = error;
+    }
+
+    fn poll_probe(&mut self)
+    {
+        let Some(receiver) = self.probe_receiver.take() else
         {
-            self.status = "请填写角色名、模型地址和模型名称。".to_owned();
+            return;
+        };
+        match receiver.try_recv()
+        {
+            Ok(Ok(message)) =>
+            {
+                self.checking = false;
+                self.set_status(message, false);
+            }
+            Ok(Err(error)) =>
+            {
+                self.checking = false;
+                self.set_status(format!("连接检查失败：{error}"), true);
+            }
+            Err(mpsc::TryRecvError::Empty) => self.probe_receiver = Some(receiver),
+            Err(mpsc::TryRecvError::Disconnected) =>
+            {
+                self.checking = false;
+                self.set_status("连接检查线程已停止，请重试。", true);
+            }
+        }
+    }
+
+    fn check_connection(&mut self)
+    {
+        if self.endpoint.trim().is_empty()
+        {
+            self.set_status("请先填写模型地址。", true);
             return;
         }
         if self.provider == ProviderChoice::DeepSeek
             && self.api_key.trim().is_empty()
             && std::env::var_os("DEEPSEEK_API_KEY").is_none()
         {
-            self.status = "DeepSeek 需要 API Key；可以粘贴到这里，或先设置 DEEPSEEK_API_KEY 环境变量。密钥不会写入配置文件。".to_owned();
+            self.set_status("DeepSeek 连接检查需要 API Key；密钥不会写入配置文件。", true);
+            return;
+        }
+        let endpoint = self.endpoint.trim().to_owned();
+        let provider = self.provider;
+        let (sender, receiver) = mpsc::channel();
+        self.checking = true;
+        self.set_status("正在检查地址和网络端口……", false);
+        self.probe_receiver = Some(receiver);
+        thread::spawn(move ||
+        {
+            let result = probe_endpoint(provider, &endpoint).map_err(|error| error.to_string());
+            let _ignored = sender.send(result);
+        });
+    }
+    fn save(&mut self, context: &egui::Context)
+    {
+        if self.persona_name.trim().is_empty()
+            || self.endpoint.trim().is_empty()
+            || self.model.trim().is_empty()
+        {
+            self.set_status("请填写角色名、模型地址和模型名称。", true);
+            return;
+        }
+        if self.provider == ProviderChoice::DeepSeek
+            && self.api_key.trim().is_empty()
+            && std::env::var_os("DEEPSEEK_API_KEY").is_none()
+        {
+            self.set_status("DeepSeek 需要 API Key；可以粘贴到这里，或先设置 DEEPSEEK_API_KEY 环境变量。密钥不会写入配置文件。", true);
             return;
         }
         let bilibili_room_id = if self.bilibili_enabled
@@ -154,7 +223,7 @@ impl SetupApp
                 Ok(room_id) if room_id > 0 => room_id,
                 _ =>
                 {
-                    self.status = "启用 Bilibili 时必须填写大于 0 的房间号。".to_owned();
+                    self.set_status("启用 Bilibili 时必须填写大于 0 的房间号。", true);
                     return;
                 }
             }
@@ -166,7 +235,7 @@ impl SetupApp
 
         let Some(parent) = self.config_path.parent() else
         {
-            self.status = "配置路径没有有效目录。".to_owned();
+            self.set_status("配置路径没有有效目录。", true);
             return;
         };
         let token_path = parent.join("control.token");
@@ -197,7 +266,7 @@ impl SetupApp
                 }
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            Err(error) => self.status = format!("保存失败：{error}"),
+            Err(error) => self.set_status(format!("保存失败：{error}"), true),
         }
     }
 
@@ -238,10 +307,106 @@ impl SetupApp
     }
 }
 
+fn probe_endpoint(provider: ProviderChoice, endpoint: &str) -> Result<String, AppError>
+{
+    let endpoint = endpoint.trim();
+    let (scheme, remainder) = endpoint
+        .split_once("://")
+        .ok_or_else(|| AppError::configuration("模型地址必须以 http:// 或 https:// 开头"))?;
+    if scheme != "http" && scheme != "https"
+    {
+        return Err(AppError::configuration("模型地址只支持 HTTP 或 HTTPS"));
+    }
+    let authority = remainder
+        .split(['/', '?', '#'])
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| AppError::configuration("模型地址缺少主机名"))?;
+    let (host, port) = endpoint_host_port(scheme, authority)?;
+    let address = format!("{host}:{port}");
+    let socket = address
+        .to_socket_addrs()
+        .map_err(|error| AppError::unavailable(format!("无法解析模型地址 {address}: {error}")))?
+        .next()
+        .ok_or_else(|| AppError::unavailable(format!("模型地址没有可用网络地址：{address}")))?;
+    let mut stream = TcpStream::connect_timeout(&socket, Duration::from_secs(5))
+        .map_err(|error| AppError::unavailable(format!("无法连接 {address}: {error}")))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|error| AppError::unavailable(format!("设置连接超时失败：{error}")))?;
+    if scheme == "https"
+    {
+        return Ok(format!("{}：网络端口可达；HTTPS/API 密钥将在服务启动时继续验证。", provider.label()));
+    }
+    let request = format!("GET / HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| AppError::unavailable(format!("发送连通性请求失败：{error}")))?;
+    let mut buffer = [0_u8; 256];
+    let count = stream
+        .read(&mut buffer)
+        .map_err(|error| AppError::unavailable(format!("读取模型服务响应失败：{error}")))?;
+    let response = String::from_utf8_lossy(&buffer[..count]);
+    let status = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| AppError::protocol("模型服务返回的 HTTP 响应无法识别"))?;
+    if status >= 500
+    {
+        return Err(AppError::unavailable(format!("模型服务返回 HTTP {status}")));
+    }
+    Ok(format!("{}：服务已响应 HTTP {status}。", provider.label()))
+}
+
+fn endpoint_host_port(scheme: &str, authority: &str) -> Result<(String, u16), AppError>
+{
+    if authority.starts_with('[')
+    {
+        let end = authority
+            .find(']')
+            .ok_or_else(|| AppError::configuration("IPv6 模型地址缺少右方括号"))?;
+        let host = authority[1..end].to_owned();
+        let port = authority
+            .get(end + 1..)
+            .and_then(|value| value.strip_prefix(':'))
+            .map(parse_port)
+            .transpose()?
+            .unwrap_or_else(|| default_port(scheme));
+        return Ok((format!("[{host}]"), port));
+    }
+    if let Some((host, port)) = authority.rsplit_once(':')
+    {
+        if !host.is_empty()
+        {
+            return Ok((host.to_owned(), parse_port(port)?));
+        }
+    }
+    Ok((authority.to_owned(), default_port(scheme)))
+}
+
+fn parse_port(value: &str) -> Result<u16, AppError>
+{
+    let port = value
+        .parse::<u16>()
+        .map_err(|_| AppError::configuration("模型地址端口必须是 1 到 65535"))?;
+    if port == 0
+    {
+        return Err(AppError::configuration("模型地址端口不能为 0"));
+    }
+    Ok(port)
+}
+
+fn default_port(scheme: &str) -> u16
+{
+    if scheme == "https" { 443 } else { 80 }
+}
 impl eframe::App for SetupApp
 {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame)
     {
+        self.poll_probe();
         egui::CentralPanel::default().show(ui, |ui|
         {
             ui.heading("AIex 首次设置");
@@ -264,11 +429,20 @@ impl eframe::App for SetupApp
                     self.provider_changed();
                 }
             });
-            ui.horizontal(|ui|
+            let check_clicked = ui.horizontal(|ui|
             {
                 ui.label("模型地址");
                 ui.text_edit_singleline(&mut self.endpoint);
-            });
+                ui.add_enabled(!self.checking, egui::Button::new("检查连接")).clicked()
+            }).inner;
+            if check_clicked
+            {
+                self.check_connection();
+            }
+            if self.checking
+            {
+                ui.weak("正在检查；不会保存 API Key。");
+            }
             ui.horizontal(|ui|
             {
                 ui.label("模型名称");
@@ -308,7 +482,8 @@ impl eframe::App for SetupApp
             ui.label("首次启动会自动生成本地控制令牌；开发者可以在 config/control.token 和日志文件中检查状态。");
             if !self.status.is_empty()
             {
-                ui.colored_label(egui::Color32::LIGHT_RED, &self.status);
+                let color = if self.status_error { egui::Color32::LIGHT_RED } else { egui::Color32::LIGHT_GREEN };
+                ui.colored_label(color, &self.status);
             }
             ui.add_space(12.0);
             if ui.button("保存并进入 AIex").clicked()
@@ -316,5 +491,49 @@ impl eframe::App for SetupApp
                 self.save(ui.ctx());
             }
         });
+    }
+}
+#[cfg(test)]
+mod tests
+{
+    use std::net::TcpListener;
+
+    use super::*;
+
+    #[test]
+    fn endpoint_parser_uses_provider_defaults()
+    {
+        assert_eq!(endpoint_host_port("http", "127.0.0.1").expect("default HTTP port"), ("127.0.0.1".to_owned(), 80));
+        assert_eq!(endpoint_host_port("https", "api.deepseek.com").expect("default HTTPS port"), ("api.deepseek.com".to_owned(), 443));
+        assert_eq!(endpoint_host_port("http", "127.0.0.1:5001").expect("explicit port"), ("127.0.0.1".to_owned(), 5001));
+    }
+
+    #[test]
+    fn probe_endpoint_reports_local_http_response()
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let server = thread::spawn(move ||
+        {
+            let (mut stream, _) = listener.accept().expect("request accepts");
+            let mut request = [0_u8; 128];
+            let _ignored = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .expect("response writes");
+        });
+        let message = probe_endpoint(
+            ProviderChoice::KoboldCpp,
+            &format!("http://{}", address),
+        )
+        .expect("local service responds");
+        assert!(message.contains("HTTP 200"));
+        server.join().expect("server joins");
+    }
+
+    #[test]
+    fn probe_endpoint_rejects_missing_scheme()
+    {
+        assert!(probe_endpoint(ProviderChoice::Ollama, "127.0.0.1:11434").is_err());
     }
 }

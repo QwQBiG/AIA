@@ -204,3 +204,4 @@ crates/
 - 外部插件启动：`[plugins]` 默认关闭；显式启用时按 manifest ID/health 做隔离启动与超时校验，单个插件失败不影响主运行时。
 - 插件运行期监控：已启动 Provider 每 15 秒刷新 health，并检测进程退出；失败只更新桌面/控制协议状态，不自动重启。
 - Typed automation bridge：`PluginAutomationPort` 将安全许可与版本化 observe/execute/interrupt 请求连接起来，服务端 stdio 适配器只负责 JSON-RPC 编解码，核心状态机不感知插件协议。
+- 首次设置连通性检查：桌面向导后台探测 HTTP/HTTPS 地址，不阻塞 UI；DeepSeek 密钥不落盘，服务启动仍做完整 provider health。

@@ -22,8 +22,10 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
 3. DeepSeek 粘贴 API Key（密钥只在本次进程中使用，不写入配置文件），或提前设置 `DEEPSEEK_API_KEY`。
 4. 可选勾选 Bilibili 直播事件，填写房间号和 Cookie 环境变量名（只填变量名，不粘贴 Cookie）。
 5. 填写角色名称，点击“保存并进入 AIex”。
+6. 点击“检查连接”可提前检查地址和本地服务端口；HTTP 本地服务会读取状态码，HTTPS 云服务先检查网络端口，完整 API 鉴权由服务启动时再次验证。
 
-向导会自动创建 `config/ai-ex.local.toml` 和 `config/control.token`。勾选“保存后自动启动服务”时，桌面端会优先启动旁边的 `ai-ex-service.exe`；开发环境没有该文件时，会自动回退到 `cargo run -p ai-ex-service`。服务日志会继续显示在启动桌面的同一个终端中。
+向导会自动创建 `config/ai-ex.local.toml` 和 `config/control.token`。
+连通性检查不会保存 API Key；向导生成的配置只保存环境变量名，密钥仍通过当前进程或环境变量传递。勾选“保存后自动启动服务”时，桌面端会优先启动旁边的 `ai-ex-service.exe`；开发环境没有该文件时，会自动回退到 `cargo run -p ai-ex-service`。服务日志会继续显示在启动桌面的同一个终端中。
 
 ## 普通用户界面
 
