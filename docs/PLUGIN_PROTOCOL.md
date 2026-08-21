@@ -43,3 +43,4 @@ Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 
 `PluginRegistry` 在组合根中维护 manifest 与 health 的统一快照，并投影为 `plugin-registry` 及 `plugin:<id>` 组件健康；桌面端只读显示这些状态，插件进程仍由独立客户端管理。
 
 服务配置中的 `[plugins]` 默认 `enabled = false`。启用后只启动显式列出的 `id/program/args`，启动时要求 manifest 的 ID 与配置一致，并以 5 秒超时读取 health；单个插件失败只会形成 `plugin:<id>` 不可用状态。
+服务保持已启动的插件进程，并每 15 秒刷新一次 health；检测到进程退出时只更新状态，不自动重启，避免外部插件绕过人工策略反复执行。

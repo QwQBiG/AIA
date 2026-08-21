@@ -202,3 +202,4 @@ crates/
 - Typed 插件契约：视觉观察与游戏动作统一使用带 schema/request UUID 的 `AutomationPluginRequest/Response`，原始帧通过引用传递，不进入 JSON-RPC 大字段。
 - 插件注册表：组合根创建 `PluginRegistry` 并将注册表/插件健康投影到控制协议，桌面安全面板可直接显示；当前默认 0 个外部插件。
 - 外部插件启动：`[plugins]` 默认关闭；显式启用时按 manifest ID/health 做隔离启动与超时校验，单个插件失败不影响主运行时。
+- 插件运行期监控：已启动 Provider 每 15 秒刷新 health，并检测进程退出；失败只更新桌面/控制协议状态，不自动重启。

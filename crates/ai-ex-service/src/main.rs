@@ -212,6 +212,7 @@ async fn run() -> Result<(), AppError>
     })
     .await;
     let health_snapshot = Arc::new(RwLock::new(startup_health));
+    let _plugin_refresh = plugin_runtime.spawn_health_refresh(Arc::clone(&health_snapshot));
 
     let mut stage_router = StageRouter::new();
     stage_router.push(speech);
@@ -607,9 +608,79 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
 struct PluginRuntime
 {
     registry: PluginRegistry,
-    _processes: Vec<StdioPlugin>,
+    processes: Vec<ManagedPlugin>,
 }
 
+struct ManagedPlugin
+{
+    id: String,
+    process: StdioPlugin,
+}
+
+impl PluginRuntime
+{
+    fn spawn_health_refresh(
+        self,
+        health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
+    ) -> Option<tokio::task::JoinHandle<()>>
+    {
+        if self.processes.is_empty()
+        {
+            return None;
+        }
+        Some(tokio::spawn(async move
+        {
+            let mut runtime = self;
+            loop
+            {
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                for plugin in &mut runtime.processes
+                {
+                    let health = match plugin.process.try_wait()
+                    {
+                        Ok(Some(status)) => PluginHealth {
+                            ready: false,
+                            detail: format!("process exited: {status}"),
+                        },
+                        Err(error) => PluginHealth {
+                            ready: false,
+                            detail: error.to_string(),
+                        },
+                        Ok(None) => match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            plugin.process.health(),
+                        )
+                        .await
+                        {
+                            Ok(Ok(health)) => health,
+                            Ok(Err(error)) => PluginHealth {
+                                ready: false,
+                                detail: error.to_string(),
+                            },
+                            Err(_) => PluginHealth {
+                                ready: false,
+                                detail: "plugin health request timed out".to_owned(),
+                            },
+                        },
+                    };
+                    if let Err(error) = runtime.registry.update_health(&plugin.id, health)
+                    {
+                        tracing::warn!(plugin = %plugin.id, %error, "plugin health refresh rejected");
+                    }
+                }
+                let registry_health = runtime.registry.health();
+                let plugin_health = runtime.registry.component_health();
+                let mut snapshot = health_snapshot.write().await;
+                snapshot.retain(|item| {
+                    item.component != "plugin-registry"
+                        && !item.component.starts_with("plugin:")
+                });
+                snapshot.push(registry_health);
+                snapshot.extend(plugin_health);
+            }
+        }))
+    }
+}
 async fn connect_plugins(config: &PluginConfig) -> PluginRuntime
 {
     let mut registry = PluginRegistry::new();
@@ -618,7 +689,7 @@ async fn connect_plugins(config: &PluginConfig) -> PluginRuntime
     {
         return PluginRuntime {
             registry,
-            _processes: processes,
+            processes,
         };
     }
     for command in &config.commands
@@ -685,11 +756,11 @@ async fn connect_plugins(config: &PluginConfig) -> PluginRuntime
         {
             tracing::warn!(plugin = %command.id, %error, "plugin health update rejected");
         }
-        processes.push(plugin);
+        processes.push(ManagedPlugin { id: command.id.clone(), process: plugin });
     }
     PluginRuntime {
         registry,
-        _processes: processes,
+        processes,
     }
 }
 struct HealthContext<'a>
