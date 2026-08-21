@@ -18,6 +18,8 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 
 const DEFAULT_ENDPOINT: &str = "wss://broadcastlv.chat.bilibili.com:443/sub";
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_PACKET_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BilibiliSettings
@@ -43,6 +45,17 @@ impl BilibiliSettings
             reconnect_delay_ms: 2_000,
         })
     }
+
+    pub fn validate(&self) -> Result<(), AppError>
+    {
+        if self.room_id == 0
+            || (!self.endpoint.starts_with("ws://") && !self.endpoint.starts_with("wss://"))
+            || self.reconnect_delay_ms == 0
+        {
+            return Err(AppError::configuration("invalid bilibili connector settings"));
+        }
+        Ok(())
+    }
 }
 
 pub struct BilibiliConnector
@@ -63,6 +76,7 @@ impl BilibiliConnector
 
     pub async fn next_events(&mut self) -> Result<Vec<LiveEventEnvelope>, AppError>
     {
+        self.settings.validate()?;
         loop
         {
             if self.connection.is_none()
@@ -102,6 +116,7 @@ impl BilibiliConnection
 {
     pub async fn connect(settings: &BilibiliSettings) -> Result<Self, AppError>
     {
+        settings.validate()?;
         let (mut socket, _response) = connect_async(&settings.endpoint)
             .await
             .map_err(|error| AppError::connectivity(format!("bilibili websocket connect failed: {error}")))?;
@@ -119,12 +134,24 @@ impl BilibiliConnection
 
     pub async fn next_events(&mut self) -> Result<Vec<LiveEventEnvelope>, AppError>
     {
+        let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+        heartbeat.tick().await;
         loop
         {
-            let message = self
-                .socket
-                .next()
-                .await
+            let message = tokio::select!
+            {
+                _ = heartbeat.tick() =>
+                {
+                    let packet = encode_packet(2, 1, &[])?;
+                    self.socket
+                        .send(Message::Binary(packet.into()))
+                        .await
+                        .map_err(|error| AppError::connectivity(format!("bilibili heartbeat failed: {error}")))?;
+                    continue;
+                }
+                message = self.socket.next() => message
+            };
+            let message = message
                 .ok_or_else(|| AppError::connectivity("bilibili websocket closed"))?
                 .map_err(|error| AppError::connectivity(format!("bilibili websocket read failed: {error}")))?;
             match message
@@ -194,7 +221,7 @@ pub fn build_handshake(room_id: u64, cookie_env: Option<&str>) -> Result<Vec<u8>
     let body = json!({
         "uid": uid,
         "roomid": room_id,
-        "protover": 1,
+        "protover": 2,
         "platform": "web",
         "type": 2,
         "key": ""
@@ -209,6 +236,10 @@ pub fn encode_packet(operation: u32, version: u16, body: &[u8]) -> Result<Vec<u8
         .ok_or_else(|| AppError::configuration("bilibili packet is too large"))?;
     let total = u32::try_from(total)
         .map_err(|_| AppError::configuration("bilibili packet exceeds protocol size"))?;
+    if total as usize > MAX_PACKET_BYTES
+    {
+        return Err(AppError::configuration("bilibili packet exceeds safety limit"));
+    }
     let mut packet = Vec::with_capacity(total as usize);
     packet.extend_from_slice(&total.to_be_bytes());
     packet.extend_from_slice(&16_u16.to_be_bytes());
@@ -233,6 +264,10 @@ fn decode_packets_at_depth(
     {
         return Err(AppError::protocol("bilibili packet nesting is too deep"));
     }
+    if bytes.len() > MAX_PACKET_BYTES
+    {
+        return Err(AppError::protocol("bilibili packet exceeds safety limit"));
+    }
     let mut offset = 0_usize;
     let mut packets = Vec::new();
     while offset < bytes.len()
@@ -245,7 +280,10 @@ fn decode_packets_at_depth(
         let header = u16::from_be_bytes(bytes[offset + 4..offset + 6].try_into().unwrap()) as usize;
         let version = u16::from_be_bytes(bytes[offset + 6..offset + 8].try_into().unwrap());
         let operation = u32::from_be_bytes(bytes[offset + 8..offset + 12].try_into().unwrap());
-        if header < 16 || total < header || total > bytes.len() - offset
+        if header < 16
+            || total < header
+            || total > bytes.len() - offset
+            || total > MAX_PACKET_BYTES
         {
             return Err(AppError::protocol("invalid bilibili packet length"));
         }
@@ -267,6 +305,10 @@ fn decode_packets_at_depth(
                 decoder
                     .read_to_end(&mut decompressed)
                     .map_err(|error| AppError::protocol(format!("bilibili zlib decompression failed: {error}")))?;
+                if decompressed.len() > MAX_PACKET_BYTES
+                {
+                    return Err(AppError::protocol("bilibili decompressed packet exceeds safety limit"));
+                }
                 packets.extend(decode_packets_at_depth(&decompressed, depth + 1)?);
             }
             3 =>
@@ -286,6 +328,29 @@ fn decode_packets_at_depth(
     }
     Ok(packets)
 }
+fn value_id(value: Option<&Value>) -> Option<String>
+{
+    value.and_then(|value|
+    {
+        value
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| value.as_u64().map(|number| number.to_string()))
+    })
+}
+
+fn platform_event_id(data: &Value, primary: &str, discriminator: &str) -> String
+{
+    if let Some(id) = value_id(data.get(primary))
+    {
+        return id;
+    }
+    let user = value_id(data.get("uid")).unwrap_or_else(|| "unknown-user".to_owned());
+    let timestamp = value_id(data.get("timestamp")).unwrap_or_else(|| "unknown-time".to_owned());
+    let kind = value_id(data.get(discriminator)).unwrap_or_else(|| "unknown-event".to_owned());
+    format!("{user}:{timestamp}:{kind}")
+}
+
 fn map_message(session_id: Uuid, room_id: u64, body: &[u8]) -> Result<Option<LiveEventEnvelope>, AppError>
 {
     let raw: Value = serde_json::from_slice(body)
@@ -314,7 +379,7 @@ fn map_message(session_id: Uuid, room_id: u64, body: &[u8]) -> Result<Option<Liv
     else if command == "SEND_GIFT"
     {
         Some(LiveEvent::Gift {
-            event_id: data.get("giftId").and_then(Value::as_u64).unwrap_or_default().to_string(),
+            event_id: platform_event_id(data, "tid", "giftId"),
             user_id: data.get("uid").and_then(Value::as_u64).unwrap_or_default().to_string(),
             display_name: data.get("uname").and_then(Value::as_str).unwrap_or("观众").to_owned(),
             gift_name: data.get("giftName").and_then(Value::as_str).unwrap_or("礼物").to_owned(),
@@ -332,7 +397,7 @@ fn map_message(session_id: Uuid, room_id: u64, body: &[u8]) -> Result<Option<Liv
     else if command == "SUPER_CHAT_MESSAGE"
     {
         Some(LiveEvent::Donation {
-            event_id: data.get("id").and_then(Value::as_u64).unwrap_or_default().to_string(),
+            event_id: platform_event_id(data, "id", "price"),
             user_id: data.get("uid").and_then(Value::as_u64).unwrap_or_default().to_string(),
             display_name: data.get("user_info").and_then(|value| value.get("uname")).and_then(Value::as_str).unwrap_or("观众").to_owned(),
             amount_minor: data.get("price").and_then(Value::as_u64).unwrap_or_default() * 100,
@@ -448,6 +513,7 @@ mod tests
                 "cmd": "SEND_GIFT",
                 "data": {
                     "giftId": 7,
+                    "tid": "gift-1",
                     "uid": 42,
                     "uname": "小明",
                     "giftName": "星星",
@@ -459,7 +525,7 @@ mod tests
         )
         .expect("gift parses")
         .expect("gift maps");
-        assert!(matches!(gift.payload, LiveEvent::Gift { count: 2, .. }));
+        assert!(matches!(gift.payload, LiveEvent::Gift { count: 2, event_id, .. } if event_id == "gift-1"));
 
         let follow = map_message(
             Uuid::new_v4(),
@@ -507,5 +573,25 @@ mod tests
         let packet = encode_packet(5, 3, b"compressed").expect("packet builds");
         let error = decode_packets(&packet).expect_err("brotli must be explicit");
         assert!(error.to_string().contains("brotli compression"));
+    }
+
+    #[test]
+    fn validates_settings_before_connecting()
+    {
+        let mut settings = BilibiliSettings::new(123).expect("settings build");
+        assert!(settings.validate().is_ok());
+        settings.endpoint = "https://example.invalid/sub".to_owned();
+        assert!(settings.validate().is_err());
+        settings.endpoint = "wss://example.invalid/sub".to_owned();
+        settings.reconnect_delay_ms = 0;
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_packets_before_allocation()
+    {
+        let body = vec![0_u8; 8 * 1024 * 1024];
+        let error = encode_packet(5, 1, &body).expect_err("safety limit must reject packet");
+        assert!(error.to_string().contains("safety limit"));
     }
 }

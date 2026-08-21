@@ -7,8 +7,8 @@
 - 默认连接 `wss://broadcastlv.chat.bilibili.com:443/sub`，房间号由 `BilibiliSettings` 提供。
 - 支持 `DANMU_MSG`、`SEND_GIFT`、`INTERACT_WORD`（关注）、`SUPER_CHAT_MESSAGE`、开播/下播通知的边界映射。
 - 读取 Cookie 只通过显式环境变量名配置；不把 Cookie 写入配置文件或日志。
-- 连接中断后按 `reconnect_delay_ms` 重连；平台输入异常只返回连接器错误。
-- WebSocket 数据包采用大端长度/操作码解析；版本 2 的 zlib 压缩包会在边界解压并递归解析内部数据包，版本 3 Brotli 在未启用编解码器时明确报错，避免把未解压数据误当作 JSON。模拟连接器和 JSONL 回放始终可用。
+- 连接中断后按 `reconnect_delay_ms` 重连；连接保持期间每 30 秒发送协议心跳；平台输入异常只返回连接器错误。
+- WebSocket 数据包采用大端长度/操作码解析；握手使用协议版本 2，版本 2 的 zlib 压缩包会在边界解压并递归解析内部数据包；单个输入或解压包超过 8 MiB 会拒绝，版本 3 Brotli 在未启用编解码器时明确报错，避免把未解压数据误当作 JSON。礼物优先使用平台 `tid` 作为事件 ID，避免同类礼物被错误去重。模拟连接器和 JSONL 回放始终可用。
 
 无真实账号时运行完整模拟路径：
 
@@ -16,7 +16,7 @@
 cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20
 ```
 
-真实连接器的账号权限、Cookie 生命周期和平台协议属于部署边界；生产接入前应为 zlib/Brotli 压缩包版本、嵌套包、重复消息、限流和断线场景补充录制契约测试。
+真实连接器的账号权限、Cookie 生命周期和平台协议属于部署边界；生产接入前仍应在目标账号和网络环境补充真实连接契约测试；当前代码已覆盖 zlib、嵌套包、包大小上限、重复事件 ID、限流边界和断线重连路径。Brotli 需要显式启用编解码器后再开放。
 ## 服务端接入（可视化向导或配置文件）
 
 桌面首次设置窗口可以勾选“接收 Bilibili 直播事件”，填写房间号和 Cookie 环境变量名。向导只保存环境变量名，不保存 Cookie 内容；默认仍为关闭状态。
