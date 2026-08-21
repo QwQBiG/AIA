@@ -37,6 +37,14 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
 
 Developer stage replay is available with --replay-stage PATH; the service validates version, sequence, and action capability before printing replay logs.
 
+视觉/游戏 dry-run 回放：
+
+```powershell
+cargo run -p ai-ex-service -- --config config/ai-ex.example.toml --replay-automation config_examples/automation-replay.jsonl
+```
+
+该命令只记录动作并生成确定性屏幕帧，不会移动真实鼠标或启动进程；每个动作仍会写入 `logs/automation-audit.jsonl`。
+
 也可以显式指定配置：
 
 ```powershell

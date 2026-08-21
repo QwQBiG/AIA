@@ -10,6 +10,7 @@ ai-ex-domain = { path = "../ai-ex-domain" }
 ai-ex-safety = { path = "../ai-ex-safety" }
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

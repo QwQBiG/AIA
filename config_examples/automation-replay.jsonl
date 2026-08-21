@@ -1,0 +1,3 @@
+{"schema_version":1,"timestamp_ms":0,"target":"game-dry-run","rationale":"观察当前画面","action":{"type":"capture_screen"}}
+{"schema_version":1,"timestamp_ms":80,"target":"game-dry-run","rationale":"移动到演示位置","action":{"type":"move_pointer","x":0.5,"y":0.5}}
+{"schema_version":1,"timestamp_ms":160,"target":"game-dry-run","rationale":"执行演示点击","action":{"type":"click","button":"left"}}

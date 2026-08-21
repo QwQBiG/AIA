@@ -62,6 +62,7 @@ dependencies = [
  "ai-ex-safety",
  "async-trait",
  "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -272,6 +273,7 @@ dependencies = [
  "ai-ex-asr",
  "ai-ex-audio",
  "ai-ex-audit",
+ "ai-ex-automation",
  "ai-ex-bilibili",
  "ai-ex-capture",
  "ai-ex-config",

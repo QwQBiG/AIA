@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod args;
+mod automation_replay;
 mod events;
 
 use std::path::{Path, PathBuf};
@@ -35,6 +36,7 @@ use ai_ex_vision::{
 };
 use async_trait::async_trait;
 use args::Args;
+use automation_replay::replay as replay_automation;
 use events::ConsoleEvents;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
@@ -129,6 +131,10 @@ async fn run() -> Result<(), AppError>
     if let Some(path) = args.replay_stage.as_ref()
     {
         return replay_stage_records(path).await;
+    }
+    if let Some(path) = args.replay_automation.as_ref()
+    {
+        return replay_automation(path, &config).await;
     }
     let vision = build_vision(&config)?;
     if let (Some(image_path), Some(prompt)) = (args.vision_image, args.vision_prompt)

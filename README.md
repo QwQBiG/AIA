@@ -52,6 +52,7 @@ Developer stage replay:
 
 ```powershell
 cargo run -p ai-ex-service -- --replay-stage path/to/stage.jsonl
+cargo run -p ai-ex-service -- --replay-automation config_examples/automation-replay.jsonl
 ```
 
 使用只读视觉分析（需在配置中启用 `[vision]`）：

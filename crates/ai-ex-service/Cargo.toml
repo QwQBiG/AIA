@@ -12,6 +12,7 @@ native-capture = ["ai-ex-capture/native-capture"]
 
 [dependencies]
 ai-ex-asr = { path = "../ai-ex-asr" }
+ai-ex-automation = { path = "../ai-ex-automation" }
 ai-ex-audit = { path = "../ai-ex-audit" }
 ai-ex-bilibili = { path = "../ai-ex-bilibili" }
 ai-ex-audio = { path = "../ai-ex-audio" }

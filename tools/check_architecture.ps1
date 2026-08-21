@@ -38,7 +38,7 @@ $allowed = @{
     'ai-ex-ui-model' = @('ai-ex-domain', 'ai-ex-observability')
     'ai-ex-migrate' = @('ai-ex-config', 'ai-ex-domain')
     'ai-ex-service' = @(
-        'ai-ex-asr', 'ai-ex-audit', 'ai-ex-audio', 'ai-ex-bilibili', 'ai-ex-capture',
+        'ai-ex-asr', 'ai-ex-audit', 'ai-ex-audio', 'ai-ex-automation', 'ai-ex-bilibili', 'ai-ex-capture',
         'ai-ex-config', 'ai-ex-control', 'ai-ex-core', 'ai-ex-domain', 'ai-ex-event-bus',
         'ai-ex-deepseek',
         'ai-ex-duplex', 'ai-ex-koboldcpp', 'ai-ex-memory', 'ai-ex-observability',

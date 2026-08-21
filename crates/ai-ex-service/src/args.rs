@@ -9,6 +9,7 @@ pub struct Args
     pub check: bool,
     pub prompt: Option<String>,
     pub replay_events: Option<PathBuf>,
+    pub replay_automation: Option<PathBuf>,
     pub replay_stage: Option<PathBuf>,
     pub vision_image: Option<PathBuf>,
     pub vision_prompt: Option<String>,
@@ -22,6 +23,7 @@ impl Args
         let mut check = false;
         let mut prompt = None;
         let mut replay_events = None;
+        let mut replay_automation = None;
         let mut replay_stage = None;
         let mut vision_image = None;
         let mut vision_prompt = None;
@@ -44,6 +46,13 @@ impl Args
                         AppError::configuration("--replay-events requires a JSONL path")
                     })?;
                     replay_events = Some(PathBuf::from(path));
+                }
+                "--replay-automation" =>
+                {
+                    let path = values.next().ok_or_else(|| {
+                        AppError::configuration("--replay-automation requires a JSONL path")
+                    })?;
+                    replay_automation = Some(PathBuf::from(path));
                 }
                 "--replay-stage" =>
                 {
@@ -74,7 +83,7 @@ impl Args
                 "--help" | "-h" =>
                 {
                     return Err(AppError::configuration(
-                        "usage: ai-ex-service [--config PATH] [--check | --replay-events PATH | --replay-stage PATH | --prompt TEXT | \
+                        "usage: ai-ex-service [--config PATH] [--check | --replay-events PATH | --replay-automation PATH | --replay-stage PATH | --prompt TEXT | \
                          --vision-image PATH --vision-prompt TEXT]",
                     ));
                 }
@@ -94,13 +103,14 @@ impl Args
         }
         let selected_modes = usize::from(check)
             + usize::from(replay_events.is_some())
+            + usize::from(replay_automation.is_some())
             + usize::from(replay_stage.is_some())
             + usize::from(prompt.is_some())
             + usize::from(vision_image.is_some());
         if selected_modes > 1
         {
             return Err(AppError::configuration(
-                "--check, --replay-events, --replay-stage, --prompt, and vision analysis modes are mutually exclusive",
+                "--check, --replay-events, --replay-automation, --replay-stage, --prompt, and vision analysis modes are mutually exclusive",
             ));
         }
         Ok(Self {
@@ -108,6 +118,7 @@ impl Args
             check,
             prompt,
             replay_events,
+            replay_automation,
             replay_stage,
             vision_image,
             vision_prompt,
@@ -149,6 +160,17 @@ mod tests
         .expect("replay arguments parse");
         assert_eq!(args.replay_events, Some(PathBuf::from("events.jsonl")));
     }
+    #[test]
+    fn accepts_automation_replay_mode()
+    {
+        let args = Args::parse([
+            "--replay-automation".to_owned(),
+            "automation.jsonl".to_owned(),
+        ])
+        .expect("automation replay arguments parse");
+        assert_eq!(args.replay_automation, Some(PathBuf::from("automation.jsonl")));
+    }
+
     #[test]
     fn accepts_stage_replay_mode()
     {
