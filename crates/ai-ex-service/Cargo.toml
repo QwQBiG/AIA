@@ -19,6 +19,7 @@ ai-ex-config = { path = "../ai-ex-config" }
 ai-ex-control = { path = "../ai-ex-control" }
 ai-ex-core = { path = "../ai-ex-core" }
 ai-ex-domain = { path = "../ai-ex-domain" }
+ai-ex-event-bus = { path = "../ai-ex-event-bus" }
 ai-ex-deepseek = { path = "../ai-ex-deepseek" }
 ai-ex-duplex = { path = "../ai-ex-duplex" }
 ai-ex-memory = { path = "../ai-ex-memory" }

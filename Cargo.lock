@@ -277,6 +277,7 @@ dependencies = [
  "ai-ex-deepseek",
  "ai-ex-domain",
  "ai-ex-duplex",
+ "ai-ex-event-bus",
  "ai-ex-koboldcpp",
  "ai-ex-memory",
  "ai-ex-observability",

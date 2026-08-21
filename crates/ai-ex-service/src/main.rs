@@ -3,7 +3,7 @@
 mod args;
 mod events;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,6 +18,7 @@ use ai_ex_core::{
     ConversationPolicy, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, spawn_runtime,
 };
 use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, TurnId};
+use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, PublishOutcome};
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
@@ -109,6 +110,18 @@ async fn run() -> Result<(), AppError>
 {
     let args = Args::parse(std::env::args().skip(1))?;
     let config = AppConfig::load(&args.config).await?;
+    if let Some(path) = args.replay_events.as_ref()
+    {
+        let mut memory = if config.memory.enabled
+        {
+            MemoryStore::open(&config.memory.path).await?
+        }
+        else
+        {
+            MemoryStore::disabled()
+        };
+        return replay_events_to_memory(path, &mut memory).await;
+    }
     let vision = build_vision(&config)?;
     if let (Some(image_path), Some(prompt)) = (args.vision_image, args.vision_prompt)
     {
@@ -271,6 +284,40 @@ async fn run() -> Result<(), AppError>
     Ok(())
 }
 
+async fn replay_events_to_memory(
+    path: &Path,
+    memory: &mut MemoryStore,
+) -> Result<(), AppError>
+{
+    let events = load_jsonl(path)?;
+    let input_count = events.len();
+    let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
+    let mut accepted = 0_usize;
+    let mut projected = 0_usize;
+    let before = memory.len().await;
+    for event in events
+    {
+        if bus.publish(event) != PublishOutcome::Accepted
+        {
+            continue;
+        }
+        accepted += 1;
+        let Ok(delivered) = receiver.try_recv() else
+        {
+            continue;
+        };
+        for projection in project_memory(&delivered)
+        {
+            memory.remember_projection(&projection).await?;
+            projected += 1;
+        }
+    }
+    let persisted = memory.len().await.saturating_sub(before);
+    println!(
+        "event replay complete: input={input_count} accepted={accepted} projected_memory={projected} persisted_memory={persisted}",
+    );
+    Ok(())
+}
 async fn join_speech_worker(task: tokio::task::JoinHandle<()>) -> Result<(), AppError>
 {
     task.await

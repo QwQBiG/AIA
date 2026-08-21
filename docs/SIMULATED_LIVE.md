@@ -18,6 +18,14 @@ cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20 -
 
 该模式会通过 `EventBus` 的去重/冷却后再调用 `project_memory`，最终输出 `persisted_memory` 数量。
 
+同一条链路也可以由服务组合根执行，不会初始化模型、VTS 或音频：
+
+```powershell
+cargo run -p ai-ex-service -- --config config/ai-ex.example.toml --replay-events config/simulated-live.jsonl
+```
+
+服务会使用配置中的 `[memory]` 路径，输出 `input`、`accepted`、`projected_memory` 和 `persisted_memory`，适合在没有任何模型或直播账号时验证完整编排链路。
+
 JSONL 录制文件不包含 API Key、控制令牌或用户长期记忆。真实平台连接器只需要把平台字段转换为 `LiveEvent`，不应把平台 SDK 类型带入核心。
 
 事件进入总线后可以调用 `project_memory` 生成平台无关的记忆投影：观众关系写入 `viewer`，礼物/捐赠和系统事件写入 `live_event`。投影交给 `MemoryStore::remember_projection` 后才会落盘；审核事件和定时器默认不写入记忆。

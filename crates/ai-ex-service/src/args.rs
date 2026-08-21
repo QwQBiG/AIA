@@ -8,6 +8,7 @@ pub struct Args
     pub config: PathBuf,
     pub check: bool,
     pub prompt: Option<String>,
+    pub replay_events: Option<PathBuf>,
     pub vision_image: Option<PathBuf>,
     pub vision_prompt: Option<String>,
 }
@@ -19,6 +20,7 @@ impl Args
         let mut config = PathBuf::from("config/ai-ex.example.toml");
         let mut check = false;
         let mut prompt = None;
+        let mut replay_events = None;
         let mut vision_image = None;
         let mut vision_prompt = None;
         let mut values = values.into_iter();
@@ -34,6 +36,13 @@ impl Args
                     config = PathBuf::from(path);
                 }
                 "--check" => check = true,
+                "--replay-events" =>
+                {
+                    let path = values.next().ok_or_else(|| {
+                        AppError::configuration("--replay-events requires a JSONL path")
+                    })?;
+                    replay_events = Some(PathBuf::from(path));
+                }
                 "--prompt" =>
                 {
                     prompt = Some(values.next().ok_or_else(|| {
@@ -56,7 +65,7 @@ impl Args
                 "--help" | "-h" =>
                 {
                     return Err(AppError::configuration(
-                        "usage: ai-ex-service [--config PATH] [--check | --prompt TEXT | \
+                        "usage: ai-ex-service [--config PATH] [--check | --replay-events PATH | --prompt TEXT | \
                          --vision-image PATH --vision-prompt TEXT]",
                     ));
                 }
@@ -75,18 +84,20 @@ impl Args
             ));
         }
         let selected_modes = usize::from(check)
+            + usize::from(replay_events.is_some())
             + usize::from(prompt.is_some())
             + usize::from(vision_image.is_some());
         if selected_modes > 1
         {
             return Err(AppError::configuration(
-                "--check, --prompt, and vision analysis modes are mutually exclusive",
+                "--check, --replay-events, --prompt, and vision analysis modes are mutually exclusive",
             ));
         }
         Ok(Self {
             config,
             check,
             prompt,
+            replay_events,
             vision_image,
             vision_prompt,
         })
@@ -117,6 +128,16 @@ mod tests
         assert!(args.check);
     }
 
+    #[test]
+    fn accepts_event_replay_mode()
+    {
+        let args = Args::parse([
+            "--replay-events".to_owned(),
+            "events.jsonl".to_owned(),
+        ])
+        .expect("replay arguments parse");
+        assert_eq!(args.replay_events, Some(PathBuf::from("events.jsonl")));
+    }
     #[test]
     fn accepts_complete_vision_mode()
     {
