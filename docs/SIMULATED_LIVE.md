@@ -6,14 +6,28 @@ Phase 3 提供平台无关的直播事件总线和 JSONL 回放器。事件先�
 
 ```powershell
 cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20
+
+开发者若要保存可重复的验收结果，可以增加 `--report`：
+```powershell
+cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 100 --report target/simulated-live-report.jsonl
 ```
 
-`--speed 20` 表示按 20 倍时间速度回放。模拟器会打印每个事件的优先级、过滤结果和最终接收数量。
+报告每行记录事件 ID、优先级、过滤结果、响应建议和记忆投影数量；不会调用模型、VTS、键鼠或直播平台。
+```
+
+`--speed 20` 表示按 20 倍时间速度回放。模拟器会打印每个事件的优先级、过滤结果、响应建议状态和最终接收数量。
 
 如果希望把回放事件实际写入分类记忆，增加 `--memory`：
 
 ```powershell
-cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20 --memory memory_db/simulated-live.jsonl
+cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 20
+
+开发者若要保存可重复的验收结果，可以增加 `--report`：
+```powershell
+cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 100 --report target/simulated-live-report.jsonl
+```
+
+报告每行记录事件 ID、优先级、过滤结果、响应建议和记忆投影数量；不会调用模型、VTS、键鼠或直播平台。 --memory memory_db/simulated-live.jsonl
 ```
 
 该模式会通过 `EventBus` 的去重/冷却后再调用 `project_memory`，最终输出 `persisted_memory` 数量。
