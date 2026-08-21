@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 ai-ex-domain = { path = "../ai-ex-domain" }
 ai-ex-protocol = { path = "../ai-ex-protocol" }
+ai-ex-stage = { path = "../ai-ex-stage" }
 ai-ex-text = { path = "../ai-ex-text" }
 async-trait.workspace = true
 tokio.workspace = true

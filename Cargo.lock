@@ -120,6 +120,7 @@ version = "0.1.0"
 dependencies = [
  "ai-ex-domain",
  "ai-ex-protocol",
+ "ai-ex-stage",
  "ai-ex-text",
  "async-trait",
  "tokio",
@@ -285,6 +286,7 @@ dependencies = [
  "ai-ex-observability",
  "ai-ex-ollama",
  "ai-ex-safety",
+ "ai-ex-stage",
  "ai-ex-stage-obs",
  "ai-ex-tts",
  "ai-ex-vision",

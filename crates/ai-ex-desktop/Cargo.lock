@@ -166,6 +166,7 @@ version = "0.1.0"
 dependencies = [
  "ai-ex-domain",
  "ai-ex-protocol",
+ "ai-ex-stage",
  "ai-ex-text",
  "async-trait",
  "tokio",
@@ -216,6 +217,15 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "ai-ex-stage"
+version = "0.1.0"
+dependencies = [
+ "ai-ex-domain",
+ "async-trait",
+ "serde",
 ]
 
 [[package]]

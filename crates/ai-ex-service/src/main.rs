@@ -16,7 +16,7 @@ use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend};
 use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
-    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle,
+    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, StageOutput,
     spawn_runtime,
 };
 use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, SystemEvent, TurnId};
@@ -25,6 +25,7 @@ use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
 use ai_ex_ollama::OllamaClient;
+use ai_ex_stage::{StageExecutor, StageRouter};
 use ai_ex_safety::{Capability, SafetyGate, SafetyPolicy};
 use ai_ex_stage_obs::{ObsDryRunStage, ObsSettings, ObsWebSocketStage, parse_records_jsonl, replay_records};
 use ai_ex_tts::{GptSovitsClient, GptSovitsSettings};
@@ -149,7 +150,7 @@ async fn run() -> Result<(), AppError>
     let model = build_model(&config)?;
     let vts = connect_vts(&config).await;
     let obs_runtime = connect_obs(&config).await;
-    if obs_runtime.stage.is_some()
+    if obs_runtime.connected
     {
         tracing::info!("OBS WebSocket stage connected");
     }
@@ -201,14 +202,21 @@ async fn run() -> Result<(), AppError>
     .await;
     let health_snapshot = Arc::new(RwLock::new(startup_health));
 
+    let mut stage_router = StageRouter::new();
+    stage_router.push(speech);
+    stage_router.push(vts);
+    stage_router.push_box(obs_runtime.stage);
+    let stage_output = StageOutput::new(stage_router);
+    let speech_port = stage_output.speech();
+    let avatar_port = stage_output.avatar();
     let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player));
     let event_hub = EventHub::new(256)?;
     let events = TeeEventSink::new(ConsoleEvents, event_hub.clone());
     let live_memory = memory.clone();
     let runtime = Runtime::with_policy(
         model,
-        speech,
-        vts,
+        speech_port,
+        avatar_port,
         memory,
         events,
         ConversationPolicy {
@@ -529,17 +537,22 @@ async fn connect_vts(config: &AppConfig) -> VtsClient
 
 struct ObsRuntime
 {
-    stage: Option<ObsWebSocketStage>,
+    stage: Box<dyn StageExecutor>,
     health: ComponentHealth,
+    connected: bool,
 }
-
+fn fallback_obs_stage() -> Box<dyn StageExecutor>
+{
+    Box::new(ObsDryRunStage::new(256).expect("valid OBS dry-run capacity"))
+}
 async fn connect_obs(config: &AppConfig) -> ObsRuntime
 {
     if !config.obs.enabled
     {
         return ObsRuntime {
-            stage: None,
+            stage: fallback_obs_stage(),
             health: obs_stage_health(),
+            connected: false,
         };
     }
     let mut settings = match ObsSettings::new(config.obs.host.clone(), config.obs.port)
@@ -548,8 +561,9 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
         Err(error) =>
         {
             return ObsRuntime {
-                stage: None,
+                stage: fallback_obs_stage(),
                 health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
+                connected: false,
             };
         }
     };
@@ -562,16 +576,18 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
         {
             let health = stage.health().clone();
             ObsRuntime {
-                stage: Some(stage),
+                stage: Box::new(stage),
                 health,
+                connected: true,
             }
         }
         Err(error) =>
         {
             tracing::warn!(%error, "OBS WebSocket unavailable; stage output disabled");
             ObsRuntime {
-                stage: None,
+                stage: fallback_obs_stage(),
                 health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
+                connected: false,
             }
         }
     }

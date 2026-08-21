@@ -18,7 +18,7 @@ $allowed = @{
     'ai-ex-simulator' = @('ai-ex-domain', 'ai-ex-event-bus', 'ai-ex-memory')
     'ai-ex-config' = @('ai-ex-domain')
     'ai-ex-text' = @('ai-ex-domain')
-    'ai-ex-core' = @('ai-ex-domain', 'ai-ex-text', 'ai-ex-protocol')
+    'ai-ex-core' = @('ai-ex-domain', 'ai-ex-text', 'ai-ex-protocol', 'ai-ex-stage')
     'ai-ex-duplex' = @('ai-ex-domain')
     'ai-ex-asr' = @('ai-ex-domain', 'ai-ex-duplex')
     'ai-ex-capture' = @('ai-ex-domain', 'ai-ex-duplex')
@@ -43,7 +43,7 @@ $allowed = @{
         'ai-ex-deepseek',
         'ai-ex-duplex', 'ai-ex-koboldcpp', 'ai-ex-memory', 'ai-ex-observability',
         'ai-ex-ollama',
-        'ai-ex-safety', 'ai-ex-stage-obs', 'ai-ex-tts', 'ai-ex-vision', 'ai-ex-vts'
+        'ai-ex-safety', 'ai-ex-stage', 'ai-ex-stage-obs', 'ai-ex-tts', 'ai-ex-vision', 'ai-ex-vts'
     )
 }
 

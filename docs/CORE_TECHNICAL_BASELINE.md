@@ -195,4 +195,4 @@ crates/
 下一步优先把 OBS JSONL 录制回放接入桌面开发者面板，再实现真实 OBS WebSocket 连接器；游戏动作继续保持独立插件边界。
 
 - OBS 适配：ai-ex-stage-obs 同时提供无副作用 JSONL dry-run 和 OBS WebSocket v5 连接器；真实连接默认关闭，密码只从环境变量读取。
-- StageRouter：核心协议层按能力分发舞台动作并广播急停；Runtime 适配正在迁移中。
+- StageRouter：核心协议层按能力分发舞台动作并广播急停；Runtime 已通过 `StageOutput` 接入语音、口型、表情和停止动作，字幕/OBS 主动输出仍待后续事件编排。

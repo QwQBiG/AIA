@@ -153,6 +153,10 @@ impl StageRouter
         self.executors.push(Box::new(executor));
     }
 
+    pub fn push_box(&mut self, executor: Box<dyn StageExecutor>)
+    {
+        self.executors.push(executor);
+    }
     pub fn len(&self) -> usize
     {
         self.executors.len()
