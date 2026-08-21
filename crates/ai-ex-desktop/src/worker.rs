@@ -26,6 +26,7 @@ pub enum WorkerEvent
     Snapshot(RuntimeSnapshot),
     Health(Vec<ComponentHealth>),
     Events(Vec<SequencedEvent>),
+    Log(String),
     Failure(String),
 }
 
@@ -88,11 +89,21 @@ async fn run_worker(
                 {
                     return;
                 };
-                if let Err(error) = send_command(&client, command).await
+                match send_command(&client, command).await
                 {
-                    if !emit(&events, WorkerEvent::Failure(error.to_string()))
+                    Ok(()) =>
                     {
-                        return;
+                        if !emit(&events, WorkerEvent::Log("control command sent".to_owned()))
+                        {
+                            return;
+                        }
+                    }
+                    Err(error) =>
+                    {
+                        if !emit(&events, WorkerEvent::Failure(error.to_string()))
+                        {
+                            return;
+                        }
                     }
                 }
             }
@@ -154,9 +165,14 @@ async fn run_worker(
                         {
                             cursor = last.sequence;
                         }
-                        if !items.is_empty() && !emit(&events, WorkerEvent::Events(items))
+                        if !items.is_empty()
                         {
-                            return;
+                            let count = items.len();
+                            if !emit(&events, WorkerEvent::Events(items))
+                                || !emit(&events, WorkerEvent::Log(format!("received {count} event(s)")))
+                            {
+                                return;
+                            }
                         }
                     }
                     Err(error) =>

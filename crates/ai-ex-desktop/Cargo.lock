@@ -165,6 +165,7 @@ name = "ai-ex-core"
 version = "0.1.0"
 dependencies = [
  "ai-ex-domain",
+ "ai-ex-protocol",
  "ai-ex-text",
  "async-trait",
  "tokio",
@@ -182,6 +183,7 @@ dependencies = [
  "ai-ex-ui-model",
  "eframe",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -202,6 +204,18 @@ dependencies = [
  "async-trait",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "ai-ex-protocol"
+version = "0.1.0"
+dependencies = [
+ "ai-ex-domain",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

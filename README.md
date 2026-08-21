@@ -115,8 +115,7 @@ crates/
   ai-ex-service/  CLI、组合根和健康检查
 ```
 
-`crates/ai-ex-desktop/` 是独立的 eframe 原生桌面包。由于 GUI 依赖尚未下载，
-它暂时从默认 workspace 排除，避免破坏核心的离线可重复验证。
+`crates/ai-ex-desktop/` 是独立的 eframe 原生桌面包。它保持在默认 workspace 之外，保证核心可以离线验证；桌面端有自己的锁文件和独立构建命令。
 
 依赖方向固定为：`domain/text/duplex contracts → core → adapters → service`。网络、设备、数据库和 UI 不得反向进入领域层。
 
@@ -161,12 +160,13 @@ Python 退役批次和删除门禁见 `docs/LEGACY_RETIREMENT.md`。
 交互模式支持 `/status`、`/interrupt`、`/emergency-stop` 和 `/quit`。
 急停一旦触发，只能通过重启服务清除。
 
-桌面客户端通过默认关闭的本地控制端口接入。启用前需创建至少 32 字节的
-`config/control.token`，再设置 `control.enabled = true`。协议定义见
+桌面客户端通过本地控制端口接入。首次设置向导会自动创建至少 32 字节的 `config/control.token` 并启用控制端；高级手动配置时仍需自行确认 `control.enabled = true`。协议定义见
 `docs/CONTROL_PROTOCOL.md`；服务拒绝任何非回环监听地址。
 
-GUI 依赖可用后启动桌面端：
+桌面端首次启动会自动打开可视化向导，适合不熟悉命令行的用户：
 
 ```powershell
-cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --config "config/ai-ex.local.toml"
+cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
 ```
+
+向导可选择 DeepSeek、KoboldCpp 或 Ollama，自动生成本地配置和控制令牌，并可自动启动服务。开发者使用 `--developer` 查看桌面控制日志；服务原始 stdout/stderr 仍保留在终端。完整说明见 [`docs/DESKTOP_USER_GUIDE.md`](docs/DESKTOP_USER_GUIDE.md)。

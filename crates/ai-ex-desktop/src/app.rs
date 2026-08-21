@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::Path;
 
 use ai_ex_domain::ComponentHealth;
@@ -14,11 +15,13 @@ pub struct DesktopApp
     last_error: Option<String>,
     confirm_emergency_stop: bool,
     health: Vec<ComponentHealth>,
+    developer_mode: bool,
+    logs: VecDeque<String>,
 }
 
 impl DesktopApp
 {
-    pub fn new(context: &eframe::CreationContext<'_>, worker: WorkerHandle) -> Self
+    pub fn new(context: &eframe::CreationContext<'_>, worker: WorkerHandle, developer_mode: bool) -> Self
     {
         configure_appearance(&context.egui_ctx);
         Self {
@@ -28,7 +31,18 @@ impl DesktopApp
             last_error: None,
             confirm_emergency_stop: false,
             health: Vec::new(),
+            developer_mode,
+            logs: VecDeque::with_capacity(200),
         }
+    }
+
+    fn push_log(&mut self, message: impl Into<String>)
+    {
+        if self.logs.len() >= 200
+        {
+            self.logs.pop_front();
+        }
+        self.logs.push_back(message.into());
     }
 
     fn drain_events(&mut self)
@@ -39,6 +53,7 @@ impl DesktopApp
             {
                 WorkerEvent::Connection(connected) =>
                 {
+                    self.push_log(if connected { "control connected" } else { "control disconnected" });
                     self.state.connection = if connected
                     {
                         ConnectionState::Connected
@@ -49,7 +64,11 @@ impl DesktopApp
                     };
                 }
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
-                WorkerEvent::Health(health) => self.health = health,
+                WorkerEvent::Health(health) =>
+                {
+                    self.push_log(format!("health snapshot received: {} component(s)", health.len()));
+                    self.health = health;
+                }
                 WorkerEvent::Events(events) =>
                 {
                     for event in events
@@ -63,7 +82,12 @@ impl DesktopApp
                         }
                     }
                 }
-                WorkerEvent::Failure(error) => self.last_error = Some(error),
+                WorkerEvent::Failure(error) =>
+                {
+                    self.push_log(format!("failure: {error}"));
+                    self.last_error = Some(error);
+                }
+                WorkerEvent::Log(message) => self.push_log(message),
             }
         }
     }
@@ -148,6 +172,35 @@ impl DesktopApp
                         .on_hover_text(&item.detail);
                 }
             });
+        });
+    }
+
+    fn show_developer_panel(&mut self, ui: &mut egui::Ui)
+    {
+        if !self.developer_mode
+        {
+            return;
+        }
+        ui.collapsing("开发者日志（--developer）", |ui|
+        {
+            ui.horizontal(|ui|
+            {
+                ui.small("桌面控制协议与事件流日志；服务端日志继续输出到启动终端。");
+                if ui.button("清空").clicked()
+                {
+                    self.logs.clear();
+                }
+            });
+            egui::ScrollArea::vertical()
+                .max_height(180.0)
+                .stick_to_bottom(true)
+                .show(ui, |ui|
+                {
+                    for line in &self.logs
+                    {
+                        ui.monospace(line);
+                    }
+                });
         });
     }
 
@@ -260,6 +313,7 @@ impl eframe::App for DesktopApp
         self.drain_events();
         self.show_header(ui);
         self.show_health(ui);
+        self.show_developer_panel(ui);
         self.show_conversation(ui);
         self.show_composer(ui);
         self.show_emergency_confirmation(ui.ctx());
