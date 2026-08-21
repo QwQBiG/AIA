@@ -285,6 +285,7 @@ dependencies = [
  "ai-ex-observability",
  "ai-ex-ollama",
  "ai-ex-safety",
+ "ai-ex-stage-obs",
  "ai-ex-tts",
  "ai-ex-vision",
  "ai-ex-vts",

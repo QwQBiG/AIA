@@ -35,6 +35,8 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
 
 开发者面板会显示桌面端收到的连接变化、健康快照、事件数量、控制命令和失败信息；启动终端仍保留 `ai-ex-service` 的完整 stdout/stderr。两者结合可以同时满足“看得懂”和“查得深”。
 
+Developer stage replay is available with --replay-stage PATH; the service validates version, sequence, and action capability before printing replay logs.
+
 也可以显式指定配置：
 
 ```powershell

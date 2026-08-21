@@ -26,6 +26,7 @@ use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
 use ai_ex_ollama::OllamaClient;
 use ai_ex_safety::{Capability, SafetyGate, SafetyPolicy};
+use ai_ex_stage_obs::{ObsDryRunStage, parse_records_jsonl, replay_records};
 use ai_ex_tts::{GptSovitsClient, GptSovitsSettings};
 use ai_ex_vts::{VtsClient, VtsSettings};
 use ai_ex_vision::{
@@ -123,6 +124,10 @@ async fn run() -> Result<(), AppError>
             MemoryStore::disabled()
         };
         return replay_events_to_memory(path, &mut memory).await;
+    }
+    if let Some(path) = args.replay_stage.as_ref()
+    {
+        return replay_stage_records(path).await;
     }
     let vision = build_vision(&config)?;
     if let (Some(image_path), Some(prompt)) = (args.vision_image, args.vision_prompt)
@@ -464,6 +469,23 @@ async fn replay_events_to_memory(
     println!(
         "event replay complete: input={input_count} accepted={accepted} reaction_suggestions={reaction_suggestions} projected_memory={projected} persisted_memory={persisted}",
     );
+    Ok(())
+}
+
+async fn replay_stage_records(path: &Path) -> Result<(), AppError>
+{
+    let input = tokio::fs::read_to_string(path).await.map_err(|error|
+    {
+        AppError::unavailable(format!("failed to read OBS stage JSONL {}: {error}", path.display()))
+    })?;
+    let records = parse_records_jsonl(&input)?;
+    let mut stage = ObsDryRunStage::new(records.len().max(1))?;
+    let count = replay_records(&mut stage, &records).await?;
+    println!("OBS dry-run replay complete: records={count}");
+    for record in stage.records()
+    {
+        println!("stage action #{}: {}", record.sequence, record.action.kind());
+    }
     Ok(())
 }
 

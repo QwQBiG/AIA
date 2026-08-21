@@ -163,6 +163,53 @@ impl StageExecutor for ObsDryRunStage
     }
 }
 
+pub fn parse_records_jsonl(input: &str) -> Result<Vec<StageRecord>, AppError>
+{
+    let mut records = Vec::new();
+    let mut previous_sequence = 0_u64;
+    for (line_index, line) in input.lines().enumerate()
+    {
+        let line = line.trim();
+        if line.is_empty()
+        {
+            continue;
+        }
+        let record: StageRecord = serde_json::from_str(line).map_err(|error|
+        {
+            AppError::protocol(format!("invalid OBS record at line {}: {error}", line_index + 1))
+        })?;
+        if record.schema_version != OBS_STAGE_SCHEMA_VERSION
+        {
+            return Err(AppError::protocol(format!(
+                "unsupported OBS record schema version {}",
+                record.schema_version,
+            )));
+        }
+        if record.sequence == 0 || record.sequence <= previous_sequence
+        {
+            return Err(AppError::protocol(format!(
+                "OBS record sequence is not strictly increasing at line {}",
+                line_index + 1,
+            )));
+        }
+        record.action.validate()?;
+        previous_sequence = record.sequence;
+        records.push(record);
+    }
+    Ok(records)
+}
+
+pub async fn replay_records(
+    stage: &mut ObsDryRunStage,
+    records: &[StageRecord],
+) -> Result<usize, AppError>
+{
+    for record in records
+    {
+        stage.execute(record.action.clone()).await?;
+    }
+    Ok(records.len())
+}
 fn unix_timestamp_ms() -> u64
 {
     SystemTime::now()
@@ -242,5 +289,39 @@ mod tests
         stage.interrupt().await.expect("interrupt records");
         assert_eq!(stage.actions().count(), 0);
         assert_eq!(stage.records().last().unwrap().action.kind(), "stop");
+    }
+    #[tokio::test]
+    async fn parses_and_replays_versioned_jsonl()
+    {
+        let mut source = ObsDryRunStage::new(4).expect("OBS stage creates");
+        source
+            .execute(StageAction::Subtitle {
+                text: "hello".to_owned(),
+                duration_ms: 500,
+            })
+            .await
+            .expect("subtitle records");
+        let records = parse_records_jsonl(&source.records_jsonl().expect("records encode"))
+            .expect("records parse");
+        let mut replay = ObsDryRunStage::new(4).expect("replay stage creates");
+        assert_eq!(replay_records(&mut replay, &records).await.expect("replay works"), 1);
+        assert_eq!(replay.actions().next().map(StageAction::kind), Some("subtitle"));
+    }
+
+    #[test]
+    fn rejects_invalid_record_sequence()
+    {
+        let record = serde_json::json!({
+            "schema_version": OBS_STAGE_SCHEMA_VERSION,
+            "sequence": 0,
+            "timestamp_ms": 1,
+            "mode": "dry_run",
+            "action": {
+                "type": "scene",
+                "scene": "main"
+            }
+        });
+        let error = parse_records_jsonl(&record.to_string()).expect_err("zero sequence rejects");
+        assert!(error.to_string().contains("strictly increasing"));
     }
 }
