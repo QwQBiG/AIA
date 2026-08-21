@@ -6,6 +6,8 @@ use ai_ex_domain::{AppError, ComponentHealth};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+const HEALTH_REFRESH_TICKS: u8 = 8;
+
 pub struct WorkerSettings
 {
     pub address: String,
@@ -187,11 +189,33 @@ async fn run_worker(
                     }
                 }
                 ticks = ticks.wrapping_add(1);
-                if connected && ticks % 8 == 0
-                    && let Ok(snapshot) = fetch_snapshot(&client).await
-                    && !emit(&events, WorkerEvent::Snapshot(snapshot))
+                if connected && ticks % HEALTH_REFRESH_TICKS == 0
                 {
-                    return;
+                    if let Ok(snapshot) = fetch_snapshot(&client).await
+                        && !emit(&events, WorkerEvent::Snapshot(snapshot))
+                    {
+                        return;
+                    }
+                    match fetch_health(&client).await
+                    {
+                        Ok(health) =>
+                        {
+                            if !emit(&events, WorkerEvent::Health(health))
+                            {
+                                return;
+                            }
+                        }
+                        Err(error) =>
+                        {
+                            if !emit(
+                                &events,
+                                WorkerEvent::Log(format!("health refresh failed: {error}")),
+                            )
+                            {
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }

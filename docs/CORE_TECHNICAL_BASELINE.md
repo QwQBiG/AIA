@@ -207,3 +207,4 @@ crates/
 - 首次设置连通性检查：桌面向导后台探测 HTTP/HTTPS 地址，不阻塞 UI；DeepSeek 密钥不落盘，服务启动仍做完整 provider health。
 - Provider 健康诊断：DeepSeek、KoboldCpp、Ollama 将 HTTP 鉴权/地址/限流/服务端故障与 timeout/connect 错误转换为可操作中文详情，并保留 provider 原始边界。
 - 模型清单验证：DeepSeek `/models` 和 Ollama `/api/tags` 在可解析时检查 configured model；非标准兼容响应降级为“已连接但未验证”，不伪造可用状态。
+- 桌面健康轮询：控制连接保持后周期性重新拉取 provider、插件、VTS/TTS 和安全状态；健康请求失败只记录开发者日志，不伪造断线。
