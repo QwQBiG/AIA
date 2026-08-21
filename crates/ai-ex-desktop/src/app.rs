@@ -73,6 +73,22 @@ impl DesktopApp
                 {
                     for event in events
                     {
+                        match &event.event
+                        {
+                            ai_ex_domain::SystemEvent::LiveEventReceived {
+                                event_type,
+                                summary,
+                                ..
+                            } => self.push_log(format!("live event {event_type}: {summary}")),
+                            ai_ex_domain::SystemEvent::LiveResponseSuggested {
+                                automatic, ..
+                            } => self.push_log(format!(
+                                "live reaction suggested (automatic={automatic})",
+                            )),
+                            _ =>
+                            {
+                            }
+                        }
                         if self.state.apply_event(event) == ApplyOutcome::GapDetected
                         {
                             self.last_error = Some(

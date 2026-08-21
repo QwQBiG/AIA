@@ -13,6 +13,17 @@ pub enum SystemEvent
     TurnFinished { turn_id: TurnId, full_text: String },
     TurnInterrupted { turn_id: TurnId, reason: String },
     StateChanged { from: ConversationState, to: ConversationState },
+    LiveEventReceived {
+        event_id: uuid::Uuid,
+        source: String,
+        event_type: String,
+        summary: String,
+    },
+    LiveResponseSuggested {
+        event_id: uuid::Uuid,
+        text: String,
+        automatic: bool,
+    },
     Fault { message: String },
 }
 

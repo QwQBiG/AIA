@@ -150,6 +150,9 @@ impl UiState
                     turn.status = TurnStatus::Failed;
                 }
             }
+            SystemEvent::LiveEventReceived { .. } | SystemEvent::LiveResponseSuggested { .. } =>
+            {
+            }
         }
     }
 

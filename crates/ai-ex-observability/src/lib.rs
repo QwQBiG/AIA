@@ -146,7 +146,9 @@ impl EventHub
                     snapshot.faults += 1;
                     snapshot.last_fault = Some(message.clone());
                 }
-                SystemEvent::ModelChunk { .. } =>
+                SystemEvent::ModelChunk { .. }
+                | SystemEvent::LiveEventReceived { .. }
+                | SystemEvent::LiveResponseSuggested { .. } =>
                 {
                 }
             }

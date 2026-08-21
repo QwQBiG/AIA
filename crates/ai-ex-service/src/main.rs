@@ -16,9 +16,10 @@ use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend};
 use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
-    ConversationPolicy, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, spawn_runtime,
+    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle,
+    spawn_runtime,
 };
-use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, TurnId};
+use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, SystemEvent, TurnId};
 use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, PublishOutcome};
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
@@ -213,7 +214,13 @@ async fn run() -> Result<(), AppError>
         return Ok(());
     }
 
-    let bilibili_task = spawn_bilibili(&config.bilibili, live_memory)?;
+    let bilibili_task = spawn_bilibili(
+        &config.bilibili,
+        live_memory,
+        runtime.clone(),
+        event_hub.clone(),
+        Arc::clone(&safety),
+    )?;
     let control_task = spawn_control(
         &config,
         runtime.clone(),
@@ -294,6 +301,9 @@ async fn run() -> Result<(), AppError>
 fn spawn_bilibili(
     config: &BilibiliConfig,
     memory: MemoryStore,
+    runtime: RuntimeHandle,
+    event_hub: EventHub,
+    safety: Arc<SafetyGate>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
 {
     if !config.enabled
@@ -304,11 +314,17 @@ fn spawn_bilibili(
     settings.endpoint = config.endpoint.clone();
     settings.cookie_env = config.cookie_env.clone().filter(|value| !value.trim().is_empty());
     settings.reconnect_delay_ms = config.reconnect_delay_ms;
+    let auto_react = config.auto_react;
+    let reaction_cooldown_ms = config.reaction_cooldown_ms;
+    let reconnect_delay_ms = config.reconnect_delay_ms;
     let task = tokio::spawn(async move
     {
         let mut memory = memory;
+        let mut event_hub = event_hub;
         let mut connector = BilibiliConnector::new(settings);
         let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
+        let mut reactions = tokio::task::JoinSet::new();
+        let mut last_reaction_ms = None;
         loop
         {
             match connector.next_events().await
@@ -323,6 +339,18 @@ fn spawn_bilibili(
                         }
                         while let Ok(delivered) = receiver.try_recv()
                         {
+                            let event_id = delivered.event_id;
+                            let event_type = delivered.payload.event_type().to_owned();
+                            let summary = delivered.payload.summary();
+                            tracing::info!(%event_id, %event_type, %summary, "live event accepted");
+                            event_hub
+                                .publish(SystemEvent::LiveEventReceived {
+                                    event_id,
+                                    source: delivered.source.clone(),
+                                    event_type,
+                                    summary,
+                                })
+                                .await;
                             for projection in project_memory(&delivered)
                             {
                                 if let Err(error) = memory.remember_projection(&projection).await
@@ -330,18 +358,68 @@ fn spawn_bilibili(
                                     tracing::error!(%error, "bilibili memory projection failed");
                                 }
                             }
+                            let Some(prompt) = delivered.payload.reaction_prompt() else
+                            {
+                                continue;
+                            };
+                            let automatic = reaction_allowed(
+                                auto_react,
+                                safety.emergency_stop_active(),
+                                last_reaction_ms,
+                                delivered.timestamp_ms,
+                                reaction_cooldown_ms,
+                            );
+                            tracing::info!(%event_id, automatic, "live reaction suggestion emitted");
+                            event_hub
+                                .publish(SystemEvent::LiveResponseSuggested {
+                                    event_id,
+                                    text: prompt.clone(),
+                                    automatic,
+                                })
+                                .await;
+                            if !automatic
+                            {
+                                continue;
+                            }
+                            last_reaction_ms = Some(delivered.timestamp_ms);
+                            let submitter = runtime.clone();
+                            reactions.spawn(async move
+                            {
+                                if let Err(error) = submitter.submit(prompt).await
+                                {
+                                    tracing::warn!(%error, %event_id, "live reaction failed");
+                                }
+                            });
                         }
+                    }
+                    while reactions.try_join_next().is_some()
+                    {
                     }
                 }
                 Err(error) =>
                 {
                     tracing::warn!(%error, "bilibili event input stopped; retrying");
-                    tokio::time::sleep(Duration::from_millis(2_000)).await;
+                    tokio::time::sleep(Duration::from_millis(reconnect_delay_ms)).await;
                 }
             }
         }
     });
     Ok(Some(task))
+}
+fn reaction_allowed(
+    auto_react: bool,
+    emergency_stop: bool,
+    last_reaction_ms: Option<u64>,
+    now_ms: u64,
+    cooldown_ms: u64,
+) -> bool
+{
+    auto_react
+        && !emergency_stop
+        && cooldown_ms > 0
+        && last_reaction_ms.is_none_or(|previous| {
+            now_ms.saturating_sub(previous) >= cooldown_ms
+        })
 }
 async fn replay_events_to_memory(
     path: &Path,
@@ -353,6 +431,7 @@ async fn replay_events_to_memory(
     let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
     let mut accepted = 0_usize;
     let mut projected = 0_usize;
+    let mut reaction_suggestions = 0_usize;
     let before = memory.len().await;
     for event in events
     {
@@ -365,6 +444,16 @@ async fn replay_events_to_memory(
         {
             continue;
         };
+        if delivered.payload.reaction_prompt().is_some()
+        {
+            reaction_suggestions += 1;
+            println!(
+                "live reaction suggestion: event={} type={} summary={}",
+                delivered.event_id,
+                delivered.payload.event_type(),
+                delivered.payload.summary(),
+            );
+        }
         for projection in project_memory(&delivered)
         {
             memory.remember_projection(&projection).await?;
@@ -373,10 +462,11 @@ async fn replay_events_to_memory(
     }
     let persisted = memory.len().await.saturating_sub(before);
     println!(
-        "event replay complete: input={input_count} accepted={accepted} projected_memory={projected} persisted_memory={persisted}",
+        "event replay complete: input={input_count} accepted={accepted} reaction_suggestions={reaction_suggestions} projected_memory={projected} persisted_memory={persisted}",
     );
     Ok(())
 }
+
 async fn join_speech_worker(task: tokio::task::JoinHandle<()>) -> Result<(), AppError>
 {
     task.await
@@ -894,4 +984,19 @@ async fn run_duplex(
         }
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests
+{
+    use super::reaction_allowed;
+
+    #[test]
+    fn reaction_policy_requires_opt_in_and_cooldown()
+    {
+        assert!(!reaction_allowed(false, false, None, 10, 5));
+        assert!(!reaction_allowed(true, true, None, 10, 5));
+        assert!(reaction_allowed(true, false, None, 10, 5));
+        assert!(!reaction_allowed(true, false, Some(8), 10, 5));
+        assert!(reaction_allowed(true, false, Some(4), 10, 5));
+    }
 }

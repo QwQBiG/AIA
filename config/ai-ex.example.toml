@@ -102,3 +102,5 @@ room_id = 0
 endpoint = "wss://broadcastlv.chat.bilibili.com:443/sub"
 cookie_env = ""
 reconnect_delay_ms = 2000
+auto_react = false
+reaction_cooldown_ms = 5000

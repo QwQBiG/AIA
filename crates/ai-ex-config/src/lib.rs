@@ -613,6 +613,8 @@ pub struct BilibiliConfig
     pub endpoint: String,
     pub cookie_env: Option<String>,
     pub reconnect_delay_ms: u64,
+    pub auto_react: bool,
+    pub reaction_cooldown_ms: u64,
 }
 
 impl BilibiliConfig
@@ -626,6 +628,7 @@ impl BilibiliConfig
         if self.room_id == 0
             || (!self.endpoint.starts_with("ws://") && !self.endpoint.starts_with("wss://"))
             || self.reconnect_delay_ms == 0
+            || self.reaction_cooldown_ms == 0
         {
             return Err(AppError::configuration("enabled bilibili configuration is invalid"));
         }
@@ -643,6 +646,8 @@ impl Default for BilibiliConfig
             endpoint: "wss://broadcastlv.chat.bilibili.com:443/sub".to_owned(),
             cookie_env: None,
             reconnect_delay_ms: 2_000,
+            auto_react: false,
+            reaction_cooldown_ms: 5_000,
         }
     }
 }
@@ -743,6 +748,9 @@ mod tests
         config.bilibili.room_id = 123;
         assert!(config.validate().is_ok());
         config.bilibili.endpoint = "http://127.0.0.1:1".to_owned();
+        assert!(config.validate().is_err());
+        config.bilibili.endpoint = "wss://example.invalid/sub".to_owned();
+        config.bilibili.reaction_cooldown_ms = 0;
         assert!(config.validate().is_err());
     }
     #[test]

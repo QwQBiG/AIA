@@ -15,6 +15,15 @@ impl EventSink for ConsoleEvents
             SystemEvent::ModelChunk { text, .. } => print!("{text}"),
             SystemEvent::TurnFinished { .. } => println!(),
             SystemEvent::Fault { message } => eprintln!("runtime fault: {message}"),
+            SystemEvent::LiveEventReceived {
+                event_type,
+                summary,
+                ..
+            } => tracing::info!(event_type, summary, "live event accepted"),
+            SystemEvent::LiveResponseSuggested { automatic, .. } =>
+            {
+                tracing::info!(automatic, "live reaction suggestion emitted");
+            }
             _ =>
             {
             }
