@@ -12,6 +12,7 @@ use ai_ex_audio::{AudioPlayer, SpeechQueue, SpeechReceiver};
 use ai_ex_asr::WhisperHttpTranscriber;
 use ai_ex_audit::JsonlAuditLog;
 use ai_ex_config::{AppConfig, ModelBackend};
+use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
     ConversationPolicy, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, spawn_runtime,
@@ -43,6 +44,7 @@ use ai_ex_duplex::{
 enum ConfiguredModel
 {
     Ollama(OllamaClient),
+    DeepSeek(DeepSeekClient),
     KoboldCpp(KoboldCppClient),
 }
 
@@ -53,6 +55,7 @@ impl ConfiguredModel
         match self
         {
             Self::Ollama(client) => client.health().await,
+            Self::DeepSeek(client) => client.health().await,
             Self::KoboldCpp(client) => client.health().await,
         }
     }
@@ -69,6 +72,7 @@ impl LanguageModelPort for ConfiguredModel
         match self
         {
             Self::Ollama(client) => client.stream(request).await,
+            Self::DeepSeek(client) => client.stream(request).await,
             Self::KoboldCpp(client) => client.stream(request).await,
         }
     }
@@ -78,6 +82,7 @@ impl LanguageModelPort for ConfiguredModel
         match self
         {
             Self::Ollama(client) => client.cancel(turn_id).await,
+            Self::DeepSeek(client) => client.cancel(turn_id).await,
             Self::KoboldCpp(client) => client.cancel(turn_id).await,
         }
     }
@@ -442,6 +447,25 @@ fn build_model(config: &AppConfig) -> Result<ConfiguredModel, AppError>
             &config.ollama.model,
             Duration::from_secs(config.ollama.timeout_seconds),
         )?)),
+        ModelBackend::DeepSeek =>
+        {
+            let api_key = std::env::var(&config.deepseek.api_key_env).map_err(|_| {
+                AppError::configuration(format!(
+                    "DeepSeek API key environment variable {} is not set",
+                    config.deepseek.api_key_env,
+                ))
+            })?;
+            Ok(ConfiguredModel::DeepSeek(DeepSeekClient::new(
+                DeepSeekSettings {
+                    base_url: config.deepseek.base_url.clone(),
+                    model: config.deepseek.model.clone(),
+                    api_key,
+                    timeout: Duration::from_secs(config.deepseek.timeout_seconds),
+                    thinking: config.deepseek.thinking,
+                    reasoning_effort: config.deepseek.reasoning_effort.clone(),
+                },
+            )?))
+        }
         ModelBackend::KoboldCpp => {
             Ok(ConfiguredModel::KoboldCpp(KoboldCppClient::new(
                 KoboldCppSettings {

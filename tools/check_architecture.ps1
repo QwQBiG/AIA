@@ -17,6 +17,7 @@ $allowed = @{
     'ai-ex-capture' = @('ai-ex-domain', 'ai-ex-duplex')
     'ai-ex-audio' = @('ai-ex-core', 'ai-ex-domain', 'ai-ex-text')
     'ai-ex-memory' = @('ai-ex-core', 'ai-ex-domain')
+    'ai-ex-deepseek' = @('ai-ex-core', 'ai-ex-domain')
     'ai-ex-ollama' = @('ai-ex-core', 'ai-ex-domain')
     'ai-ex-koboldcpp' = @('ai-ex-core', 'ai-ex-domain')
     'ai-ex-tts' = @('ai-ex-domain')
@@ -32,6 +33,7 @@ $allowed = @{
     'ai-ex-service' = @(
         'ai-ex-asr', 'ai-ex-audit', 'ai-ex-audio', 'ai-ex-capture',
         'ai-ex-config', 'ai-ex-control', 'ai-ex-core', 'ai-ex-domain',
+        'ai-ex-deepseek',
         'ai-ex-duplex', 'ai-ex-koboldcpp', 'ai-ex-memory', 'ai-ex-observability',
         'ai-ex-ollama',
         'ai-ex-safety', 'ai-ex-tts', 'ai-ex-vision', 'ai-ex-vts'

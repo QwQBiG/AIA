@@ -13,6 +13,7 @@ pub struct AppConfig
 {
     pub model: ModelConfig,
     pub conversation: ConversationConfig,
+    pub deepseek: DeepSeekConfig,
     pub ollama: OllamaConfig,
     pub koboldcpp: KoboldCppConfig,
     pub vts: VtsConfig,
@@ -48,6 +49,10 @@ impl AppConfig
     pub fn validate(&self) -> Result<(), AppError>
     {
         self.conversation.validate()?;
+        if self.model.backend == ModelBackend::DeepSeek
+        {
+            self.deepseek.validate()?;
+        }
         if self.model.backend == ModelBackend::Ollama
             && !is_http_url(&self.ollama.base_url)
         {
@@ -121,6 +126,8 @@ pub enum ModelBackend
 {
     #[default]
     Ollama,
+    #[serde(rename = "deepseek")]
+    DeepSeek,
     #[serde(rename = "koboldcpp")]
     KoboldCpp,
 }
@@ -186,6 +193,56 @@ impl Default for OllamaConfig
             base_url: "http://127.0.0.1:11434".to_owned(),
             model: "llama3.2:latest".to_owned(),
             timeout_seconds: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeepSeekConfig
+{
+    pub base_url: String,
+    pub model: String,
+    pub api_key_env: String,
+    pub timeout_seconds: u64,
+    pub thinking: bool,
+    pub reasoning_effort: String,
+}
+
+impl DeepSeekConfig
+{
+    fn validate(&self) -> Result<(), AppError>
+    {
+        if !is_http_url(&self.base_url)
+            || self.model.trim().is_empty()
+            || self.api_key_env.trim().is_empty()
+            || self.timeout_seconds == 0
+        {
+            return Err(AppError::configuration(
+                "DeepSeek requires an HTTP base URL, model, API key environment name, and timeout",
+            ));
+        }
+        if !matches!(self.reasoning_effort.as_str(), "high" | "max")
+        {
+            return Err(AppError::configuration(
+                "deepseek.reasoning_effort must be high or max",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for DeepSeekConfig
+{
+    fn default() -> Self
+    {
+        Self {
+            base_url: "https://api.deepseek.com".to_owned(),
+            model: "deepseek-v4-flash".to_owned(),
+            api_key_env: "DEEPSEEK_API_KEY".to_owned(),
+            timeout_seconds: 120,
+            thinking: false,
+            reasoning_effort: "high".to_owned(),
         }
     }
 }

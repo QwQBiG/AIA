@@ -1,0 +1,16 @@
+[model]
+backend = "deepseek"
+
+[deepseek]
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+timeout_seconds = 120
+thinking = false
+reasoning_effort = "high"
+
+[vts]
+enabled = false
+
+[memory]
+enabled = false

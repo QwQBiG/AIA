@@ -105,6 +105,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-ex-deepseek"
+version = "0.1.0"
+dependencies = [
+ "ai-ex-core",
+ "ai-ex-domain",
+ "async-trait",
+ "futures-util",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ai-ex-domain"
 version = "0.1.0"
 dependencies = [
@@ -206,6 +219,7 @@ dependencies = [
  "ai-ex-config",
  "ai-ex-control",
  "ai-ex-core",
+ "ai-ex-deepseek",
  "ai-ex-domain",
  "ai-ex-duplex",
  "ai-ex-koboldcpp",

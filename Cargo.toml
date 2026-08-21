@@ -5,6 +5,7 @@ members = [
     "crates/ai-ex-core",
     "crates/ai-ex-text",
     "crates/ai-ex-memory",
+    "crates/ai-ex-deepseek",
     "crates/ai-ex-ollama",
     "crates/ai-ex-koboldcpp",
     "crates/ai-ex-vts",

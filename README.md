@@ -10,7 +10,7 @@ AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新�
 | --- | --- | --- |
 | 配置 | 可用 | TOML、默认值、校验、异步读取 |
 | 对话核心 | 可用 | 显式状态机、运行时 actor、排队、流式打断、结构化事件 |
-| 模型后端 | 可用 | Ollama NDJSON 与 KoboldCpp SSE 流式增量、超时和取消 |
+| 模型后端 | 可用 | DeepSeek V4 SSE、KoboldCpp SSE、Ollama NDJSON，均支持超时和取消 |
 | VTube Studio | 可用 | WebSocket 认证、嘴型参数、响应情绪到显式热键 ID 的映射 |
 | 文本处理 | 可用 | UTF-8 分句、Markdown/TTS 清理 |
 | 持久记忆 | 可用 | JSONL 持久化、相关性检索、上下文注入 |
@@ -77,7 +77,8 @@ cargo run -p ai-ex-migrate -- --input "config.json" --output "config/ai-ex.local
 
 ## 外部服务
 
-- Ollama：默认 `http://127.0.0.1:11434`。
+- DeepSeek V4：官方 API 默认 `https://api.deepseek.com`；密钥从 `DEEPSEEK_API_KEY` 读取，示例见 `docs/MODEL_BACKENDS.md`。`deepseek-v4-flash` 适合先测，`deepseek-v4-pro` 可按需切换。
+- Ollama：默认 `http://127.0.0.1:11434`，适配仍保留。
 - KoboldCpp：可选后端，默认 `http://127.0.0.1:5001`；设置 `model.backend = "koboldcpp"` 启用。
 - VTube Studio：默认 `ws://127.0.0.1:8001`，令牌文件结构为 `{ "token": "..." }`。
 - GPT-SoVITS：默认 `http://127.0.0.1:9880`，默认关闭。
@@ -93,6 +94,7 @@ crates/
   ai-ex-config/   TOML 配置与校验
   ai-ex-text/     分句和 TTS 文本清理
   ai-ex-core/     对话状态机、端口和异步编排
+  ai-ex-deepseek/ DeepSeek V4 SSE 流式 HTTP 适配器
   ai-ex-ollama/   Ollama 流式 HTTP 适配器
   ai-ex-koboldcpp/ KoboldCpp 流式 SSE 适配器
   ai-ex-vts/      VTube Studio WebSocket actor
