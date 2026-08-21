@@ -38,7 +38,13 @@ cargo run -p ai-ex-simulator -- --input config/simulated-live.jsonl --speed 100 
 cargo run -p ai-ex-service -- --config config/ai-ex.example.toml --replay-events config/simulated-live.jsonl
 ```
 
-服务会使用配置中的 `[memory]` 路径，输出 `input`、`accepted`、`projected_memory` 和 `persisted_memory`，适合在没有任何模型或直播账号时验证完整编排链路。
+如果要让服务端回放也写结构化报告：
+
+```powershell
+cargo run -p ai-ex-service -- --config config/ai-ex.example.toml --replay-events config/simulated-live.jsonl --replay-report target/service-event-report.jsonl
+```
+
+服务会使用配置中的 `[memory]` 路径，输出 `input`、`accepted`、`filtered`、`reaction_suggestions`、`projected_memory` 和 `persisted_memory`；使用 `--replay-report` 时还会生成与模拟器同格式的 JSONL，适合在没有任何模型或直播账号时验证完整编排链路。
 
 JSONL 录制文件不包含 API Key、控制令牌或用户长期记忆。真实平台连接器只需要把平台字段转换为 `LiveEvent`，不应把平台 SDK 类型带入核心。
 

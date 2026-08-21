@@ -4,6 +4,8 @@ mod args;
 mod automation_replay;
 mod events;
 
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -128,7 +130,7 @@ async fn run() -> Result<(), AppError>
         {
             MemoryStore::disabled()
         };
-        return replay_events_to_memory(path, &mut memory).await;
+        return replay_events_to_memory(path, &mut memory, args.replay_report.as_deref()).await;
     }
     if let Some(path) = args.replay_stage.as_ref()
     {
@@ -457,49 +459,99 @@ fn reaction_allowed(
 async fn replay_events_to_memory(
     path: &Path,
     memory: &mut MemoryStore,
+    report_path: Option<&Path>,
 ) -> Result<(), AppError>
 {
     let events = load_jsonl(path)?;
     let input_count = events.len();
+    let mut report = report_path
+        .map(|path| {
+            File::create(path)
+                .map(BufWriter::new)
+                .map_err(|error| AppError::unavailable(format!("cannot create replay report: {error}")))
+        })
+        .transpose()?;
     let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
     let mut accepted = 0_usize;
+    let mut filtered = 0_usize;
     let mut projected = 0_usize;
     let mut reaction_suggestions = 0_usize;
     let before = memory.len().await;
     for event in events
     {
-        if bus.publish(event) != PublishOutcome::Accepted
+        let event_id = event.event_id.to_string();
+        let timestamp_ms = event.timestamp_ms;
+        let event_type = event.payload.event_type().to_owned();
+        let priority = format!("{:?}", event.payload.priority());
+        let outcome = bus.publish(event);
+        let (reaction_prompt, projection_count) = if outcome == PublishOutcome::Accepted
         {
-            continue;
+            accepted += 1;
+            match receiver.try_recv()
+            {
+                Ok(delivered) =>
+                {
+                    let reaction_prompt = delivered.payload.reaction_prompt();
+                    if let Some(prompt) = reaction_prompt.as_ref()
+                    {
+                        reaction_suggestions += 1;
+                        println!(
+                            "live reaction suggestion: event={} type={} summary={} prompt={}",
+                            delivered.event_id,
+                            delivered.payload.event_type(),
+                            delivered.payload.summary(),
+                            prompt,
+                        );
+                    }
+                    let projections = project_memory(&delivered);
+                    let projection_count = projections.len();
+                    for projection in projections
+                    {
+                        memory.remember_projection(&projection).await?;
+                        projected += 1;
+                    }
+                    (reaction_prompt, projection_count)
+                }
+                Err(_) => (None, 0),
+            }
         }
-        accepted += 1;
-        let Ok(delivered) = receiver.try_recv() else
+        else
         {
-            continue;
+            filtered += 1;
+            println!("live event filtered: type={event_type} outcome={outcome:?}");
+            (None, 0)
         };
-        if delivered.payload.reaction_prompt().is_some()
+        if let Some(writer) = report.as_mut()
         {
-            reaction_suggestions += 1;
-            println!(
-                "live reaction suggestion: event={} type={} summary={}",
-                delivered.event_id,
-                delivered.payload.event_type(),
-                delivered.payload.summary(),
-            );
+            let record = serde_json::json!({
+                "event_id": event_id,
+                "timestamp_ms": timestamp_ms,
+                "event_type": event_type,
+                "priority": priority,
+                "outcome": format!("{outcome:?}"),
+                "reaction_prompt": reaction_prompt,
+                "memory_projections": projection_count,
+            });
+            serde_json::to_writer(&mut *writer, &record)
+                .map_err(|error| AppError::protocol(format!("cannot encode replay report: {error}")))?;
+            writer
+                .write_all(b"\n")
+                .map_err(|error| AppError::unavailable(format!("cannot write replay report: {error}")))?;
         }
-        for projection in project_memory(&delivered)
-        {
-            memory.remember_projection(&projection).await?;
-            projected += 1;
-        }
+    }
+    if let Some(writer) = report.as_mut()
+    {
+        writer
+            .flush()
+            .map_err(|error| AppError::unavailable(format!("cannot flush replay report: {error}")))?;
     }
     let persisted = memory.len().await.saturating_sub(before);
     println!(
-        "event replay complete: input={input_count} accepted={accepted} reaction_suggestions={reaction_suggestions} projected_memory={projected} persisted_memory={persisted}",
+        "event replay complete: input={input_count} accepted={accepted} filtered={filtered} reaction_suggestions={reaction_suggestions} projected_memory={projected} persisted_memory={persisted} report={}",
+        report_path.map_or_else(|| "none".to_owned(), |path| path.display().to_string()),
     );
     Ok(())
 }
-
 async fn replay_stage_records(path: &Path) -> Result<(), AppError>
 {
     let input = tokio::fs::read_to_string(path).await.map_err(|error|

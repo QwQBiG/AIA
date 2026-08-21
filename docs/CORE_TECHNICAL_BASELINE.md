@@ -209,3 +209,4 @@ crates/
 - 模型清单验证：DeepSeek `/models` 和 Ollama `/api/tags` 在可解析时检查 configured model；非标准兼容响应降级为“已连接但未验证”，不伪造可用状态。
 - 桌面健康轮询：控制连接保持后周期性重新拉取 provider、插件、VTS/TTS 和安全状态；健康请求失败只记录开发者日志，不伪造断线。
 - 模拟直播闭环报告：`ai-ex-simulator --report` 记录事件过滤、响应建议和记忆投影，保证没有模型/平台凭据时也能验收编排链路。
+- 服务事件回放报告：`--replay-events` 支持 `--replay-report`，与模拟器输出同一事件/响应/记忆字段；报告参数脱离事件回放时会明确拒绝。

@@ -9,6 +9,7 @@ pub struct Args
     pub check: bool,
     pub prompt: Option<String>,
     pub replay_events: Option<PathBuf>,
+    pub replay_report: Option<PathBuf>,
     pub replay_automation: Option<PathBuf>,
     pub replay_stage: Option<PathBuf>,
     pub vision_image: Option<PathBuf>,
@@ -23,6 +24,7 @@ impl Args
         let mut check = false;
         let mut prompt = None;
         let mut replay_events = None;
+        let mut replay_report = None;
         let mut replay_automation = None;
         let mut replay_stage = None;
         let mut vision_image = None;
@@ -46,6 +48,13 @@ impl Args
                         AppError::configuration("--replay-events requires a JSONL path")
                     })?;
                     replay_events = Some(PathBuf::from(path));
+                }
+                "--replay-report" =>
+                {
+                    let path = values.next().ok_or_else(|| {
+                        AppError::configuration("--replay-report requires a JSONL path")
+                    })?;
+                    replay_report = Some(PathBuf::from(path));
                 }
                 "--replay-automation" =>
                 {
@@ -83,7 +92,7 @@ impl Args
                 "--help" | "-h" =>
                 {
                     return Err(AppError::configuration(
-                        "usage: ai-ex-service [--config PATH] [--check | --replay-events PATH | --replay-automation PATH | --replay-stage PATH | --prompt TEXT | \
+                        "usage: ai-ex-service [--config PATH] [--check | --replay-events PATH [--replay-report PATH] | --replay-automation PATH | --replay-stage PATH | --prompt TEXT | \
                          --vision-image PATH --vision-prompt TEXT]",
                     ));
                 }
@@ -94,6 +103,10 @@ impl Args
                     )));
                 }
             }
+        }
+        if replay_report.is_some() && replay_events.is_none()
+        {
+            return Err(AppError::configuration("--replay-report requires --replay-events"));
         }
         if vision_image.is_some() != vision_prompt.is_some()
         {
@@ -118,6 +131,7 @@ impl Args
             check,
             prompt,
             replay_events,
+            replay_report,
             replay_automation,
             replay_stage,
             vision_image,
@@ -160,6 +174,19 @@ mod tests
         .expect("replay arguments parse");
         assert_eq!(args.replay_events, Some(PathBuf::from("events.jsonl")));
     }
+    #[test]
+    fn accepts_event_replay_report()
+    {
+        let args = Args::parse([
+            "--replay-events".to_owned(),
+            "events.jsonl".to_owned(),
+            "--replay-report".to_owned(),
+            "report.jsonl".to_owned(),
+        ])
+        .expect("replay report arguments parse");
+        assert_eq!(args.replay_report, Some(PathBuf::from("report.jsonl")));
+    }
+
     #[test]
     fn accepts_automation_replay_mode()
     {
