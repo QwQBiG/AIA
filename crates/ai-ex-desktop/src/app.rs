@@ -186,7 +186,7 @@ impl DesktopApp
 
     fn show_health(&self, ui: &mut egui::Ui)
     {
-        ui.collapsing("组件健康状态（启动时快照）", |ui|
+        ui.collapsing("组件健康状态（实时刷新）", |ui|
         {
             if self.health.is_empty()
             {
