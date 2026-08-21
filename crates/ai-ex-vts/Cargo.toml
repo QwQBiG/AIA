@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 ai-ex-core = { path = "../ai-ex-core" }
+ai-ex-stage = { path = "../ai-ex-stage" }
 ai-ex-domain = { path = "../ai-ex-domain" }
 async-trait.workspace = true
 futures-util.workspace = true

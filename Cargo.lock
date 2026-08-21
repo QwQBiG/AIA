@@ -358,6 +358,7 @@ version = "0.1.0"
 dependencies = [
  "ai-ex-core",
  "ai-ex-domain",
+ "ai-ex-stage",
  "async-trait",
  "futures-util",
  "serde_json",

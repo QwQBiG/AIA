@@ -2,10 +2,11 @@
 
 mod protocol;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use ai_ex_core::AvatarPort;
+use ai_ex_stage::{StageAction, StageCapability, StageExecutor};
 use ai_ex_domain::{AppError, ComponentHealth, Emotion};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -144,6 +145,50 @@ impl AvatarPort for VtsClient
     }
 }
 
+#[async_trait]
+impl StageExecutor for VtsClient
+{
+    fn capabilities(&self) -> BTreeSet<StageCapability>
+    {
+        BTreeSet::from([
+            StageCapability::Expression,
+            StageCapability::Hotkey,
+            StageCapability::Interrupt,
+            StageCapability::Mouth,
+        ])
+    }
+
+    async fn health(&self) -> ComponentHealth
+    {
+        self.health.clone()
+    }
+
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
+    {
+        action.validate()?;
+        match action
+        {
+            StageAction::Expression { emotion } =>
+            {
+                AvatarPort::set_emotion(self, emotion).await
+            }
+            StageAction::Mouth { value } => self.send(Command::Mouth(value.into())).await,
+            StageAction::Hotkey { id } => self.trigger_hotkey(id).await,
+            StageAction::Stop => AvatarPort::set_neutral(self).await,
+            StageAction::Speak { .. }
+            | StageAction::Subtitle { .. }
+            | StageAction::Scene { .. } => Err(AppError::configuration(
+                "VTS stage does not support this action",
+            )),
+        }
+    }
+
+    async fn interrupt(&mut self) -> Result<(), AppError>
+    {
+        AvatarPort::set_neutral(self).await
+    }
+}
+
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn read_token(path: &PathBuf) -> Result<String, AppError>
@@ -217,5 +262,38 @@ async fn run_actor(socket: Socket, mut receiver: mpsc::Receiver<Command>)
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[tokio::test]
+    async fn disabled_vts_exposes_only_supported_stage_actions()
+    {
+        let mut client = VtsClient::disabled();
+        let capabilities = StageExecutor::capabilities(&client);
+        assert!(capabilities.contains(&StageCapability::Expression));
+        assert!(!capabilities.contains(&StageCapability::Speech));
+        StageExecutor::execute(
+            &mut client,
+            StageAction::Expression {
+                emotion: Emotion::Happy,
+            },
+        )
+        .await
+        .expect("disabled VTS safely ignores expression output");
+        let error = StageExecutor::execute(
+            &mut client,
+            StageAction::Subtitle {
+                text: "hello".to_owned(),
+                duration_ms: 1_000,
+            },
+        )
+        .await
+        .expect_err("VTS must reject subtitle actions");
+        assert!(error.to_string().contains("VTS"));
     }
 }
