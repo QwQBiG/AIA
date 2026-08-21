@@ -25,3 +25,9 @@ ai-ex-stage 提供平台无关的 StageAction、StageCapability 和 StageExecuto
 Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 桥接到 `StageRouter`。因此会话状态机只面向语音和化身抽象，具体的 VTS、音频、字幕或 OBS Provider 仍留在舞台适配器边界。
 
 当路由器声明 `Subtitle` 能力时，`StageSpeechPort` 会为每个完整句子生成受限时长字幕动作；没有字幕执行器时，语音路径保持兼容。
+
+## 视觉与游戏自动化边界
+
+`ai-ex-automation` 的 `AutomationCoordinator` 是所有视觉观察和游戏动作的安全入口；它固定执行“校验动作 → 持久审计 → SafetyGate 授权 → Permit 复核 → 适配器执行”的顺序。`DryRunAutomationPort` 实现同一接口但不触碰真实桌面：动作只进入有界队列，`CaptureScreen` 返回确定性的 RGBA 帧，Permit 能力不匹配或急停都会被再次拒绝。
+
+视觉插件只应返回 `ScreenFrame` 或结构化观察，游戏插件只应提交白名单内的 `AutomationAction`。真实键鼠、进程启动和截图实现必须位于独立进程或明确的原生适配器边界，默认配置保持 dry-run。
