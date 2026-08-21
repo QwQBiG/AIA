@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use ai_ex_domain::ComponentHealth;
 use ai_ex_ui_model::{ApplyOutcome, ConnectionState, TurnStatus, UiState};
 use eframe::egui;
 
@@ -12,6 +13,7 @@ pub struct DesktopApp
     input: String,
     last_error: Option<String>,
     confirm_emergency_stop: bool,
+    health: Vec<ComponentHealth>,
 }
 
 impl DesktopApp
@@ -25,6 +27,7 @@ impl DesktopApp
             input: String::new(),
             last_error: None,
             confirm_emergency_stop: false,
+            health: Vec::new(),
         }
     }
 
@@ -46,6 +49,7 @@ impl DesktopApp
                     };
                 }
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
+                WorkerEvent::Health(health) => self.health = health,
                 WorkerEvent::Events(events) =>
                 {
                     for event in events
@@ -116,6 +120,35 @@ impl DesktopApp
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
         ui.separator();
+    }
+
+    fn show_health(&self, ui: &mut egui::Ui)
+    {
+        ui.collapsing("组件健康状态（启动时快照）", |ui|
+        {
+            if self.health.is_empty()
+            {
+                ui.weak("等待服务健康信息……");
+                return;
+            }
+            ui.horizontal_wrapped(|ui|
+            {
+                for item in &self.health
+                {
+                    let color = if item.ready
+                    {
+                        egui::Color32::from_rgb(80, 200, 140)
+                    }
+                    else
+                    {
+                        egui::Color32::LIGHT_RED
+                    };
+                    let label = if item.ready { "就绪" } else { "不可用" };
+                    ui.colored_label(color, format!("{}：{}", item.component, label))
+                        .on_hover_text(&item.detail);
+                }
+            });
+        });
     }
 
     fn show_conversation(&self, ui: &mut egui::Ui)
@@ -226,6 +259,7 @@ impl eframe::App for DesktopApp
     {
         self.drain_events();
         self.show_header(ui);
+        self.show_health(ui);
         self.show_conversation(ui);
         self.show_composer(ui);
         self.show_emergency_confirmation(ui.ctx());
@@ -247,10 +281,10 @@ fn turn_status(status: TurnStatus) -> (&'static str, egui::Color32)
 fn configure_appearance(context: &egui::Context)
 {
     context.set_visuals(egui::Visuals::dark());
-    let mut style = (*context.style()).clone();
+    let mut style = (*context.style_of(egui::Theme::Dark)).clone();
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
     style.spacing.button_padding = egui::vec2(14.0, 7.0);
-    context.set_style(style);
+    context.set_style_of(egui::Theme::Dark, style);
 
     let font_paths = [
         Path::new("C:/Windows/Fonts/msyh.ttc"),

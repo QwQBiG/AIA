@@ -1,4 +1,4 @@
-use ai_ex_domain::AppError;
+use ai_ex_domain::{AppError, ComponentHealth};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,6 +18,7 @@ pub enum ControlCommand
     Submit { text: String },
     Interrupt { reason: String },
     Status,
+    Health,
     Events { after: u64, limit: usize },
     EmergencyStop,
 }
@@ -28,6 +29,7 @@ pub enum ControlPayload
 {
     Accepted,
     Snapshot(RuntimeSnapshot),
+    Health(Vec<ComponentHealth>),
     Events(Vec<SequencedEvent>),
 }
 

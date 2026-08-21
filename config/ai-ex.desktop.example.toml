@@ -1,0 +1,23 @@
+# Desktop baseline: run commands from the repository root.
+[model]
+backend = "deepseek"
+
+[deepseek]
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+timeout_seconds = 120
+thinking = false
+reasoning_effort = "high"
+
+[control]
+enabled = true
+bind = "127.0.0.1:7878"
+token_path = "config/control.token"
+max_message_bytes = 65536
+
+[vts]
+enabled = false
+
+[memory]
+enabled = false

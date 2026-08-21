@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use ai_ex_control::{ControlClient, ControlCommand, ControlPayload};
-use ai_ex_domain::AppError;
+use ai_ex_domain::{AppError, ComponentHealth};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -24,6 +24,7 @@ pub enum WorkerEvent
 {
     Connection(bool),
     Snapshot(RuntimeSnapshot),
+    Health(Vec<ComponentHealth>),
     Events(Vec<SequencedEvent>),
     Failure(String),
 }
@@ -103,11 +104,29 @@ async fn run_worker(
                     {
                         Ok(snapshot) =>
                         {
+                            let health = match fetch_health(&client).await
+                            {
+                                Ok(health) => health,
+                                Err(error) =>
+                                {
+                                    if !failure_reported
+                                    {
+                                        failure_reported = true;
+                                        if !emit(&events, WorkerEvent::Connection(false))
+                                            || !emit(&events, WorkerEvent::Failure(error.to_string()))
+                                        {
+                                            return;
+                                        }
+                                    }
+                                    continue;
+                                }
+                            };
                             cursor = snapshot.last_sequence;
                             connected = true;
                             failure_reported = false;
                             if !emit(&events, WorkerEvent::Connection(true))
                                 || !emit(&events, WorkerEvent::Snapshot(snapshot))
+                                || !emit(&events, WorkerEvent::Health(health))
                             {
                                 return;
                             }
@@ -186,6 +205,15 @@ async fn fetch_snapshot(client: &ControlClient) -> Result<RuntimeSnapshot, AppEr
     {
         ControlPayload::Snapshot(snapshot) => Ok(snapshot),
         _ => Err(AppError::protocol("status returned an unexpected payload")),
+    }
+}
+
+async fn fetch_health(client: &ControlClient) -> Result<Vec<ComponentHealth>, AppError>
+{
+    match client.send(ControlCommand::Health).await?
+    {
+        ControlPayload::Health(health) => Ok(health),
+        _ => Err(AppError::protocol("health returned an unexpected payload")),
     }
 }
 

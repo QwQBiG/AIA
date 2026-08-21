@@ -32,6 +32,7 @@ use async_trait::async_trait;
 use args::Args;
 use events::ConsoleEvents;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::RwLock;
 use tracing_subscriber::EnvFilter;
 
 #[cfg(feature = "native-capture")]
@@ -158,6 +159,21 @@ async fn run() -> Result<(), AppError>
         .await;
     }
 
+    let startup_health = collect_health(HealthContext {
+        model: &model,
+        vts: &vts,
+        speech: &speech,
+        memory: &memory,
+        player: &player,
+        tts: tts.as_ref(),
+        safety: safety.as_ref(),
+        audit: audit.as_ref(),
+        vision: vision.as_ref(),
+        config: &config,
+    })
+    .await;
+    let health_snapshot = Arc::new(RwLock::new(startup_health));
+
     let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player));
     let event_hub = EventHub::new(256)?;
     let events = TeeEventSink::new(ConsoleEvents, event_hub.clone());
@@ -187,6 +203,7 @@ async fn run() -> Result<(), AppError>
         runtime.clone(),
         event_hub.clone(),
         Arc::clone(&safety),
+        Arc::clone(&health_snapshot),
     )
     .await?;
     let duplex_task = spawn_duplex(&config, runtime.clone())?;
@@ -301,6 +318,21 @@ struct HealthContext<'a>
 
 async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
 {
+    let health = collect_health(context).await;
+    println!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+    let failed: Vec<&ComponentHealth> = health.iter().filter(|item| !item.ready).collect();
+    if !failed.is_empty()
+    {
+        return Err(AppError::unavailable(format!(
+            "{} component(s) unavailable",
+            failed.len()
+        )));
+    }
+    Ok(())
+}
+
+async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
+{
     let mut health = vec![
         context.model.health().await,
         context.vts.health().clone(),
@@ -315,7 +347,14 @@ async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
     }
     if context.config.duplex.enabled
     {
-        health.push(build_asr(context.config)?.health().await);
+        match build_asr(context.config)
+        {
+            Ok(asr) => health.push(asr.health().await),
+            Err(error) => health.push(ComponentHealth::unavailable(
+                "asr",
+                error.to_string(),
+            )),
+        }
         health.push(capture_health(context.config));
     }
     if context.config.control.enabled
@@ -330,16 +369,7 @@ async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
     {
         health.push(vision.health().await);
     }
-    println!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
-    let failed: Vec<&ComponentHealth> = health.iter().filter(|item| !item.ready).collect();
-    if !failed.is_empty()
-    {
-        return Err(AppError::unavailable(format!(
-            "{} component(s) unavailable",
-            failed.len()
-        )));
-    }
-    Ok(())
+    health
 }
 
 async fn run_speech_worker(
@@ -501,6 +531,7 @@ struct ServiceControl
     runtime: RuntimeHandle,
     events: EventHub,
     safety: Arc<SafetyGate>,
+    health: Arc<RwLock<Vec<ComponentHealth>>>,
 }
 
 #[async_trait::async_trait]
@@ -542,6 +573,7 @@ impl ControlBackend for ServiceControl
                 Ok(ControlPayload::Accepted)
             }
             ControlCommand::Status => Ok(ControlPayload::Snapshot(self.events.current())),
+            ControlCommand::Health => Ok(ControlPayload::Health(self.health.read().await.clone())),
             ControlCommand::Events { after, limit } =>
             {
                 if limit == 0 || limit > 1_000
@@ -571,6 +603,7 @@ async fn spawn_control(
     runtime: RuntimeHandle,
     events: EventHub,
     safety: Arc<SafetyGate>,
+    health: Arc<RwLock<Vec<ComponentHealth>>>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
 {
     if !config.control.enabled
@@ -596,6 +629,7 @@ async fn spawn_control(
         runtime,
         events,
         safety,
+        health,
     });
     tracing::info!(%address, "local control server ready");
     Ok(Some(tokio::spawn(async move
