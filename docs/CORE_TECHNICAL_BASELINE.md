@@ -200,6 +200,7 @@ OBS JSONL 回放、动作遥测和真实 OBS WebSocket v5 request/response 联�
 - OBS 适配：ai-ex-stage-obs 同时提供无副作用 JSONL dry-run 和 OBS WebSocket v5 连接器；真实连接默认关闭，密码只从环境变量读取。
 - StageRouter：核心协议层按能力分发舞台动作并广播急停；Runtime 已通过 `StageOutput` 接入语音、口型、表情、停止和可选字幕动作，字幕/OBS 仍由舞台适配器负责执行。
 - 舞台遥测：`StageOutput` 维护有界 `StageJournal`，控制协议只暴露 domain `StageSnapshot` 摘要；桌面开发者面板可观察动作而不触发外部副作用。
+- OBS 健康投影：真实 WebSocket stage 的共享健康状态每约 2 秒投影到服务快照；断线、响应失败和恢复后的重连不会继续显示过期“已连接”。
 
 - 视觉/游戏自动化：`DryRunAutomationPort` 已提供确定性屏幕帧、有界动作队列、Permit 能力二次校验和急停拒绝路径；真实桌面适配器尚未启用。
 - 插件进程边界：`ai-ex-plugin::StdioPlugin` 已提供带尺寸限制、响应校验和生命周期回收的 JSON-RPC stdio 客户端，真实视觉/游戏 Provider 仍默认关闭。

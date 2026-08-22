@@ -117,6 +117,11 @@ impl ObsWebSocketStage
             .clone()
     }
 
+    pub fn health_handle(&self) -> Arc<RwLock<ComponentHealth>>
+    {
+        Arc::clone(&self.health)
+    }
+
     async fn send(&self, command: Command) -> Result<(), AppError>
     {
         let (response, receiver) = oneshot::channel();

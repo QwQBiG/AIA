@@ -216,6 +216,10 @@ async fn run() -> Result<(), AppError>
     .await;
     let health_snapshot = Arc::new(RwLock::new(startup_health));
     let _plugin_refresh = plugin_runtime.spawn_health_refresh(Arc::clone(&health_snapshot));
+    let _obs_health_refresh = spawn_obs_health_refresh(
+        Arc::clone(&health_snapshot),
+        obs_runtime.health_handle.clone(),
+    );
 
     let mut stage_router = StageRouter::new();
     stage_router.push(speech);
@@ -605,6 +609,7 @@ struct ObsRuntime
 {
     stage: Box<dyn StageExecutor>,
     health: ComponentHealth,
+    health_handle: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
     connected: bool,
 }
 fn fallback_obs_stage() -> Box<dyn StageExecutor>
@@ -618,6 +623,7 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
         return ObsRuntime {
             stage: fallback_obs_stage(),
             health: obs_stage_health(),
+            health_handle: None,
             connected: false,
         };
     }
@@ -629,6 +635,7 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
             return ObsRuntime {
                 stage: fallback_obs_stage(),
                 health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
+                health_handle: None,
                 connected: false,
             };
         }
@@ -640,10 +647,12 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
     {
         Ok(stage) =>
         {
-            let health = stage.health().clone();
+            let health = stage.health();
+            let health_handle = Some(stage.health_handle());
             ObsRuntime {
                 stage: Box::new(stage),
                 health,
+                health_handle,
                 connected: true,
             }
         }
@@ -653,12 +662,38 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
             ObsRuntime {
                 stage: fallback_obs_stage(),
                 health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
+                health_handle: None,
                 connected: false,
             }
         }
     }
 }
 
+fn replace_component_health(snapshot: &mut Vec<ComponentHealth>, health: ComponentHealth)
+{
+    snapshot.retain(|item| item.component != health.component);
+    snapshot.push(health);
+}
+fn spawn_obs_health_refresh(
+    health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
+    obs_health: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
+) -> Option<tokio::task::JoinHandle<()>>
+{
+    let obs_health = obs_health?;
+    Some(tokio::spawn(async move
+    {
+        loop
+        {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let health = obs_health
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let mut snapshot = health_snapshot.write().await;
+            replace_component_health(&mut snapshot, health);
+        }
+    }))
+}
 pub struct StdioAutomationTransport
 {
     plugin: StdioPlugin,
@@ -1382,8 +1417,28 @@ async fn run_duplex(
 #[cfg(test)]
 mod tests
 {
-    use super::{reaction_allowed, LiveResponseMode};
+    use super::{reaction_allowed, replace_component_health, LiveResponseMode};
+    use ai_ex_domain::ComponentHealth;
 
+    #[test]
+    fn replaces_obs_health_without_duplicate_entries()
+    {
+        let mut snapshot = vec![
+            ComponentHealth::ready("model"),
+            ComponentHealth::ready("obs-websocket"),
+        ];
+        replace_component_health(
+            &mut snapshot,
+            ComponentHealth::unavailable("obs-websocket", "socket closed"),
+        );
+        assert_eq!(snapshot.iter().filter(|item| item.component == "obs-websocket").count(), 1);
+        let obs = snapshot
+            .iter()
+            .find(|item| item.component == "obs-websocket")
+            .expect("OBS health remains present");
+        assert!(!obs.ready);
+        assert_eq!(obs.detail, "socket closed");
+    }
     #[test]
     fn reaction_policy_requires_opt_in_and_cooldown()
     {
