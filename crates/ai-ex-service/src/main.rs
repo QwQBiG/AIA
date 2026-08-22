@@ -253,13 +253,26 @@ async fn run() -> Result<(), AppError>
         return Ok(());
     }
 
-    let bilibili_task = spawn_bilibili(
+    let bilibili_runtime = spawn_bilibili(
         &config.bilibili,
         live_memory,
         runtime.clone(),
         event_hub.clone(),
         Arc::clone(&safety),
     )?;
+    if let Some(handle) = bilibili_runtime.health_handle.clone()
+    {
+        let health = handle
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let mut snapshot = health_snapshot.write().await;
+        replace_component_health(&mut snapshot, health);
+    }
+    let _bilibili_health_refresh = spawn_bilibili_health_refresh(
+        Arc::clone(&health_snapshot),
+        bilibili_runtime.health_handle.clone(),
+    );
     let control_task = spawn_control(
         &config,
         runtime.clone(),
@@ -321,7 +334,7 @@ async fn run() -> Result<(), AppError>
             }
         });
     }
-    if let Some(task) = bilibili_task
+    if let Some(task) = bilibili_runtime.task
     {
         task.abort();
     }
@@ -338,17 +351,26 @@ async fn run() -> Result<(), AppError>
     Ok(())
 }
 
+struct BilibiliRuntime
+{
+    task: Option<tokio::task::JoinHandle<()>>,
+    health_handle: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
+}
+
 fn spawn_bilibili(
     config: &BilibiliConfig,
     memory: MemoryStore,
     runtime: RuntimeHandle,
     event_hub: EventHub,
     safety: Arc<SafetyGate>,
-) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
+) -> Result<BilibiliRuntime, AppError>
 {
     if !config.enabled
     {
-        return Ok(None);
+        return Ok(BilibiliRuntime {
+            task: None,
+            health_handle: None,
+        });
     }
     let mut settings = BilibiliSettings::new(config.room_id)?;
     settings.endpoint = config.endpoint.clone();
@@ -357,11 +379,13 @@ fn spawn_bilibili(
     let response_mode = config.response_mode();
     let reaction_cooldown_ms = config.reaction_cooldown_ms;
     let reconnect_delay_ms = config.reconnect_delay_ms;
+    let connector = BilibiliConnector::new(settings);
+    let health_handle = Some(connector.health_handle());
     let task = tokio::spawn(async move
     {
         let mut memory = memory;
         let mut event_hub = event_hub;
-        let mut connector = BilibiliConnector::new(settings);
+        let mut connector = connector;
         let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
         let mut reactions = tokio::task::JoinSet::new();
         let mut last_reaction_ms = None;
@@ -444,7 +468,10 @@ fn spawn_bilibili(
             }
         }
     });
-    Ok(Some(task))
+    Ok(BilibiliRuntime {
+        task: Some(task),
+        health_handle,
+    })
 }
 fn reaction_allowed(
     response_mode: LiveResponseMode,
@@ -686,6 +713,26 @@ fn spawn_obs_health_refresh(
         {
             tokio::time::sleep(Duration::from_secs(2)).await;
             let health = obs_health
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let mut snapshot = health_snapshot.write().await;
+            replace_component_health(&mut snapshot, health);
+        }
+    }))
+}
+fn spawn_bilibili_health_refresh(
+    health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
+    bilibili_health: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
+) -> Option<tokio::task::JoinHandle<()>>
+{
+    let bilibili_health = bilibili_health?;
+    Some(tokio::spawn(async move
+    {
+        loop
+        {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let health = bilibili_health
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();

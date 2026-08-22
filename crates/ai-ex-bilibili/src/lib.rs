@@ -2,9 +2,10 @@
 
 use std::env;
 use std::io::Read;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use ai_ex_domain::AppError;
+use ai_ex_domain::{AppError, ComponentHealth};
 use flate2::read::ZlibDecoder;
 use ai_ex_event_bus::{envelope, LiveEvent, LiveEventEnvelope};
 use futures_util::{SinkExt, StreamExt};
@@ -62,6 +63,7 @@ pub struct BilibiliConnector
 {
     settings: BilibiliSettings,
     connection: Option<BilibiliConnection>,
+    health: Arc<RwLock<ComponentHealth>>,
 }
 
 impl BilibiliConnector
@@ -71,17 +73,54 @@ impl BilibiliConnector
         Self {
             settings,
             connection: None,
+            health: Arc::new(RwLock::new(ComponentHealth::unavailable(
+                "bilibili",
+                "not connected",
+            ))),
         }
+    }
+
+    pub fn health(&self) -> ComponentHealth
+    {
+        self.health
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn health_handle(&self) -> Arc<RwLock<ComponentHealth>>
+    {
+        Arc::clone(&self.health)
     }
 
     pub async fn next_events(&mut self) -> Result<Vec<LiveEventEnvelope>, AppError>
     {
-        self.settings.validate()?;
+        if let Err(error) = self.settings.validate()
+        {
+            self.set_health(false, error.to_string());
+            return Err(error);
+        }
         loop
         {
             if self.connection.is_none()
             {
-                self.connection = Some(BilibiliConnection::connect(&self.settings).await?);
+                self.set_health(
+                    false,
+                    format!("connecting to room {}", self.settings.room_id),
+                );
+                match BilibiliConnection::connect(&self.settings).await
+                {
+                    Ok(connection) =>
+                    {
+                        self.connection = Some(connection);
+                        self.set_health(true, "connected");
+                    }
+                    Err(error) =>
+                    {
+                        self.set_health(false, format!("connect failed: {error}"));
+                        return Err(error);
+                    }
+                }
             }
             let result = self
                 .connection
@@ -91,16 +130,30 @@ impl BilibiliConnector
                 .await;
             match result
             {
-                Ok(events) => return Ok(events),
-                Err(_) =>
+                Ok(events) =>
+                {
+                    self.set_health(true, format!("connected; received {} event(s)", events.len()));
+                    return Ok(events);
+                }
+                Err(error) =>
                 {
                     self.connection = None;
+                    self.set_health(false, format!("connection lost: {error}"));
                     tokio::time::sleep(Duration::from_millis(
                         self.settings.reconnect_delay_ms,
                     ))
                     .await;
                 }
             }
+        }
+    }
+
+    fn set_health(&self, ready: bool, detail: impl Into<String>)
+    {
+        if let Ok(mut health) = self.health.write()
+        {
+            health.ready = ready;
+            health.detail = detail.into();
         }
     }
 }
@@ -629,7 +682,9 @@ mod tests
         settings.endpoint = format!("ws://127.0.0.1:{port}");
         settings.reconnect_delay_ms = 1;
         let mut connector = BilibiliConnector::new(settings);
+        assert!(!connector.health().ready);
         let first = connector.next_events().await.expect("first event batch");
+        assert!(connector.health().ready);
         let second = connector.next_events().await.expect("reconnected event batch");
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
