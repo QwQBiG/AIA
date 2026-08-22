@@ -22,13 +22,11 @@ AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新�
 
 ## 快速开始
 
-### 小白用户：打开可视化向导
+### 小白用户：双击打开可视化向导
 
-不熟悉命令行时直接运行桌面端：
+在 Windows 资源管理器中双击仓库根目录的 `AIex-Desktop.cmd` 即可打开桌面端；如果已经构建了 release/debug 二进制，它会直接启动，否则才回退到 Cargo 开发启动。首次打开会进入可视化设置向导，不需要先手写 TOML 或控制令牌。
 
-~~~powershell
-cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
-~~~
+开发者需要同时查看结构化诊断时，双击 `AIex-Desktop-Developer.cmd`；服务原始 stdout/stderr 仍保留在启动终端。
 
 向导会选择 DeepSeek、KoboldCpp 或 Ollama，生成本地配置和控制令牌，也可以配置 Bilibili 房间号。勾选自动启动后，服务会在后台运行；普通界面显示连接、对话和急停状态。
 
