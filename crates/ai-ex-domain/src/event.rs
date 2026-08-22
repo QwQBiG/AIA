@@ -43,6 +43,11 @@ pub enum SystemEvent
         automatic: bool,
     },
     PersonaChanged { profile_id: String, revision: u64 },
+    ComponentHealthChanged {
+        component: String,
+        ready: bool,
+        detail: String,
+    },
     Fault { message: String },
 }
 

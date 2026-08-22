@@ -151,7 +151,8 @@ impl UiState
                 }
             }
             SystemEvent::LiveEventReceived { .. } | SystemEvent::LiveResponseSuggested { .. }
-                | SystemEvent::PersonaChanged { .. } =>
+                | SystemEvent::PersonaChanged { .. }
+                | SystemEvent::ComponentHealthChanged { .. } =>
             {
             }
         }

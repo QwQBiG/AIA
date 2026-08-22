@@ -24,6 +24,11 @@ impl EventSink for ConsoleEvents
             {
                 tracing::info!(automatic, "live reaction suggestion emitted");
             }
+            SystemEvent::ComponentHealthChanged {
+                component,
+                ready,
+                detail,
+            } => tracing::info!(component, ready, detail, "component health changed"),
             _ =>
             {
             }

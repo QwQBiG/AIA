@@ -144,6 +144,11 @@ impl DesktopApp
                             {
                                 self.push_log(format!("persona changed: {profile_id}@{revision}"));
                             }
+                            SystemEvent::ComponentHealthChanged { component, ready, detail } =>
+                            {
+                                let state = if *ready { "ready" } else { "unavailable" };
+                                self.push_log(format!("health transition {component}={state}: {detail}"));
+                            }
                             _ =>
                             {
                             }

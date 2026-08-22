@@ -214,11 +214,14 @@ async fn run() -> Result<(), AppError>
         config: &config,
     })
     .await;
+    let event_hub = EventHub::new(256)?;
     let health_snapshot = Arc::new(RwLock::new(startup_health));
+    publish_health_snapshot(&health_snapshot, &event_hub).await;
     let _plugin_refresh = plugin_runtime.spawn_health_refresh(Arc::clone(&health_snapshot));
     let _obs_health_refresh = spawn_obs_health_refresh(
         Arc::clone(&health_snapshot),
         obs_runtime.health_handle.clone(),
+        event_hub.clone(),
     );
 
     let mut stage_router = StageRouter::new();
@@ -229,7 +232,6 @@ async fn run() -> Result<(), AppError>
     let speech_port = stage_output.speech();
     let avatar_port = stage_output.avatar();
     let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player));
-    let event_hub = EventHub::new(256)?;
     let events = TeeEventSink::new(ConsoleEvents, event_hub.clone());
     let live_memory = memory.clone();
     let runtime = Runtime::with_policy(
@@ -267,11 +269,12 @@ async fn run() -> Result<(), AppError>
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         let mut snapshot = health_snapshot.write().await;
-        replace_component_health(&mut snapshot, health);
+        update_component_health(&mut snapshot, health, &event_hub);
     }
     let _bilibili_health_refresh = spawn_bilibili_health_refresh(
         Arc::clone(&health_snapshot),
         bilibili_runtime.health_handle.clone(),
+        event_hub.clone(),
     );
     let control_task = spawn_control(
         &config,
@@ -701,9 +704,51 @@ fn replace_component_health(snapshot: &mut Vec<ComponentHealth>, health: Compone
     snapshot.retain(|item| item.component != health.component);
     snapshot.push(health);
 }
+
+fn update_component_health(
+    snapshot: &mut Vec<ComponentHealth>,
+    health: ComponentHealth,
+    events: &EventHub,
+)
+{
+    let changed = snapshot
+        .iter()
+        .find(|item| item.component == health.component)
+        != Some(&health);
+    let component = health.component.clone();
+    let ready = health.ready;
+    let detail = health.detail.clone();
+    replace_component_health(snapshot, health);
+    if changed
+    {
+        events.publish_now(SystemEvent::ComponentHealthChanged {
+            component,
+            ready,
+            detail,
+        });
+    }
+}
+
+async fn publish_health_snapshot(
+    health_snapshot: &Arc<RwLock<Vec<ComponentHealth>>>,
+    events: &EventHub,
+)
+{
+    let snapshot = health_snapshot.read().await.clone();
+    for health in snapshot
+    {
+        events.publish_now(SystemEvent::ComponentHealthChanged {
+            component: health.component,
+            ready: health.ready,
+            detail: health.detail,
+        });
+    }
+}
+
 fn spawn_obs_health_refresh(
     health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
     obs_health: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
+    events: EventHub,
 ) -> Option<tokio::task::JoinHandle<()>>
 {
     let obs_health = obs_health?;
@@ -717,13 +762,15 @@ fn spawn_obs_health_refresh(
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             let mut snapshot = health_snapshot.write().await;
-            replace_component_health(&mut snapshot, health);
+            update_component_health(&mut snapshot, health, &events);
         }
     }))
 }
+
 fn spawn_bilibili_health_refresh(
     health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
     bilibili_health: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
+    events: EventHub,
 ) -> Option<tokio::task::JoinHandle<()>>
 {
     let bilibili_health = bilibili_health?;
@@ -737,10 +784,11 @@ fn spawn_bilibili_health_refresh(
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             let mut snapshot = health_snapshot.write().await;
-            replace_component_health(&mut snapshot, health);
+            update_component_health(&mut snapshot, health, &events);
         }
     }))
 }
+
 pub struct StdioAutomationTransport
 {
     plugin: StdioPlugin,

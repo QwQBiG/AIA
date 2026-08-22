@@ -212,6 +212,6 @@ OBS JSONL 回放、动作遥测和真实 OBS WebSocket v5 request/response 联�
 - 首次设置连通性检查：桌面向导后台探测 HTTP/HTTPS 地址，不阻塞 UI；DeepSeek 密钥不落盘，服务启动仍做完整 provider health。
 - Provider 健康诊断：DeepSeek、KoboldCpp、Ollama 将 HTTP 鉴权/地址/限流/服务端故障与 timeout/connect 错误转换为可操作中文详情，并保留 provider 原始边界。
 - 模型清单验证：DeepSeek `/models` 和 Ollama `/api/tags` 在可解析时检查 configured model；非标准兼容响应降级为“已连接但未验证”，不伪造可用状态。
-- 桌面健康轮询：控制连接保持后周期性重新拉取 provider、插件、VTS/TTS 和安全状态；健康请求失败只记录开发者日志，不伪造断线。
+- 桌面健康轮询：控制连接保持后周期性重新拉取 provider、插件、VTS/TTS 和安全状态；健康请求失败只记录开发者日志，不伪造断线。 健康变化会以 ComponentHealthChanged 事件进入有界重放历史，桌面新手面板消费快照，开发者面板消费变化事件。
 - 模拟直播闭环报告：`ai-ex-simulator --report` 记录事件过滤、响应建议和记忆投影，保证没有模型/平台凭据时也能验收编排链路。
 - 服务事件回放报告：`--replay-events` 支持 `--replay-report`，与模拟器输出同一事件/响应/记忆字段；报告参数脱离事件回放时会明确拒绝。

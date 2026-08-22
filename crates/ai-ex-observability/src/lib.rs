@@ -149,7 +149,8 @@ impl EventHub
                 SystemEvent::ModelChunk { .. }
                 | SystemEvent::LiveEventReceived { .. }
                 | SystemEvent::LiveResponseSuggested { .. }
-                | SystemEvent::PersonaChanged { .. } =>
+                | SystemEvent::PersonaChanged { .. }
+                | SystemEvent::ComponentHealthChanged { .. } =>
                 {
                 }
             }
@@ -296,6 +297,37 @@ mod tests
         assert_eq!(hub.events_since(2, 1)[0].sequence, 3);
     }
 
+    #[tokio::test]
+    async fn replays_component_health_transitions_for_diagnostics()
+    {
+        let mut hub = EventHub::new(8).expect("event hub");
+        hub.publish(SystemEvent::ComponentHealthChanged {
+            component: "bilibili".to_owned(),
+            ready: false,
+            detail: "connecting".to_owned(),
+        })
+        .await;
+        hub.publish(SystemEvent::ComponentHealthChanged {
+            component: "bilibili".to_owned(),
+            ready: true,
+            detail: "connected".to_owned(),
+        })
+        .await;
+
+        let replay = hub.events_since(0, 8);
+        assert_eq!(replay.len(), 2);
+        assert_eq!(replay[0].sequence, 1);
+        assert_eq!(replay[1].sequence, 2);
+        assert_eq!(
+            replay[1].event,
+            SystemEvent::ComponentHealthChanged {
+                component: "bilibili".to_owned(),
+                ready: true,
+                detail: "connected".to_owned(),
+            },
+        );
+        assert_eq!(hub.current().last_sequence, 2);
+    }
     #[test]
     fn rejects_zero_capacity()
     {
