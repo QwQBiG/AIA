@@ -20,6 +20,7 @@ ai-ex-stage 提供平台无关的 StageAction、StageCapability 和 StageExecuto
 动作默认受到长度、数值范围、队列容量和急停边界约束；真实适配器不得绕过这些校验。
 
 `ObsWebSocketStage` 是真实 OBS v5 连接器：启动时完成 Hello/Identify/Identified 握手，可选读取密码环境变量，并把字幕、场景和热键转换为 OBS request；每个 request 都等待匹配的 `requestId` 响应，失败、超时或断线会返回错误并降级连接健康状态。它只在 `obs.enabled = true` 时建立连接；连接失败不会拖垮模型和本地 dry-run。
+`ai-ex-stage-obs` 的契约测试使用本地 fake WebSocket 完整模拟 Hello/Identify、场景 request、成功响应、失败响应和健康降级；不需要安装 OBS 即可验证协议边界。
 `StageRouter` 按 `StageCapability` 把动作分发给所有匹配的执行器，并把 `Stop`/急停广播到全部执行器；新增 VTS、音频或 OBS 实现不需要修改会话状态机。
 
 Runtime 通过 `ai-ex-core` 的 `StageOutput` 将 `SpeechPort` 与 `AvatarPort` 桥接到 `StageRouter`。因此会话状态机只面向语音和化身抽象，具体的 VTS、音频、字幕或 OBS Provider 仍留在舞台适配器边界。

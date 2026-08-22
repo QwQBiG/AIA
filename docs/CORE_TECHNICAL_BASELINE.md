@@ -195,7 +195,7 @@ crates/
 - 验证：workspace 测试、严格 Clippy、架构门禁、Allman 门禁、git diff 检查，以及独立桌面端离线编译均通过。
 - 舞台协议：ai-ex-stage 已提供版本化 StageAction、能力声明、动作边界校验和 dry-run 执行器；ai-ex-stage-obs 提供字幕/场景/热键 JSONL 录制和 OBS WebSocket v5 外部连接边界。
 
-OBS JSONL 回放、动作遥测和真实 OBS WebSocket v5 request/response 联调已接入服务/桌面开发者链路；游戏动作继续保持独立插件边界。
+OBS JSONL 回放、动作遥测和真实 OBS WebSocket v5 request/response 联调已接入服务/桌面开发者链路；本地 fake WebSocket 契约测试覆盖成功、失败和健康降级；游戏动作继续保持独立插件边界。
 
 - OBS 适配：ai-ex-stage-obs 同时提供无副作用 JSONL dry-run 和 OBS WebSocket v5 连接器；真实连接默认关闭，密码只从环境变量读取。
 - StageRouter：核心协议层按能力分发舞台动作并广播急停；Runtime 已通过 `StageOutput` 接入语音、口型、表情、停止和可选字幕动作，字幕/OBS 仍由舞台适配器负责执行。

@@ -489,6 +489,104 @@ mod tests
 {
     use super::*;
 
+    async fn run_fake_obs(request_result: bool) -> (u16, tokio::task::JoinHandle<()>)
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("fake OBS listener binds");
+        let port = listener
+            .local_addr()
+            .expect("fake OBS address")
+            .port();
+        let task = tokio::spawn(async move
+        {
+            let (stream, _) = listener.accept().await.expect("fake OBS accepts");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("fake OBS websocket accepts");
+            socket
+                .send(Message::Text(json!({
+                    "op": 0,
+                    "d": { "obsWebSocketVersion": "5.0.0", "rpcVersion": 1 }
+                }).to_string().into()))
+                .await
+                .expect("fake OBS sends hello");
+            let identify = socket.next().await.expect("fake OBS receives identify")
+                .expect("fake OBS identify frame");
+            let identify = match identify
+            {
+                Message::Text(text) => serde_json::from_str::<Value>(&text).expect("identify JSON"),
+                Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes).expect("identify JSON"),
+                other => panic!("unexpected identify frame: {other:?}"),
+            };
+            assert_eq!(identify["op"], 1);
+            socket
+                .send(Message::Text(json!({ "op": 2, "d": {} }).to_string().into()))
+                .await
+                .expect("fake OBS sends identified");
+            let request = socket.next().await.expect("fake OBS receives request")
+                .expect("fake OBS request frame");
+            let request = match request
+            {
+                Message::Text(text) => serde_json::from_str::<Value>(&text).expect("request JSON"),
+                Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes).expect("request JSON"),
+                other => panic!("unexpected request frame: {other:?}"),
+            };
+            assert_eq!(request["op"], 6);
+            assert_eq!(request["d"]["requestType"], "SetCurrentProgramScene");
+            let request_id = request["d"]["requestId"].as_str().expect("request id");
+            let response = json!({
+                "op": 7,
+                "d": {
+                    "requestId": request_id,
+                    "requestStatus": {
+                        "result": request_result,
+                        "code": if request_result { 100 } else { 5004 },
+                        "comment": if request_result { "ok" } else { "scene missing" }
+                    }
+                }
+            });
+            socket
+                .send(Message::Text(response.to_string().into()))
+                .await
+                .expect("fake OBS sends response");
+        });
+        (port, task)
+    }
+
+    #[tokio::test]
+    async fn executes_scene_against_fake_obs_protocol()
+    {
+        let (port, server) = run_fake_obs(true).await;
+        let settings = ObsSettings::new("127.0.0.1", port).expect("OBS settings");
+        let mut stage = ObsWebSocketStage::connect(settings).await.expect("OBS connects");
+        stage
+            .execute(StageAction::Scene {
+                scene: "main".to_owned(),
+            })
+            .await
+            .expect("scene executes");
+        server.await.expect("fake OBS task");
+    }
+
+    #[tokio::test]
+    async fn reports_obs_failure_and_downgrades_health()
+    {
+        let (port, server) = run_fake_obs(false).await;
+        let settings = ObsSettings::new("127.0.0.1", port).expect("OBS settings");
+        let mut stage = ObsWebSocketStage::connect(settings).await.expect("OBS connects");
+        let error = stage
+            .execute(StageAction::Scene {
+                scene: "missing".to_owned(),
+            })
+            .await
+            .expect_err("OBS failure is returned");
+        assert!(error.to_string().contains("scene missing"));
+        let health = stage.health();
+        assert!(!health.ready);
+        assert!(health.detail.contains("scene missing"));
+        server.await.expect("fake OBS task");
+    }
     #[test]
     fn rejects_invalid_settings()
     {
