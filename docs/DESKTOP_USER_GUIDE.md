@@ -9,7 +9,7 @@ AIex 提供两种入口：普通用户使用可视化首次设置向导；开发
 
 ## 小白模式：双击完成初始化
 
-Windows 用户可以直接双击仓库根目录的 `AIex-Desktop.cmd`。它优先启动 `target/release` 或 `target/debug` 中已构建的桌面端；开发环境没有二进制时才调用 Cargo。首次打开会进入可视化设置向导。
+Windows 用户可以直接双击仓库根目录的 `AIex-Desktop.cmd`。它优先启动 `crates/ai-ex-desktop/target/release` 或 `crates/ai-ex-desktop/target/debug` 中已构建的桌面端；开发环境没有二进制时才调用 Cargo。首次打开会进入可视化设置向导。
 
 开发者可以双击 `AIex-Desktop-Developer.cmd`，让诊断面板默认展开；桌面端日志和服务原始 stdout/stderr 可以同时查看。
 
