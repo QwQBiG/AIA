@@ -95,3 +95,7 @@ cargo run -p ai-ex-service -- --config config/ai-ex.desktop.example.toml --check
 ```
 
 DeepSeek 未配置时会明确报告 `DEEPSEEK_API_KEY` 缺失；VTS、TTS 和记忆在样例中默认关闭，因此不要求安装这些外部服务。
+
+### 诊断导出与新手提示
+
+开发者诊断面板支持关键词筛选，并可点击“导出日志”写入桌面启动目录的 aiex-desktop-diagnostics.log。导出内容只来自桌面已收到的诊断行，适合提交问题时保留本地证据。服务未连接时，新手控制台会显示下一步操作提示；首次设置时可勾选保存后自动启动服务。

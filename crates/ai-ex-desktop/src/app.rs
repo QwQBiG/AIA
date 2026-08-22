@@ -17,6 +17,8 @@ pub struct DesktopApp
     health: Vec<ComponentHealth>,
     show_developer: bool,
     logs: VecDeque<String>,
+    log_filter: String,
+    export_feedback: Option<String>,
     persona: PersonaSnapshot,
     persona_dirty: bool,
     pending_persona: Option<PersonaSnapshot>,
@@ -40,6 +42,8 @@ impl DesktopApp
             health: Vec::new(),
             show_developer: developer_mode,
             logs: VecDeque::with_capacity(200),
+            log_filter: String::new(),
+            export_feedback: None,
             persona: PersonaSnapshot::default(),
             persona_dirty: false,
             pending_persona: None,
@@ -57,6 +61,29 @@ impl DesktopApp
             self.logs.pop_front();
         }
         self.logs.push_back(message.into());
+    }
+
+    fn export_diagnostics(&mut self)
+    {
+        let path = std::env::current_dir()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join("aiex-desktop-diagnostics.log");
+        let content = self.logs.iter().cloned().collect::<Vec<_>>().join("\n");
+        match std::fs::write(&path, content)
+        {
+            Ok(()) =>
+            {
+                let message = format!("诊断日志已导出：{}", path.display());
+                self.export_feedback = Some(message.clone());
+                self.push_log(message);
+            }
+            Err(error) =>
+            {
+                let message = format!("诊断日志导出失败：{error}");
+                self.export_feedback = Some(message.clone());
+                self.push_log(message);
+            }
+        }
     }
 
     fn drain_events(&mut self)
@@ -252,6 +279,23 @@ impl DesktopApp
                 ui.separator();
                 ui.label(format!("运行状态：{:?}", self.state.runtime.state));
             });
+            let guidance = match self.state.connection
+            {
+                ConnectionState::Connected =>
+                {
+                    if let Some(item) = self.health.iter().find(|item| !item.ready)
+                    {
+                        format!("建议：检查 {} —— {}", item.component, item.detail)
+                    }
+                    else
+                    {
+                        "建议：可以直接输入消息开始对话。".to_owned()
+                    }
+                }
+                ConnectionState::Connecting => "建议：等待服务完成连接；不要重复启动多个服务进程。".to_owned(),
+                ConnectionState::Disconnected => "建议：重新双击 AIex-Desktop.cmd；首次设置时勾选“保存后自动启动服务”，再打开“开发者诊断”查看原因。".to_owned(),
+            };
+            ui.small(guidance);
             let ready = self.health.iter().filter(|item| item.ready).count();
             let total = self.health.len();
             if total == 0
@@ -471,20 +515,44 @@ impl DesktopApp
         }
         ui.collapsing("开发者诊断日志", |ui|
         {
-            ui.horizontal(|ui|
+            ui.horizontal_wrapped(|ui|
             {
-                ui.small("桌面控制协议与事件流日志；服务端日志继续输出到启动终端。");
+                ui.small("桌面控制协议与事件流日志；服务端原始日志继续输出到启动终端。");
+                if ui.button("导出日志").clicked()
+                {
+                    self.export_diagnostics();
+                }
                 if ui.button("清空").clicked()
                 {
                     self.logs.clear();
+                    self.export_feedback = None;
                 }
             });
+            ui.horizontal(|ui|
+            {
+                ui.label("筛选");
+                ui.text_edit_singleline(&mut self.log_filter);
+                if ui.button("清除筛选").clicked()
+                {
+                    self.log_filter.clear();
+                }
+            });
+            let filtered = self
+                .logs
+                .iter()
+                .filter(|line| self.log_filter.is_empty() || line.contains(&self.log_filter))
+                .collect::<Vec<_>>();
+            ui.small(format!("显示 {} / {} 条；日志最多保留 200 条。", filtered.len(), self.logs.len()));
+            if let Some(feedback) = &self.export_feedback
+            {
+                ui.weak(feedback);
+            }
             egui::ScrollArea::vertical()
                 .max_height(180.0)
                 .stick_to_bottom(true)
                 .show(ui, |ui|
                 {
-                    for line in &self.logs
+                    for line in filtered
                     {
                         ui.monospace(line);
                     }
