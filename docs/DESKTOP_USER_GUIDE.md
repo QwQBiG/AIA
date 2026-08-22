@@ -103,3 +103,7 @@ DeepSeek 未配置时会明确报告 `DEEPSEEK_API_KEY` 缺失；VTS、TTS 和�
 ### Provider 配置提示（Phase 32）
 
 首次设置会根据 DeepSeek、KoboldCpp、Ollama 显示不同的依赖提示：云端 DeepSeek 需要 DEEPSEEK_API_KEY；KoboldCpp 需要先启动本地 5001 端口服务；Ollama 需要先运行本地服务并安装模型。模型名称仍可自由编辑，桌面不会擅自替换模型。主界面的“模型 Provider 诊断”会显示当前 Provider 的健康详情和下一步处理方向。
+
+### 人格、记忆与安全状态（Phase 33）
+
+主界面的“人格、记忆与自动化策略”面板只读展示当前人格版本、直播模式、记忆是否启用及安全门状态。人格修改仍必须经过确认；记忆和自动化不会因为打开面板而改变，急停状态会优先显示。

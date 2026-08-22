@@ -473,6 +473,46 @@ impl DesktopApp
         });
     }
 
+    fn show_policy_panel(&self, ui: &mut egui::Ui)
+    {
+        ui.collapsing("人格、记忆与自动化策略", |ui|
+        {
+            ui.label(format!(
+                "当前人格：{} @ revision {} · 直播模式：{}",
+                self.persona.name,
+                self.persona.revision,
+                self.persona.live_mode,
+            ));
+            if let Some(memory) = self.health.iter().find(|item| item.component == "memory")
+            {
+                let state = if memory.ready { "可用" } else { "不可用" };
+                ui.label(format!("记忆：{}（{}）", state, memory.detail));
+            }
+            else
+            {
+                ui.weak("记忆状态尚未同步。");
+            }
+            if let Some(safety) = self.health.iter().find(|item| item.component == "safety")
+            {
+                let emergency = safety.detail.contains("emergency stop");
+                let color = if emergency
+                {
+                    egui::Color32::LIGHT_RED
+                }
+                else
+                {
+                    egui::Color32::from_rgb(80, 200, 140)
+                };
+                ui.colored_label(color, format!("自动化安全门：{}", safety.detail));
+            }
+            else
+            {
+                ui.weak("自动化安全状态尚未同步。");
+            }
+            ui.small("人格修改必须确认；记忆默认本地保存；外部动作仍受权限、冷却和急停约束。");
+        });
+    }
+
     fn show_automation_panel(&self, ui: &mut egui::Ui)
     {
         ui.collapsing("视觉与游戏安全状态", |ui|
@@ -765,6 +805,7 @@ impl eframe::App for DesktopApp
         self.show_persona_panel(ui);
         self.show_health(ui);
         self.show_model_panel(ui);
+        self.show_policy_panel(ui);
         self.show_automation_panel(ui);
         self.show_developer_panel(ui);
         self.show_stage_panel(ui);

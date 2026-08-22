@@ -217,3 +217,4 @@ OBS JSONL 回放、动作遥测和真实 OBS WebSocket v5 request/response 联�
 - 服务事件回放报告：`--replay-events` 支持 `--replay-report`，与模拟器输出同一事件/响应/记忆字段；报告参数脱离事件回放时会明确拒绝。
 - 诊断体验：桌面开发者面板支持关键词筛选和本地 UTF-8 日志导出；新手连接失败时显示可执行的下一步提示。
 - Provider 配置体验：首次设置按 DeepSeek/KoboldCpp/Ollama 显示云端密钥、本地服务端口和模型安装提示；桌面主界面独立显示当前模型 Provider 健康详情，不把供应商 SDK 带入核心。
+- 人格/记忆/安全投影：桌面只读消费 Persona、memory 和 safety 健康快照，展示人格版本、直播模式、记忆状态与急停状态；任何外部动作仍只能经过服务端 SafetyGate。
