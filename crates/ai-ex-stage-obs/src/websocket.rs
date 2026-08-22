@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ai_ex_domain::{AppError, ComponentHealth};
@@ -10,7 +11,7 @@ use futures_util::{SinkExt, StreamExt};
 use ring::digest::{SHA256, digest};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 use uuid::Uuid;
 
@@ -56,8 +57,8 @@ impl ObsSettings
 
 pub struct ObsWebSocketStage
 {
-    sender: mpsc::Sender<Command>,
-    health: ComponentHealth,
+    sender: mpsc::Sender<PendingCommand>,
+    health: Arc<RwLock<ComponentHealth>>,
     subtitle_input: Option<String>,
 }
 
@@ -88,31 +89,69 @@ impl ObsWebSocketStage
             )));
         }
         let (sender, receiver) = mpsc::channel(64);
-        tokio::spawn(run_actor(socket, receiver));
+        let health = Arc::new(RwLock::new(ComponentHealth {
+            component: "obs-websocket".to_owned(),
+            ready: true,
+            detail: "OBS WebSocket v5 identified".to_owned(),
+        }));
+        tokio::spawn(run_actor(
+            socket,
+            receiver,
+            settings.timeout,
+            Arc::clone(&health),
+        ));
         Ok(Self {
             sender,
-            health: ComponentHealth {
-                component: "obs-websocket".to_owned(),
-                ready: true,
-                detail: "OBS WebSocket v5 identified".to_owned(),
-            },
+            health,
             subtitle_input: settings
                 .subtitle_input
                 .filter(|value| !value.trim().is_empty()),
         })
     }
 
-    pub fn health(&self) -> &ComponentHealth
+    pub fn health(&self) -> ComponentHealth
     {
-        &self.health
+        self.health
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     async fn send(&self, command: Command) -> Result<(), AppError>
     {
+        let (response, receiver) = oneshot::channel();
         self.sender
-            .send(command)
+            .send(PendingCommand { command, response })
             .await
-            .map_err(|_| AppError::unavailable("OBS WebSocket actor stopped"))
+            .map_err(|_| {
+                self.mark_unavailable("OBS WebSocket actor stopped");
+                AppError::unavailable("OBS WebSocket actor stopped")
+            })?;
+        match receiver.await
+        {
+            Ok(result) =>
+            {
+                if let Err(error) = &result
+                {
+                    self.mark_unavailable(error.to_string());
+                }
+                result
+            }
+            Err(_) =>
+            {
+                self.mark_unavailable("OBS WebSocket actor stopped");
+                Err(AppError::unavailable("OBS WebSocket actor stopped"))
+            }
+        }
+    }
+
+    fn mark_unavailable(&self, detail: impl Into<String>)
+    {
+        if let Ok(mut health) = self.health.write()
+        {
+            health.ready = false;
+            health.detail = detail.into();
+        }
     }
 }
 
@@ -131,7 +170,7 @@ impl StageExecutor for ObsWebSocketStage
 
     async fn health(&self) -> ComponentHealth
     {
-        self.health.clone()
+        ObsWebSocketStage::health(self)
     }
 
     async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
@@ -174,6 +213,12 @@ impl StageExecutor for ObsWebSocketStage
     }
 }
 
+struct PendingCommand
+{
+    command: Command,
+    response: oneshot::Sender<Result<(), AppError>>,
+}
+
 enum Command
 {
     Subtitle {
@@ -186,23 +231,44 @@ enum Command
     Stop(Option<String>),
 }
 
-async fn run_actor(mut socket: ObsSocket, mut receiver: mpsc::Receiver<Command>)
+async fn run_actor(
+    mut socket: ObsSocket,
+    mut receiver: mpsc::Receiver<PendingCommand>,
+    timeout: Duration,
+    health: Arc<RwLock<ComponentHealth>>,
+)
 {
     loop
     {
         tokio::select!
         {
-            command = receiver.recv() =>
+            pending = receiver.recv() =>
             {
-                let Some(command) = command else
+                let Some(PendingCommand { command, response }) = pending else
                 {
                     break;
                 };
                 let Some(request) = command_request(command) else
                 {
+                    let _ignored = response.send(Ok(()));
                     continue;
                 };
-                if send_json(&mut socket, request).await.is_err()
+                let request_id = request["d"]["requestId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                let result = match send_json(&mut socket, request).await
+                {
+                    Ok(()) => receive_response(&mut socket, &request_id, timeout).await,
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = &result
+                {
+                    set_health_unavailable(&health, error.to_string());
+                }
+                let failed = result.is_err();
+                let _ignored = response.send(result);
+                if failed
                 {
                     break;
                 }
@@ -211,7 +277,21 @@ async fn run_actor(mut socket: ObsSocket, mut receiver: mpsc::Receiver<Command>)
             {
                 match message
                 {
-                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    Some(Ok(Message::Close(_))) =>
+                    {
+                        set_health_unavailable(&health, "OBS WebSocket closed".to_owned());
+                        break;
+                    }
+                    Some(Err(error)) =>
+                    {
+                        set_health_unavailable(&health, format!("OBS WebSocket read failed: {error}"));
+                        break;
+                    }
+                    None =>
+                    {
+                        set_health_unavailable(&health, "OBS WebSocket stream ended".to_owned());
+                        break;
+                    }
                     Some(_) =>
                     {
                     }
@@ -332,6 +412,70 @@ async fn receive_json(socket: &mut ObsSocket, timeout: Duration) -> Result<Value
     }
 }
 
+async fn receive_response(
+    socket: &mut ObsSocket,
+    request_id: &str,
+    timeout: Duration,
+) -> Result<(), AppError>
+{
+    loop
+    {
+        let message = tokio::time::timeout(timeout, socket.next())
+            .await
+            .map_err(|_| AppError::connectivity("OBS WebSocket request response timed out"))?
+            .ok_or_else(|| AppError::connectivity("OBS WebSocket closed while waiting for response"))?
+            .map_err(|error| AppError::connectivity(format!("OBS WebSocket read failed: {error}")))?;
+        let value: Value = match message
+        {
+            Message::Text(text) => serde_json::from_str(&text)
+                .map_err(|error| AppError::protocol(format!("invalid OBS JSON: {error}")))?,
+            Message::Binary(bytes) => serde_json::from_slice(&bytes)
+                .map_err(|error| AppError::protocol(format!("invalid OBS JSON: {error}")))?,
+            Message::Close(_) =>
+            {
+                return Err(AppError::connectivity(
+                    "OBS WebSocket closed while waiting for response",
+                ));
+            }
+            Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
+        };
+        if let Some(result) = response_result(&value, request_id)
+        {
+            return result;
+        }
+    }
+}
+fn set_health_unavailable(health: &Arc<RwLock<ComponentHealth>>, detail: String)
+{
+    if let Ok(mut health) = health.write()
+    {
+        health.ready = false;
+        health.detail = detail;
+    }
+}
+
+fn response_result(value: &Value, request_id: &str) -> Option<Result<(), AppError>>
+{
+    if value.get("op").and_then(Value::as_u64) != Some(7)
+    {
+        return None;
+    }
+    let response_id = value["d"]["requestId"].as_str().unwrap_or_default();
+    if response_id != request_id
+    {
+        return None;
+    }
+    let status = &value["d"]["requestStatus"];
+    if status["result"].as_bool() == Some(true)
+    {
+        return Some(Ok(()));
+    }
+    let code = status["code"].as_u64().unwrap_or_default();
+    let comment = status["comment"].as_str().unwrap_or("unknown OBS error");
+    Some(Err(AppError::protocol(format!(
+        "OBS request failed: code={code}, comment={comment}",
+    ))))
+}
 async fn send_json(socket: &mut ObsSocket, value: Value) -> Result<(), AppError>
 {
     socket
@@ -369,6 +513,29 @@ mod tests
         assert!(request["d"]["authentication"].as_str().is_some());
     }
 
+    #[test]
+    fn matches_success_and_failure_responses()
+    {
+        let success = json!({
+            "op": 7,
+            "d": {
+                "requestId": "request-1",
+                "requestStatus": { "result": true, "code": 100 }
+            }
+        });
+        assert!(matches!(response_result(&success, "request-1"), Some(Ok(()))));
+
+        let failure = json!({
+            "op": 7,
+            "d": {
+                "requestId": "request-1",
+                "requestStatus": { "result": false, "code": 402, "comment": "bad request" }
+            }
+        });
+        let result = response_result(&failure, "request-1").expect("matching failure");
+        assert!(result.is_err());
+        assert!(response_result(&success, "other").is_none());
+    }
     #[test]
     fn builds_scene_and_hotkey_requests()
     {
