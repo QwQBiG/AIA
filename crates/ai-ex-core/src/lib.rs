@@ -17,5 +17,5 @@ pub use ports::{
 };
 pub use policy::ConversationPolicy;
 pub use runtime::{Runtime, RuntimeControl, TurnOutcome};
-pub use stage_ports::{StageAvatarPort, StageOutput, StageSpeechPort};
+pub use stage_ports::{StageAvatarPort, StageJournal, StageOutput, StageSpeechPort};
 pub use actor::{RuntimeHandle, spawn_runtime};

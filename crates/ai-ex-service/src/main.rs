@@ -20,7 +20,7 @@ use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend, PluginConfig};
 use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
-    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, StageOutput,
+    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, StageJournal, StageOutput,
     spawn_runtime,
 };
 use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, LiveResponseMode, PersonaSnapshot, SystemEvent, TurnId};
@@ -262,6 +262,7 @@ async fn run() -> Result<(), AppError>
         event_hub.clone(),
         Arc::clone(&safety),
         Arc::clone(&health_snapshot),
+        stage_output.journal(),
     )
     .await?;
     let duplex_task = spawn_duplex(&config, runtime.clone())?;
@@ -1091,6 +1092,7 @@ struct ServiceControl
     events: EventHub,
     safety: Arc<SafetyGate>,
     health: Arc<RwLock<Vec<ComponentHealth>>>,
+    stage: StageJournal,
     persona: Arc<RwLock<PersonaSnapshot>>,
 }
 
@@ -1147,6 +1149,7 @@ impl ControlBackend for ServiceControl
                 self.events.publish_now(SystemEvent::PersonaChanged { profile_id, revision });
                 Ok(ControlPayload::Accepted)
             },
+            ControlCommand::Stage => Ok(ControlPayload::Stage(self.stage.snapshot())),
             ControlCommand::Health => Ok(ControlPayload::Health(self.health.read().await.clone())),
             ControlCommand::Events { after, limit } =>
             {
@@ -1178,6 +1181,7 @@ async fn spawn_control(
     events: EventHub,
     safety: Arc<SafetyGate>,
     health: Arc<RwLock<Vec<ComponentHealth>>>,
+    stage: StageJournal,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
 {
     if !config.control.enabled
@@ -1215,6 +1219,7 @@ async fn spawn_control(
         safety,
         health,
         persona: Arc::new(RwLock::new(persona)),
+        stage,
     });
     tracing::info!(%address, "local control server ready");
     Ok(Some(tokio::spawn(async move

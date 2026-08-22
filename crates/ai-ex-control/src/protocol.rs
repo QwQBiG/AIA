@@ -1,4 +1,4 @@
-use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot};
+use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot, StageSnapshot};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,6 +21,7 @@ pub enum ControlCommand
     Persona,
     SetPersona { profile: PersonaSnapshot },
     Health,
+    Stage,
     Events { after: u64, limit: usize },
     EmergencyStop,
 }
@@ -33,6 +34,7 @@ pub enum ControlPayload
     Snapshot(RuntimeSnapshot),
     Persona(PersonaSnapshot),
     Health(Vec<ComponentHealth>),
+    Stage(StageSnapshot),
     Events(Vec<SequencedEvent>),
 }
 

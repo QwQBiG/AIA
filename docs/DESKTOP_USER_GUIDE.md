@@ -48,6 +48,13 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
 桌面默认先显示新手控制台：连接状态、组件就绪数、对话输入、打断和急停都不需要命令行。点击右上角“开发者诊断”即可展开桌面端收到的连接变化、健康快照、事件数量、控制命令和失败信息；启动终端仍保留 `ai-ex-service` 的完整 stdout/stderr。`--developer` 只用于让诊断面板启动时自动展开，两者结合可以同时满足“看得懂”和“查得深”。
 
 Developer stage replay is available with --replay-stage PATH; the service validates version, sequence, and action capability before printing replay logs.
+示例回放文件位于 `config_examples/stage-replay.jsonl`，可执行：
+
+```powershell
+cargo run -p ai-ex-service -- --config config/ai-ex.example.toml --replay-stage config_examples/stage-replay.jsonl
+```
+
+开发者诊断下的“舞台/OBS 动作遥测”面板会显示服务最近的舞台动作摘要（schema、序号、类型和受限 detail），包括语音、字幕、口型、表情、Stop 等；它是只读观察，不会因为查看而触发 OBS。
 
 视觉/游戏 dry-run 回放：
 

@@ -253,6 +253,7 @@ mod tests
             {
                 ControlCommand::Status => Ok(ControlPayload::Snapshot(RuntimeSnapshot::default())),
                 ControlCommand::Persona => Ok(ControlPayload::Persona(PersonaSnapshot::default())),
+                ControlCommand::Stage => Ok(ControlPayload::Stage(ai_ex_domain::StageSnapshot::default())),
                 _ => Ok(ControlPayload::Accepted),
             }
         }
@@ -282,6 +283,12 @@ mod tests
             .await
             .expect("persona response");
         assert_eq!(response, ControlPayload::Persona(PersonaSnapshot::default()));
+
+        let stage = client
+            .send(ControlCommand::Stage)
+            .await
+            .expect("stage response");
+        assert_eq!(stage, ControlPayload::Stage(ai_ex_domain::StageSnapshot::default()));
 
         task.abort();
     }

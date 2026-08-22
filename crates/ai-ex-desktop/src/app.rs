@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use ai_ex_domain::{ComponentHealth, PersonaSnapshot, SystemEvent};
+use ai_ex_domain::{ComponentHealth, PersonaSnapshot, StageSnapshot, SystemEvent};
 use ai_ex_ui_model::{ApplyOutcome, ConnectionState, TurnStatus, UiState};
 use eframe::egui;
 
@@ -23,6 +23,7 @@ pub struct DesktopApp
     confirm_persona: bool,
     persona_apply_pending: bool,
     taboos_editor: String,
+    stage: StageSnapshot,
 }
 
 impl DesktopApp
@@ -45,6 +46,7 @@ impl DesktopApp
             confirm_persona: false,
             persona_apply_pending: false,
             taboos_editor: String::new(),
+            stage: StageSnapshot::default(),
         }
     }
 
@@ -89,6 +91,11 @@ impl DesktopApp
                     {
                         self.push_log(format!("persona update received while editing: {}@{}", profile.profile_id, profile.revision));
                     }
+                }
+                WorkerEvent::Stage(snapshot) =>
+                {
+                    self.push_log(format!("stage snapshot received: {} action(s)", snapshot.actions.len()));
+                    self.stage = snapshot;
                 }
                 WorkerEvent::Health(health) =>
                 {
@@ -430,6 +437,27 @@ impl DesktopApp
             }
         });
     }
+    fn show_stage_panel(&self, ui: &mut egui::Ui)
+    {
+        if !self.show_developer
+        {
+            return;
+        }
+        ui.collapsing("舞台/OBS 动作遥测", |ui|
+        {
+            ui.small(format!("schema={}，最近 {} 个动作", self.stage.schema_version, self.stage.actions.len()));
+            if self.stage.actions.is_empty()
+            {
+                ui.weak("尚未收到舞台动作；可发送一条对话或运行 dry-run 回放后刷新。");
+                return;
+            }
+            for action in self.stage.actions.iter().rev().take(24)
+            {
+                ui.monospace(format!("#{} [{}] {}", action.sequence, action.kind, action.detail));
+            }
+        });
+    }
+
     fn show_developer_panel(&mut self, ui: &mut egui::Ui)
     {
         if !self.show_developer
@@ -629,6 +657,7 @@ impl eframe::App for DesktopApp
         self.show_health(ui);
         self.show_automation_panel(ui);
         self.show_developer_panel(ui);
+        self.show_stage_panel(ui);
         self.show_conversation(ui);
         self.show_composer(ui);
         self.show_persona_confirmation(ui.ctx());

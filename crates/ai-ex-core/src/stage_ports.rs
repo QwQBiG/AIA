@@ -1,16 +1,92 @@
 #![forbid(unsafe_code)]
 
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
-use ai_ex_domain::{AppError, Emotion, TurnId};
+use ai_ex_domain::{AppError, Emotion, StageActionSummary, StageSnapshot, TurnId, STAGE_TELEMETRY_SCHEMA_VERSION};
 use ai_ex_stage::{StageAction, StageCapability, StageExecutor, StageRouter};
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
+
+#[derive(Clone)]
+pub struct StageJournal
+{
+    entries: Arc<Mutex<VecDeque<StageActionSummary>>>,
+    next_sequence: Arc<AtomicU64>,
+    capacity: usize,
+}
+
+fn summarize_action(action: &StageAction) -> String
+{
+    match action
+    {
+        StageAction::Speak {
+            turn_id,
+            text,
+            interruptible,
+        } => format!("turn_id={turn_id:?} text_chars={} interruptible={interruptible}", text.chars().count()),
+        StageAction::Subtitle {
+            text,
+            duration_ms,
+        } => format!("text_chars={} duration_ms={duration_ms}", text.chars().count()),
+        StageAction::Expression { emotion } => format!("emotion={emotion:?}"),
+        StageAction::Mouth { value } => format!("value={value:.3}"),
+        StageAction::Scene { scene } => format!("scene={scene}"),
+        StageAction::Hotkey { id } => format!("id={id}"),
+        StageAction::Stop => "stop".to_owned(),
+    }
+}
+
+impl StageJournal
+{
+    pub fn new(capacity: usize) -> Self
+    {
+        Self {
+            entries: Arc::new(Mutex::new(VecDeque::with_capacity(capacity.max(1)))),
+            next_sequence: Arc::new(AtomicU64::new(0)),
+            capacity: capacity.max(1),
+        }
+    }
+
+    pub fn record(&self, action: &StageAction)
+    {
+        let sequence = self.next_sequence.fetch_add(1, Ordering::AcqRel) + 1;
+        let entry = StageActionSummary {
+            sequence,
+            schema_version: STAGE_TELEMETRY_SCHEMA_VERSION,
+            kind: action.kind().to_owned(),
+            detail: summarize_action(action),
+        };
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if entries.len() == self.capacity
+        {
+            entries.pop_front();
+        }
+        entries.push_back(entry);
+    }
+
+    pub fn snapshot(&self) -> StageSnapshot
+    {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        StageSnapshot {
+            schema_version: STAGE_TELEMETRY_SCHEMA_VERSION,
+            actions: entries.iter().cloned().collect(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct StageOutput
 {
-    router: Arc<Mutex<StageRouter>>,
+    router: Arc<AsyncMutex<StageRouter>>,
+    journal: StageJournal,
 }
 
 impl StageOutput
@@ -18,7 +94,8 @@ impl StageOutput
     pub fn new(router: StageRouter) -> Self
     {
         Self {
-            router: Arc::new(Mutex::new(router)),
+            router: Arc::new(AsyncMutex::new(router)),
+            journal: StageJournal::new(256),
         }
     }
 
@@ -26,6 +103,7 @@ impl StageOutput
     {
         StageSpeechPort {
             router: Arc::clone(&self.router),
+            journal: self.journal.clone(),
         }
     }
 
@@ -33,14 +111,22 @@ impl StageOutput
     {
         StageAvatarPort {
             router: Arc::clone(&self.router),
+            journal: self.journal.clone(),
         }
     }
+
+    pub fn journal(&self) -> StageJournal
+    {
+        self.journal.clone()
+    }
+
 }
 
 #[derive(Clone)]
 pub struct StageSpeechPort
 {
-    router: Arc<Mutex<StageRouter>>,
+    router: Arc<AsyncMutex<StageRouter>>,
+    journal: StageJournal,
 }
 
 #[async_trait]
@@ -50,21 +136,21 @@ impl crate::SpeechPort for StageSpeechPort
     {
         let mut router = self.router.lock().await;
         let subtitle_enabled = router.capabilities().contains(&StageCapability::Subtitle);
-        router
-            .execute(StageAction::Speak {
-                turn_id,
-                text: sentence.clone(),
-                interruptible: true,
-            })
-            .await?;
+        let speech = StageAction::Speak {
+            turn_id,
+            text: sentence.clone(),
+            interruptible: true,
+        };
+        self.journal.record(&speech);
+        router.execute(speech).await?;
         if subtitle_enabled
         {
-            router
-                .execute(StageAction::Subtitle {
-                    text: sentence.clone(),
-                    duration_ms: subtitle_duration_ms(&sentence),
-                })
-                .await?;
+            let subtitle = StageAction::Subtitle {
+                text: sentence.clone(),
+                duration_ms: subtitle_duration_ms(&sentence),
+            };
+            self.journal.record(&subtitle);
+            router.execute(subtitle).await?;
         }
         Ok(())
     }
@@ -72,7 +158,9 @@ impl crate::SpeechPort for StageSpeechPort
     async fn interrupt(&mut self) -> Result<(), AppError>
     {
         let mut router = self.router.lock().await;
-        router.execute(StageAction::Stop).await
+        let action = StageAction::Stop;
+        self.journal.record(&action);
+        router.execute(action).await
     }
 }
 
@@ -84,7 +172,8 @@ fn subtitle_duration_ms(text: &str) -> u64
 #[derive(Clone)]
 pub struct StageAvatarPort
 {
-    router: Arc<Mutex<StageRouter>>,
+    router: Arc<AsyncMutex<StageRouter>>,
+    journal: StageJournal,
 }
 
 #[async_trait]
@@ -94,24 +183,30 @@ impl crate::AvatarPort for StageAvatarPort
     {
         let value = if speaking { 0.65 } else { 0.0 };
         let mut router = self.router.lock().await;
-        router.execute(StageAction::Mouth { value }).await
+        let action = StageAction::Mouth { value };
+        self.journal.record(&action);
+        router.execute(action).await
     }
 
     async fn set_neutral(&mut self) -> Result<(), AppError>
     {
         let mut router = self.router.lock().await;
-        router
-            .execute(StageAction::Expression {
-                emotion: Emotion::Neutral,
-            })
-            .await?;
-        router.execute(StageAction::Mouth { value: 0.0 }).await
+        let expression = StageAction::Expression {
+            emotion: Emotion::Neutral,
+        };
+        self.journal.record(&expression);
+        router.execute(expression).await?;
+        let mouth = StageAction::Mouth { value: 0.0 };
+        self.journal.record(&mouth);
+        router.execute(mouth).await
     }
 
     async fn set_emotion(&mut self, emotion: Emotion) -> Result<(), AppError>
     {
         let mut router = self.router.lock().await;
-        router.execute(StageAction::Expression { emotion }).await
+        let action = StageAction::Expression { emotion };
+        self.journal.record(&action);
+        router.execute(action).await
     }
 }
 
@@ -142,5 +237,11 @@ mod tests
             .set_speaking(true)
             .await
             .expect("mouth bridges");
+        let snapshot = output.journal().snapshot();
+        assert_eq!(snapshot.schema_version, STAGE_TELEMETRY_SCHEMA_VERSION);
+        assert!(snapshot.actions.iter().any(|action| action.kind == "speak"));
+        assert!(snapshot.actions.iter().any(|action| action.kind == "expression"));
+        assert!(snapshot.actions.iter().any(|action| action.kind == "mouth"));
+        assert!(!snapshot.actions.iter().any(|action| action.detail.contains("hello")));
     }
 }

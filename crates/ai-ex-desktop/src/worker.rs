@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use ai_ex_control::{ControlClient, ControlCommand, ControlPayload};
-use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot};
+use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot, StageSnapshot};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -28,6 +28,7 @@ pub enum WorkerEvent
     Connection(bool),
     Snapshot(RuntimeSnapshot),
     Health(Vec<ComponentHealth>),
+    Stage(StageSnapshot),
     Persona(PersonaSnapshot),
     Events(Vec<SequencedEvent>),
     Log(String),
@@ -170,6 +171,23 @@ async fn run_worker(
                                     }
                                 }
                             }
+                            match fetch_stage(&client).await
+                            {
+                                Ok(snapshot) =>
+                                {
+                                    if !emit(&events, WorkerEvent::Stage(snapshot))
+                                    {
+                                        return;
+                                    }
+                                }
+                                Err(error) =>
+                                {
+                                    if !emit(&events, WorkerEvent::Log(format!("stage refresh failed: {error}")))
+                                    {
+                                        return;
+                                    }
+                                }
+                            }
                         }
                         Err(error) =>
                         {
@@ -260,6 +278,23 @@ async fn run_worker(
                             }
                         }
                     }
+                    match fetch_stage(&client).await
+                    {
+                        Ok(snapshot) =>
+                        {
+                            if !emit(&events, WorkerEvent::Stage(snapshot))
+                            {
+                                return;
+                            }
+                        }
+                        Err(error) =>
+                        {
+                            if !emit(&events, WorkerEvent::Log(format!("stage refresh failed: {error}")))
+                            {
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -298,6 +333,15 @@ async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppErr
     {
         ControlPayload::Persona(profile) => Ok(profile),
         _ => Err(AppError::protocol("persona returned an unexpected payload")),
+    }
+}
+
+async fn fetch_stage(client: &ControlClient) -> Result<StageSnapshot, AppError>
+{
+    match client.send(ControlCommand::Stage).await?
+    {
+        ControlPayload::Stage(snapshot) => Ok(snapshot),
+        _ => Err(AppError::protocol("stage returned an unexpected payload")),
     }
 }
 
