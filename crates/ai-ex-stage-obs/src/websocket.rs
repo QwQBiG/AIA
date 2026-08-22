@@ -3,7 +3,7 @@
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use ai_ex_domain::{AppError, ComponentHealth};
+use ai_ex_domain::{AppError, ComponentHealth, ErrorKind};
 use ai_ex_stage::{StageAction, StageCapability, StageExecutor};
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -62,32 +62,37 @@ pub struct ObsWebSocketStage
     subtitle_input: Option<String>,
 }
 
+async fn connect_socket(settings: &ObsSettings) -> Result<ObsSocket, AppError>
+{
+    let endpoint = settings.endpoint();
+    let (mut socket, _response) = tokio::time::timeout(
+        settings.timeout,
+        connect_async(&endpoint),
+    )
+    .await
+    .map_err(|_| AppError::connectivity("OBS WebSocket connection timed out"))?
+    .map_err(|error| AppError::connectivity(format!("OBS WebSocket connect failed: {error}")))?;
+    let hello = receive_json(&mut socket, settings.timeout).await?;
+    let identify = identify_request(&hello, settings.password.as_deref())?;
+    send_json(&mut socket, identify).await?;
+    let identified = receive_json(&mut socket, settings.timeout).await?;
+    if identified.get("op").and_then(Value::as_u64) != Some(2)
+    {
+        return Err(AppError::protocol(format!(
+            "OBS WebSocket identify failed: {}",
+            identified
+                .get("d")
+                .cloned()
+                .unwrap_or(Value::Null),
+        )));
+    }
+    Ok(socket)
+}
 impl ObsWebSocketStage
 {
     pub async fn connect(settings: ObsSettings) -> Result<Self, AppError>
     {
-        let endpoint = settings.endpoint();
-        let (mut socket, _response) = tokio::time::timeout(
-            settings.timeout,
-            connect_async(&endpoint),
-        )
-        .await
-        .map_err(|_| AppError::connectivity("OBS WebSocket connection timed out"))?
-        .map_err(|error| AppError::connectivity(format!("OBS WebSocket connect failed: {error}")))?;
-        let hello = receive_json(&mut socket, settings.timeout).await?;
-        let identify = identify_request(&hello, settings.password.as_deref())?;
-        send_json(&mut socket, identify).await?;
-        let identified = receive_json(&mut socket, settings.timeout).await?;
-        if identified.get("op").and_then(Value::as_u64) != Some(2)
-        {
-            return Err(AppError::protocol(format!(
-                "OBS WebSocket identify failed: {}",
-                identified
-                    .get("d")
-                    .cloned()
-                    .unwrap_or(Value::Null),
-            )));
-        }
+        let socket = connect_socket(&settings).await?;
         let (sender, receiver) = mpsc::channel(64);
         let health = Arc::new(RwLock::new(ComponentHealth {
             component: "obs-websocket".to_owned(),
@@ -98,6 +103,7 @@ impl ObsWebSocketStage
             socket,
             receiver,
             settings.timeout,
+            settings.clone(),
             Arc::clone(&health),
         ));
         Ok(Self {
@@ -237,12 +243,16 @@ enum Command
 }
 
 async fn run_actor(
-    mut socket: ObsSocket,
+    initial_socket: ObsSocket,
     mut receiver: mpsc::Receiver<PendingCommand>,
     timeout: Duration,
+    settings: ObsSettings,
     health: Arc<RwLock<ComponentHealth>>,
 )
 {
+    let mut socket = Some(initial_socket);
+    let mut health_tick = tokio::time::interval(Duration::from_secs(5));
+    let _ignored = health_tick.tick().await;
     loop
     {
         tokio::select!
@@ -258,47 +268,52 @@ async fn run_actor(
                     let _ignored = response.send(Ok(()));
                     continue;
                 };
-                let request_id = request["d"]["requestId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
-                let result = match send_json(&mut socket, request).await
+                let result = match ensure_socket(&mut socket, &settings, &health).await
                 {
-                    Ok(()) => receive_response(&mut socket, &request_id, timeout).await,
+                    Ok(()) => match socket.as_mut()
+                    {
+                        Some(socket) => execute_request(socket, request, timeout).await,
+                        None => Err(AppError::unavailable("OBS WebSocket is not connected")),
+                    },
                     Err(error) => Err(error),
                 };
                 if let Err(error) = &result
                 {
                     set_health_unavailable(&health, error.to_string());
+                    if is_connection_error(error)
+                    {
+                        socket = None;
+                    }
                 }
-                let failed = result.is_err();
                 let _ignored = response.send(result);
-                if failed
-                {
-                    break;
-                }
             }
-            message = socket.next() =>
+            _ = health_tick.tick() =>
             {
-                match message
+                if socket.is_none()
                 {
-                    Some(Ok(Message::Close(_))) =>
+                    let _ignored = ensure_socket(&mut socket, &settings, &health).await;
+                    continue;
+                }
+                let probe = request("GetVersion", json!({}));
+                let result = match socket.as_mut()
+                {
+                    Some(socket) => execute_request(
+                        socket,
+                        probe,
+                        timeout.min(Duration::from_secs(2)),
+                    ).await,
+                    None => Err(AppError::unavailable("OBS WebSocket is not connected")),
+                };
+                match result
+                {
+                    Ok(()) => set_health_ready(&health, "OBS WebSocket health probe succeeded"),
+                    Err(error) =>
                     {
-                        set_health_unavailable(&health, "OBS WebSocket closed".to_owned());
-                        break;
-                    }
-                    Some(Err(error)) =>
-                    {
-                        set_health_unavailable(&health, format!("OBS WebSocket read failed: {error}"));
-                        break;
-                    }
-                    None =>
-                    {
-                        set_health_unavailable(&health, "OBS WebSocket stream ended".to_owned());
-                        break;
-                    }
-                    Some(_) =>
-                    {
+                        set_health_unavailable(&health, error.to_string());
+                        if is_connection_error(&error)
+                        {
+                            socket = None;
+                        }
                     }
                 }
             }
@@ -306,6 +321,62 @@ async fn run_actor(
     }
 }
 
+async fn ensure_socket(
+    socket: &mut Option<ObsSocket>,
+    settings: &ObsSettings,
+    health: &Arc<RwLock<ComponentHealth>>,
+) -> Result<(), AppError>
+{
+    if socket.is_some()
+    {
+        return Ok(());
+    }
+    set_health_unavailable(health, "OBS WebSocket reconnecting".to_owned());
+    let mut reconnect_settings = settings.clone();
+    reconnect_settings.timeout = settings.timeout.min(Duration::from_secs(2));
+    match connect_socket(&reconnect_settings).await
+    {
+        Ok(new_socket) =>
+        {
+            *socket = Some(new_socket);
+            set_health_ready(health, "OBS WebSocket reconnected");
+            Ok(())
+        }
+        Err(error) =>
+        {
+            set_health_unavailable(health, format!("OBS WebSocket reconnect failed: {error}"));
+            Err(error)
+        }
+    }
+}
+
+async fn execute_request(
+    socket: &mut ObsSocket,
+    request: Value,
+    timeout: Duration,
+) -> Result<(), AppError>
+{
+    let request_id = request["d"]["requestId"]
+        .as_str()
+        .ok_or_else(|| AppError::protocol("OBS request id is missing"))?
+        .to_owned();
+    send_json(socket, request).await?;
+    receive_response(socket, &request_id, timeout).await
+}
+
+fn is_connection_error(error: &AppError) -> bool
+{
+    matches!(error.kind, ErrorKind::Connectivity | ErrorKind::Unavailable)
+}
+
+fn set_health_ready(health: &Arc<RwLock<ComponentHealth>>, detail: impl Into<String>)
+{
+    if let Ok(mut health) = health.write()
+    {
+        health.ready = true;
+        health.detail = detail.into();
+    }
+}
 fn command_request(command: Command) -> Option<Value>
 {
     match command
@@ -559,6 +630,95 @@ mod tests
         (port, task)
     }
 
+    async fn run_reconnecting_fake_obs() -> (u16, tokio::task::JoinHandle<()>)
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("reconnect listener binds");
+        let port = listener
+            .local_addr()
+            .expect("reconnect listener address")
+            .port();
+        let task = tokio::spawn(async move
+        {
+            for expected_scene in ["first", "third"]
+            {
+                let (stream, _) = listener.accept().await.expect("reconnect accepts");
+                let mut socket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .expect("reconnect websocket accepts");
+                socket
+                    .send(Message::Text(json!({
+                        "op": 0,
+                        "d": { "obsWebSocketVersion": "5.0.0", "rpcVersion": 1 }
+                    }).to_string().into()))
+                    .await
+                    .expect("reconnect sends hello");
+                let identify = socket.next().await.expect("reconnect receives identify")
+                    .expect("reconnect identify frame");
+                let identify = match identify
+                {
+                    Message::Text(text) => serde_json::from_str::<Value>(&text).expect("identify JSON"),
+                    Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes).expect("identify JSON"),
+                    other => panic!("unexpected identify frame: {other:?}"),
+                };
+                assert_eq!(identify["op"], 1);
+                socket
+                    .send(Message::Text(json!({ "op": 2, "d": {} }).to_string().into()))
+                    .await
+                    .expect("reconnect sends identified");
+                let request = socket.next().await.expect("reconnect receives request")
+                    .expect("reconnect request frame");
+                let request = match request
+                {
+                    Message::Text(text) => serde_json::from_str::<Value>(&text).expect("request JSON"),
+                    Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes).expect("request JSON"),
+                    other => panic!("unexpected request frame: {other:?}"),
+                };
+                assert_eq!(request["d"]["requestData"]["sceneName"], expected_scene);
+                let request_id = request["d"]["requestId"].as_str().expect("request id");
+                socket
+                    .send(Message::Text(json!({
+                        "op": 7,
+                        "d": {
+                            "requestId": request_id,
+                            "requestStatus": { "result": true, "code": 100, "comment": "ok" }
+                        }
+                    }).to_string().into()))
+                    .await
+                    .expect("reconnect sends response");
+            }
+        });
+        (port, task)
+    }
+
+    #[tokio::test]
+    async fn reconnects_after_socket_failure_on_next_command()
+    {
+        let (port, server) = run_reconnecting_fake_obs().await;
+        let settings = ObsSettings::new("127.0.0.1", port).expect("OBS settings");
+        let mut stage = ObsWebSocketStage::connect(settings).await.expect("OBS connects");
+        stage
+            .execute(StageAction::Scene {
+                scene: "first".to_owned(),
+            })
+            .await
+            .expect("first scene executes");
+        let failure = stage
+            .execute(StageAction::Scene {
+                scene: "second".to_owned(),
+            })
+            .await
+            .expect_err("closed socket is reported");
+        assert!(is_connection_error(&failure));
+        stage
+            .execute(StageAction::Scene {
+                scene: "third".to_owned(),
+            })
+            .await
+            .expect("reconnected scene executes");
+        server.await.expect("reconnect server task");
+    }
     #[tokio::test]
     async fn executes_scene_against_fake_obs_protocol()
     {
