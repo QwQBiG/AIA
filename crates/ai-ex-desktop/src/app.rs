@@ -63,6 +63,13 @@ impl DesktopApp
         self.logs.push_back(message.into());
     }
 
+    fn active_model_health(&self) -> Option<&ComponentHealth>
+    {
+        self.health.iter().find(|item| {
+            matches!(item.component.as_str(), "deepseek" | "koboldcpp" | "ollama")
+        })
+    }
+
     fn export_diagnostics(&mut self)
     {
         let path = std::env::current_dir()
@@ -296,6 +303,11 @@ impl DesktopApp
                 ConnectionState::Disconnected => "建议：重新双击 AIex-Desktop.cmd；首次设置时勾选“保存后自动启动服务”，再打开“开发者诊断”查看原因。".to_owned(),
             };
             ui.small(guidance);
+            if let Some(item) = self.active_model_health()
+            {
+                let state = if item.ready { "模型已就绪" } else { "模型不可用" };
+                ui.label(format!("当前模型 Provider：{}（{}）", item.component, state));
+            }
             let ready = self.health.iter().filter(|item| item.ready).count();
             let total = self.health.len();
             if total == 0
@@ -434,6 +446,30 @@ impl DesktopApp
                         .on_hover_text(&item.detail);
                 }
             });
+        });
+    }
+
+    fn show_model_panel(&self, ui: &mut egui::Ui)
+    {
+        ui.collapsing("模型 Provider 诊断", |ui|
+        {
+            let Some(item) = self.active_model_health() else
+            {
+                ui.weak("尚未收到 DeepSeek、KoboldCpp 或 Ollama 的健康信息。");
+                return;
+            };
+            let color = if item.ready
+            {
+                egui::Color32::from_rgb(80, 200, 140)
+            }
+            else
+            {
+                egui::Color32::LIGHT_RED
+            };
+            let state = if item.ready { "就绪" } else { "不可用" };
+            ui.colored_label(color, format!("{}：{}", item.component, state));
+            ui.label(&item.detail);
+            ui.small("切换 Provider 或模型名需要重新运行首次设置，或修改配置后重启服务；桌面端不会偷偷替换当前模型。");
         });
     }
 
@@ -728,6 +764,7 @@ impl eframe::App for DesktopApp
         self.show_beginner_panel(ui);
         self.show_persona_panel(ui);
         self.show_health(ui);
+        self.show_model_panel(ui);
         self.show_automation_panel(ui);
         self.show_developer_panel(ui);
         self.show_stage_panel(ui);

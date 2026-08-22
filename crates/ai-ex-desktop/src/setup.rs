@@ -90,6 +90,26 @@ impl ProviderChoice
             Self::Ollama => "ollama",
         }
     }
+
+    fn description(self) -> &'static str
+    {
+        match self
+        {
+            Self::DeepSeek => "云端 API，适合直接开始测试；需要 DEEPSEEK_API_KEY。",
+            Self::KoboldCpp => "本地兼容 API，默认 127.0.0.1:5001；需要先启动 KoboldCpp。",
+            Self::Ollama => "本地模型服务，默认 127.0.0.1:11434；需要先安装并运行 Ollama。",
+        }
+    }
+
+    fn model_hint(self) -> &'static str
+    {
+        match self
+        {
+            Self::DeepSeek => "模型名按账户可用清单填写，例如 deepseek-v4-flash。",
+            Self::KoboldCpp => "填写 KoboldCpp 当前加载的模型标识；服务会使用已加载模型。",
+            Self::Ollama => "填写本机已安装的模型名，例如 llama3.2:latest。",
+        }
+    }
 }
 
 impl SetupApp
@@ -437,6 +457,12 @@ impl eframe::App for SetupApp
                     self.provider_changed();
                 }
             });
+            ui.group(|ui|
+            {
+                ui.strong(format!("当前 Provider：{}", self.provider.label()));
+                ui.label(self.provider.description());
+                ui.small(self.provider.model_hint());
+            });
             let check_clicked = ui.horizontal(|ui|
             {
                 ui.label("模型地址");
@@ -516,6 +542,14 @@ mod tests
         assert_eq!(endpoint_host_port("http", "127.0.0.1:5001").expect("explicit port"), ("127.0.0.1".to_owned(), 5001));
     }
 
+    #[test]
+    fn provider_help_explains_local_and_cloud_requirements()
+    {
+        assert!(ProviderChoice::DeepSeek.description().contains("DEEPSEEK_API_KEY"));
+        assert!(ProviderChoice::KoboldCpp.description().contains("5001"));
+        assert!(ProviderChoice::Ollama.description().contains("Ollama"));
+        assert!(ProviderChoice::Ollama.model_hint().contains("已安装"));
+    }
     #[test]
     fn probe_endpoint_reports_local_http_response()
     {

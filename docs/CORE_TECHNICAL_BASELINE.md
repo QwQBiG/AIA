@@ -216,3 +216,4 @@ OBS JSONL 回放、动作遥测和真实 OBS WebSocket v5 request/response 联�
 - 模拟直播闭环报告：`ai-ex-simulator --report` 记录事件过滤、响应建议和记忆投影，保证没有模型/平台凭据时也能验收编排链路。
 - 服务事件回放报告：`--replay-events` 支持 `--replay-report`，与模拟器输出同一事件/响应/记忆字段；报告参数脱离事件回放时会明确拒绝。
 - 诊断体验：桌面开发者面板支持关键词筛选和本地 UTF-8 日志导出；新手连接失败时显示可执行的下一步提示。
+- Provider 配置体验：首次设置按 DeepSeek/KoboldCpp/Ollama 显示云端密钥、本地服务端口和模型安装提示；桌面主界面独立显示当前模型 Provider 健康详情，不把供应商 SDK 带入核心。
