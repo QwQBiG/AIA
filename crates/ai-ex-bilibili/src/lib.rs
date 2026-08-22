@@ -423,6 +423,7 @@ fn map_message(session_id: Uuid, room_id: u64, body: &[u8]) -> Result<Option<Liv
 mod tests
 {
     use super::*;
+    use ai_ex_event_bus::{EventBus, EventPolicy, PublishOutcome};
 
     #[test]
     fn handshake_and_packet_round_trip()
@@ -566,6 +567,88 @@ mod tests
                 ..
             }
         ));
+    }
+    async fn run_fake_bilibili_sessions(
+        listener: tokio::net::TcpListener,
+        body: Vec<u8>,
+        sessions: usize,
+    )
+    {
+        for _ in 0..sessions
+        {
+            let (stream, _) = listener.accept().await.expect("fake Bilibili accepts");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("fake Bilibili websocket accepts");
+            let handshake = socket
+                .next()
+                .await
+                .expect("fake Bilibili receives handshake")
+                .expect("fake Bilibili handshake frame");
+            let handshake = match handshake
+            {
+                Message::Binary(bytes) => bytes,
+                other => panic!("unexpected Bilibili handshake frame: {other:?}"),
+            };
+            let packets = decode_packets(&handshake).expect("Bilibili handshake decodes");
+            assert_eq!(packets.len(), 1);
+            assert_eq!(packets[0].operation, 7);
+            assert!(String::from_utf8_lossy(&packets[0].body).contains("roomid"));
+            let event_packet = encode_packet(5, 1, &body).expect("event packet builds");
+            socket
+                .send(Message::Binary(event_packet.into()))
+                .await
+                .expect("fake Bilibili sends event");
+        }
+    }
+
+    #[tokio::test]
+    async fn connector_reconnects_and_event_bus_deduplicates_platform_id()
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Bilibili listener binds");
+        let port = listener
+            .local_addr()
+            .expect("Bilibili listener address")
+            .port();
+        let body = json!({
+            "cmd": "SEND_GIFT",
+            "data": {
+                "tid": "gift-reconnect-1",
+                "uid": 42,
+                "uname": "小明",
+                "giftName": "星星",
+                "num": 1
+            }
+        })
+        .to_string()
+        .into_bytes();
+        let server = tokio::spawn(run_fake_bilibili_sessions(listener, body, 2));
+        let mut settings = BilibiliSettings::new(123).expect("Bilibili settings");
+        settings.endpoint = format!("ws://127.0.0.1:{port}");
+        settings.reconnect_delay_ms = 1;
+        let mut connector = BilibiliConnector::new(settings);
+        let first = connector.next_events().await.expect("first event batch");
+        let second = connector.next_events().await.expect("reconnected event batch");
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert!(matches!(
+            &first[0].payload,
+            LiveEvent::Gift { event_id, .. } if event_id == "gift-reconnect-1"
+        ));
+        assert!(matches!(
+            &second[0].payload,
+            LiveEvent::Gift { event_id, .. } if event_id == "gift-reconnect-1"
+        ));
+        let (mut bus, _receiver) = EventBus::new(EventPolicy {
+            per_user_cooldown_ms: 1_500,
+            global_cooldown_ms: 0,
+            max_queue: 8,
+        });
+        assert_eq!(bus.publish(first[0].clone()), PublishOutcome::Accepted);
+        assert_eq!(bus.publish(second[0].clone()), PublishOutcome::Duplicate);
+        server.await.expect("fake Bilibili task");
     }
     #[test]
     fn rejects_brotli_packets_until_codec_is_enabled()

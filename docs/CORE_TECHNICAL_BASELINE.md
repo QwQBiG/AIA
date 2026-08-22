@@ -187,7 +187,7 @@ crates/
 
 - 小白入口：独立 eframe 桌面端首次设置向导可选择 DeepSeek、KoboldCpp、Ollama，生成本地配置与控制令牌，并可选配置 Bilibili 房间号。
 - 开发者入口：桌面开发者面板显示结构化控制事件，启动终端保留服务原始 stdout/stderr；两者共用本地控制协议。
-- Bilibili：服务读取配置后在后台启动隔离连接任务，连接器负责握手、30 秒心跳、zlib 包边界和重连，统一事件先经 EventBus，再写入本地记忆投影；默认关闭，断线只影响平台输入。
+- Bilibili：服务读取配置后在后台启动隔离连接任务，连接器负责握手、30 秒心跳、zlib 包边界和重连，统一事件先经 EventBus，再写入本地记忆投影；默认关闭，断线只影响平台输入；本地 WebSocket 契约测试覆盖双会话重连和重复礼物 ID 的 EventBus 去重。
 - 并发安全：MemoryStore 的克隆实例共享写锁，运行时与直播输入不会交错破坏 JSONL 文件；Runtime 通过 `MemoryPort::recall_for_context` 使用受限分类上下文，不把 live_event 原始日志直接混入普通对话。
 - 受控响应模式：Bilibili 默认 `suggest`，只有显式 `automatic`（或兼容旧 `auto_react = true`）且通过急停/冷却检查时才提交 Runtime；`confirm` 为人工确认扩展边界。
 - 角色热切换边界：`PersonaSnapshot` 携带 `profile_id/revision`，控制协议在无活动回合时更新 Runtime 系统提示词并广播 `PersonaChanged`，失败保持旧角色。
