@@ -1143,6 +1143,7 @@ impl ControlBackend for ServiceControl
                 let profile_id = profile.profile_id.clone();
                 let revision = profile.revision;
                 *self.persona.write().await = profile;
+                tracing::info!(%profile_id, revision, "persona changed");
                 self.events.publish_now(SystemEvent::PersonaChanged { profile_id, revision });
                 Ok(ControlPayload::Accepted)
             },

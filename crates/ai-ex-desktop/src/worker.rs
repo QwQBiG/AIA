@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use ai_ex_control::{ControlClient, ControlCommand, ControlPayload};
-use ai_ex_domain::{AppError, ComponentHealth};
+use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -20,6 +20,7 @@ pub enum WorkerCommand
     Submit(String),
     Interrupt,
     EmergencyStop,
+    SetPersona(PersonaSnapshot),
 }
 
 pub enum WorkerEvent
@@ -27,6 +28,7 @@ pub enum WorkerEvent
     Connection(bool),
     Snapshot(RuntimeSnapshot),
     Health(Vec<ComponentHealth>),
+    Persona(PersonaSnapshot),
     Events(Vec<SequencedEvent>),
     Log(String),
     Failure(String),
@@ -93,7 +95,15 @@ async fn run_worker(
                 };
                 match send_command(&client, command).await
                 {
-                    Ok(()) =>
+                    Ok(Some(profile)) =>
+                    {
+                        if !emit(&events, WorkerEvent::Persona(profile))
+                            || !emit(&events, WorkerEvent::Log("persona apply accepted".to_owned()))
+                        {
+                            return;
+                        }
+                    }
+                    Ok(None) =>
                     {
                         if !emit(&events, WorkerEvent::Log("control command sent".to_owned()))
                         {
@@ -142,6 +152,23 @@ async fn run_worker(
                                 || !emit(&events, WorkerEvent::Health(health))
                             {
                                 return;
+                            }
+                            match fetch_persona(&client).await
+                            {
+                                Ok(profile) =>
+                                {
+                                    if !emit(&events, WorkerEvent::Persona(profile))
+                                    {
+                                        return;
+                                    }
+                                }
+                                Err(error) =>
+                                {
+                                    if !emit(&events, WorkerEvent::Log(format!("persona refresh failed: {error}")))
+                                    {
+                                        return;
+                                    }
+                                }
                             }
                         }
                         Err(error) =>
@@ -216,26 +243,61 @@ async fn run_worker(
                             }
                         }
                     }
+                    match fetch_persona(&client).await
+                    {
+                        Ok(profile) =>
+                        {
+                            if !emit(&events, WorkerEvent::Persona(profile))
+                            {
+                                return;
+                            }
+                        }
+                        Err(error) =>
+                        {
+                            if !emit(&events, WorkerEvent::Log(format!("persona refresh failed: {error}")))
+                            {
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-async fn send_command(client: &ControlClient, command: WorkerCommand) -> Result<(), AppError>
+async fn send_command(
+    client: &ControlClient,
+    command: WorkerCommand,
+) -> Result<Option<PersonaSnapshot>, AppError>
 {
-    let command = match command
+    let (command, persona) = match command
     {
-        WorkerCommand::Submit(text) => ControlCommand::Submit { text },
-        WorkerCommand::Interrupt => ControlCommand::Interrupt {
+        WorkerCommand::Submit(text) => (ControlCommand::Submit { text }, None),
+        WorkerCommand::Interrupt => (ControlCommand::Interrupt {
             reason: "desktop user interrupt".to_owned(),
-        },
-        WorkerCommand::EmergencyStop => ControlCommand::EmergencyStop,
+        }, None),
+        WorkerCommand::EmergencyStop => (ControlCommand::EmergencyStop, None),
+        WorkerCommand::SetPersona(profile) => (
+            ControlCommand::SetPersona {
+                profile: profile.clone(),
+            },
+            Some(profile),
+        ),
     };
     match client.send(command).await?
     {
-        ControlPayload::Accepted => Ok(()),
+        ControlPayload::Accepted => Ok(persona),
         _ => Err(AppError::protocol("control command returned an unexpected payload")),
+    }
+}
+
+async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppError>
+{
+    match client.send(ControlCommand::Persona).await?
+    {
+        ControlPayload::Persona(profile) => Ok(profile),
+        _ => Err(AppError::protocol("persona returned an unexpected payload")),
     }
 }
 

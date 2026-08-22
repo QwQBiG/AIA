@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use ai_ex_domain::ComponentHealth;
+use ai_ex_domain::{ComponentHealth, PersonaSnapshot, SystemEvent};
 use ai_ex_ui_model::{ApplyOutcome, ConnectionState, TurnStatus, UiState};
 use eframe::egui;
 
@@ -17,6 +17,12 @@ pub struct DesktopApp
     health: Vec<ComponentHealth>,
     show_developer: bool,
     logs: VecDeque<String>,
+    persona: PersonaSnapshot,
+    persona_dirty: bool,
+    pending_persona: Option<PersonaSnapshot>,
+    confirm_persona: bool,
+    persona_apply_pending: bool,
+    taboos_editor: String,
 }
 
 impl DesktopApp
@@ -33,6 +39,12 @@ impl DesktopApp
             health: Vec::new(),
             show_developer: developer_mode,
             logs: VecDeque::with_capacity(200),
+            persona: PersonaSnapshot::default(),
+            persona_dirty: false,
+            pending_persona: None,
+            confirm_persona: false,
+            persona_apply_pending: false,
+            taboos_editor: String::new(),
         }
     }
 
@@ -64,6 +76,20 @@ impl DesktopApp
                     };
                 }
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
+                WorkerEvent::Persona(profile) =>
+                {
+                    if self.persona_apply_pending || (!self.persona_dirty && self.pending_persona.is_none())
+                    {
+                        self.taboos_editor = profile.taboos.join("\n");
+                        self.persona = profile;
+                        self.persona_dirty = false;
+                        self.persona_apply_pending = false;
+                    }
+                    else
+                    {
+                        self.push_log(format!("persona update received while editing: {}@{}", profile.profile_id, profile.revision));
+                    }
+                }
                 WorkerEvent::Health(health) =>
                 {
                     let details = health
@@ -107,6 +133,10 @@ impl DesktopApp
                             {
                                 self.push_log(format!("stage expression: {emotion:?}"));
                             }
+                            SystemEvent::PersonaChanged { profile_id, revision } =>
+                            {
+                                self.push_log(format!("persona changed: {profile_id}@{revision}"));
+                            }
                             _ =>
                             {
                             }
@@ -122,6 +152,10 @@ impl DesktopApp
                 }
                 WorkerEvent::Failure(error) =>
                 {
+                    if self.persona_apply_pending
+                    {
+                        self.persona_apply_pending = false;
+                    }
                     self.push_log(format!("failure: {error}"));
                     self.last_error = Some(error);
                 }
@@ -218,7 +252,107 @@ impl DesktopApp
             }
             ui.small("使用下方输入框发送消息；“打断”停止当前回复；“急停”会撤销自动化许可。AIex 默认不会执行未经授权的外部动作。");
         });
-    }    fn show_health(&self, ui: &mut egui::Ui)
+    }
+
+    fn show_persona_panel(&mut self, ui: &mut egui::Ui)
+    {
+        let mut changed = false;
+        let mut request_confirm = false;
+        ui.collapsing("角色设置（新手）", |ui|
+        {
+            ui.label("修改角色后必须预览并确认；活动回复期间服务会拒绝切换。开发者可同时观察事件日志。");
+            ui.horizontal(|ui|
+            {
+                ui.label("档案 ID");
+                if ui.text_edit_singleline(&mut self.persona.profile_id).changed()
+                {
+                    changed = true;
+                }
+                ui.label(format!("版本 {}", self.persona.revision));
+                if ui.button("版本 +1").clicked()
+                {
+                    self.persona.revision = self.persona.revision.saturating_add(1);
+                    changed = true;
+                }
+            });
+            ui.horizontal(|ui|
+            {
+                ui.label("名称");
+                if ui.text_edit_singleline(&mut self.persona.name).changed()
+                {
+                    changed = true;
+                }
+                ui.label("语气");
+                if ui.text_edit_singleline(&mut self.persona.tone).changed()
+                {
+                    changed = true;
+                }
+            });
+            ui.label("系统提示词");
+            if ui.text_edit_multiline(&mut self.persona.system_prompt).changed()
+            {
+                changed = true;
+            }
+            ui.label("禁忌（每行一项）");
+            if ui.text_edit_multiline(&mut self.taboos_editor).changed()
+            {
+                changed = true;
+            }
+            ui.horizontal(|ui|
+            {
+                ui.label("直播模式");
+                if ui.text_edit_singleline(&mut self.persona.live_mode).changed()
+                {
+                    changed = true;
+                }
+                if ui.button("预览并请求确认").clicked()
+                {
+                    request_confirm = true;
+                }
+            });
+            if self.persona_dirty
+            {
+                ui.colored_label(egui::Color32::YELLOW, "有未确认的角色修改");
+            }
+            if self.persona_apply_pending
+            {
+                ui.weak("正在等待服务确认角色切换……");
+            }
+        });
+        if changed
+        {
+            self.persona_dirty = true;
+            self.persona.taboos = self
+                .taboos_editor
+                .lines()
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
+        if request_confirm
+        {
+            self.persona.taboos = self
+                .taboos_editor
+                .lines()
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_owned)
+                .collect();
+            match self.persona.validate()
+            {
+                Ok(()) =>
+                {
+                    self.pending_persona = Some(self.persona.clone());
+                    self.confirm_persona = true;
+                    self.push_log("persona draft is ready for confirmation");
+                }
+                Err(error) => self.last_error = Some(error.to_string()),
+            }
+        }
+    }
+
+    fn show_health(&self, ui: &mut egui::Ui)
     {
         ui.collapsing("组件健康状态（实时刷新）", |ui|
         {
@@ -385,6 +519,63 @@ impl DesktopApp
         });
     }
 
+    fn show_persona_confirmation(&mut self, context: &egui::Context)
+    {
+        if !self.confirm_persona
+        {
+            return;
+        }
+        let Some(profile) = self.pending_persona.clone() else
+        {
+            self.confirm_persona = false;
+            return;
+        };
+        let mut apply = false;
+        let mut cancel = false;
+        egui::Window::new("确认角色切换")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(context, |ui|
+            {
+                ui.heading(format!("{} @ revision {}", profile.name, profile.revision));
+                ui.label(format!("档案：{}", profile.profile_id));
+                ui.label("确认后会替换后续回合的人格提示词；当前活动回合仍保持原人格。");
+                ui.horizontal(|ui|
+                {
+                    if ui.button("取消").clicked()
+                    {
+                        cancel = true;
+                    }
+                    if ui.button("确认应用").clicked()
+                    {
+                        apply = true;
+                    }
+                });
+            });
+        if apply
+        {
+            if self.state.connection != ConnectionState::Connected
+            {
+                self.last_error = Some("服务未连接，无法应用角色。".to_owned());
+            }
+            else
+            {
+                self.persona_apply_pending = true;
+                self.send(WorkerCommand::SetPersona(profile));
+                self.push_log("persona apply requested");
+                self.confirm_persona = false;
+                self.pending_persona = None;
+            }
+        }
+        else if cancel
+        {
+            self.confirm_persona = false;
+            self.pending_persona = None;
+            self.push_log("persona draft discarded");
+        }
+    }
+
     fn show_emergency_confirmation(&mut self, context: &egui::Context)
     {
         if !self.confirm_emergency_stop
@@ -434,11 +625,13 @@ impl eframe::App for DesktopApp
         self.drain_events();
         self.show_header(ui);
         self.show_beginner_panel(ui);
+        self.show_persona_panel(ui);
         self.show_health(ui);
         self.show_automation_panel(ui);
         self.show_developer_panel(ui);
         self.show_conversation(ui);
         self.show_composer(ui);
+        self.show_persona_confirmation(ui.ctx());
         self.show_emergency_confirmation(ui.ctx());
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }

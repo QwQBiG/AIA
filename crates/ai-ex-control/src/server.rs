@@ -277,6 +277,12 @@ mod tests
             response,
             ControlPayload::Snapshot(_)
         ));
+        let response = client
+            .send(ControlCommand::Persona)
+            .await
+            .expect("persona response");
+        assert_eq!(response, ControlPayload::Persona(PersonaSnapshot::default()));
+
         task.abort();
     }
 
