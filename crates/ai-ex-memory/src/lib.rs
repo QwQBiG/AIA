@@ -5,6 +5,9 @@ mod record;
 #[cfg(test)]
 mod persistence_tests;
 
+#[cfg(test)]
+mod profile_tests;
+
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -26,6 +29,7 @@ pub struct MemoryStore
 
 struct MemoryInner
 {
+    profile_id: RwLock<String>,
     path: PathBuf,
     records: RwLock<Vec<MemoryRecord>>,
     write_lock: Mutex<()>,
@@ -57,6 +61,7 @@ impl MemoryStore
         }
         Ok(Self {
             inner: Arc::new(MemoryInner {
+                profile_id: RwLock::new(record::default_profile()),
                 path,
                 records: RwLock::new(records),
                 write_lock: Mutex::new(()),
@@ -69,6 +74,7 @@ impl MemoryStore
     {
         Self {
             inner: Arc::new(MemoryInner {
+                profile_id: RwLock::new(record::default_profile()),
                 path: PathBuf::new(),
                 records: RwLock::new(Vec::new()),
                 write_lock: Mutex::new(()),
@@ -79,22 +85,35 @@ impl MemoryStore
 
     pub async fn len(&self) -> usize
     {
-        self.inner.records.read().await.len()
+        self.count(None).await
     }
 
     pub async fn count(&self, kind: Option<MemoryKind>) -> usize
     {
+        let profile_id = self.inner.profile_id.read().await;
         self.inner.records
             .read()
             .await
             .iter()
+            .filter(|record| record.profile_id == *profile_id)
             .filter(|record| kind.is_none_or(|expected| record.kind == expected))
             .count()
     }
 
     pub async fn is_empty(&self) -> bool
     {
-        self.inner.records.read().await.is_empty()
+        self.len().await == 0
+    }
+
+    pub async fn select_profile(&self, profile_id: &str) -> Result<(), AppError>
+    {
+        if profile_id.trim().is_empty() || profile_id.chars().count() > 128
+        {
+            return Err(AppError::configuration("memory profile ID is outside supported bounds"));
+        }
+        // Readers retain their scope until their complete operation has finished.
+        *self.inner.profile_id.write().await = profile_id.to_owned();
+        Ok(())
     }
 
     pub async fn health(&self) -> ComponentHealth
@@ -125,9 +144,11 @@ impl MemoryStore
         {
             return Ok(Vec::new());
         }
+        let profile_id = self.inner.profile_id.read().await;
         let records = self.inner.records.read().await;
         let mut ranked: Vec<_> = records
             .iter()
+            .filter(|record| record.profile_id == *profile_id)
             .filter(|record| kind.is_none_or(|expected| record.kind == expected))
             .filter_map(|record|
             {
@@ -165,9 +186,11 @@ impl MemoryStore
         {
             return Ok(Vec::new());
         }
+        let profile_id = self.inner.profile_id.read().await;
         let records = self.inner.records.read().await;
         let mut ranked: Vec<_> = records
             .iter()
+            .filter(|record| record.profile_id == *profile_id)
             .filter(|record| kinds.contains(&record.kind))
             .filter_map(|record|
             {
@@ -206,6 +229,7 @@ impl MemoryStore
         {
             return Ok(());
         }
+        let profile_id = self.inner.profile_id.read().await;
         let _write_guard = self.inner.write_lock.lock().await;
         if let Some(parent) = self.inner.path.parent()
         {
@@ -214,6 +238,7 @@ impl MemoryStore
                 .map_err(|error| AppError::unavailable(error.to_string()))?;
         }
         let record = MemoryRecord {
+            profile_id: profile_id.clone(),
             id: Uuid::new_v4(),
             turn_id,
             created_ms: SystemTime::now()
@@ -264,12 +289,14 @@ impl MemoryStore
         destination: impl AsRef<Path>,
     ) -> Result<usize, AppError>
     {
+        let profile_id = self.inner.profile_id.read().await;
         let records: Vec<_> = self
             .inner
             .records
             .read()
             .await
             .iter()
+            .filter(|record| record.profile_id == *profile_id)
             .filter(|record| kind.is_none_or(|expected| record.kind == expected))
             .cloned()
             .collect();
@@ -293,11 +320,12 @@ impl MemoryStore
         {
             return Ok(0);
         }
+        let profile_id = self.inner.profile_id.read().await;
         let _write_guard = self.inner.write_lock.lock().await;
         let records = self.inner.records.read().await;
         let retained: Vec<_> = records
             .iter()
-            .filter(|record| record.kind != kind)
+            .filter(|record| record.profile_id != *profile_id || record.kind != kind)
             .cloned()
             .collect();
         let removed = records.len().saturating_sub(retained.len());
@@ -325,6 +353,11 @@ impl MemoryStore
 #[async_trait]
 impl MemoryPort for MemoryStore
 {
+    async fn select_profile(&mut self, profile_id: &str) -> Result<(), AppError>
+    {
+        MemoryStore::select_profile(self, profile_id).await
+    }
+
     async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError>
     {
         self.recall_kind(None, query, limit).await

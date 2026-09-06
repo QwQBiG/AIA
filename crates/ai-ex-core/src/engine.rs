@@ -57,6 +57,14 @@ impl ConversationEngine
         &self.history
     }
 
+    pub(crate) fn clear_identity_context(&mut self)
+    {
+        self.history.clear();
+        self.response.clear();
+        self.sentence.clear();
+        self.active_history_len = None;
+    }
+
     pub fn active_turn(&self) -> Option<TurnId>
     {
         self.active_turn

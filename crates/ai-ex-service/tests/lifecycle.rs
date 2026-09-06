@@ -9,6 +9,9 @@ use ai_ex_control::{ControlClient, ControlCommand, ControlPayload};
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
+#[path = "support/persona_switch.rs"]
+mod persona_switch;
+
 struct ServiceProcess
 {
     child: Child,
@@ -25,6 +28,11 @@ impl ServiceProcess
 
     fn with_model(mode: &str, piped: bool, model_url: &str) -> Self
     {
+        Self::with_memory(mode, piped, model_url, false)
+    }
+
+    fn with_memory(mode: &str, piped: bool, model_url: &str, memory: bool) -> Self
+    {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let sequence = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let directory = std::env::temp_dir().join(format!("aiex-lifecycle-{}-{nonce}-{sequence}", std::process::id()));
@@ -35,7 +43,7 @@ impl ServiceProcess
         fs::write(directory.join("control.token"), token).unwrap();
         fs::write(directory.join("service.toml"), format!(
             "[model]\nbackend = 'ollama'\n[ollama]\nbase_url = '{model_url}'\ntimeout_seconds = 30\n\
-             [vts]\nenabled = false\n[obs]\nenabled = false\n[memory]\nenabled = false\n\
+             [vts]\nenabled = false\n[obs]\nenabled = false\n[memory]\nenabled = {memory}\npath = 'memory.jsonl'\n\
              [control]\nenabled = true\nbind = '{address}'\ntoken_path = 'control.token'\n",
         )).unwrap();
         drop(reservation);
@@ -97,7 +105,7 @@ impl Drop for ServiceProcess
             let _ignored = self.child.kill();
             let _ignored = self.child.wait();
         }
-        for name in ["service.toml", "control.token", "stdout.log", "stderr.log"]
+        for name in ["service.toml", "control.token", "stdout.log", "stderr.log", "memory.jsonl"]
         {
             let _ignored = fs::remove_file(self.directory.join(name));
         }

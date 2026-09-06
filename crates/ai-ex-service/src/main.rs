@@ -138,6 +138,7 @@ async fn run() -> Result<(), AppError>
         {
             MemoryStore::disabled()
         };
+        memory.select_profile(&config.persona.profile_id).await?;
         return replay_events_to_memory(path, &mut memory, args.replay_report.as_deref()).await;
     }
     if let Some(path) = args.replay_stage.as_ref()
@@ -187,6 +188,7 @@ async fn run() -> Result<(), AppError>
     {
         MemoryStore::disabled()
     };
+    memory.select_profile(&config.persona.profile_id).await?;
 
     if args.check
     {
@@ -242,7 +244,7 @@ async fn run() -> Result<(), AppError>
     let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player, event_hub.clone()));
     let events = TeeEventSink::new(ConsoleEvents, event_hub.clone());
     let live_memory = memory.clone();
-    let runtime = Runtime::with_policy(
+    let mut runtime = Runtime::with_policy(
         model,
         speech_port,
         avatar_port,
@@ -254,6 +256,7 @@ async fn run() -> Result<(), AppError>
             memory_recall_limit: config.conversation.memory_recall_limit,
         },
     )?;
+    runtime.set_persona(config.persona.profile_id.clone(), config.effective_system_prompt()).await?;
     let runtime = spawn_runtime(runtime, 32)?;
     if let Some(prompt) = args.prompt
     {
@@ -1313,12 +1316,14 @@ impl ControlBackend for ServiceControl
             ControlCommand::SetPersona { profile } =>
             {
                 profile.validate()?;
+                // Serialize identity updates and snapshots across the actor acknowledgement.
+                let mut current = self.persona.write().await;
                 self.runtime
-                    .set_system_prompt(profile.compiled_system_prompt())
+                    .set_persona(profile.profile_id.clone(), profile.compiled_system_prompt())
                     .await?;
                 let profile_id = profile.profile_id.clone();
                 let revision = profile.revision;
-                *self.persona.write().await = profile;
+                *current = profile;
                 tracing::info!(%profile_id, revision, "persona changed");
                 self.events.publish_now(SystemEvent::PersonaChanged { profile_id, revision });
                 Ok(ControlPayload::Accepted)

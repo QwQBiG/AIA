@@ -25,6 +25,11 @@ enum RuntimeCommand
     Shutdown {
         response: oneshot::Sender<Result<(), AppError>>,
     },
+    SetPersona {
+        profile_id: String,
+        prompt: String,
+        response: oneshot::Sender<Result<(), AppError>>,
+    },
 }
 
 #[derive(Clone)]
@@ -90,6 +95,14 @@ impl RuntimeHandle
         receiver
             .await
             .map_err(|_| AppError::unavailable("shutdown response dropped"))?
+    }
+
+    pub async fn set_persona(&self, profile_id: String, prompt: String) -> Result<(), AppError>
+    {
+        let (response, receiver) = oneshot::channel();
+        self.sender.send(RuntimeCommand::SetPersona { profile_id, prompt, response }).await
+            .map_err(|_| AppError::unavailable("runtime actor stopped"))?;
+        receiver.await.map_err(|_| AppError::unavailable("persona update response dropped"))?
     }
 }
 
@@ -167,7 +180,8 @@ where
                                             .map_err(|_| AppError::unavailable("turn control stopped"));
                                         let _ignored = response.send(result);
                                     }
-                                    Some(RuntimeCommand::SetSystemPrompt { response, .. }) =>
+                                    Some(RuntimeCommand::SetSystemPrompt { response, .. })
+                                    | Some(RuntimeCommand::SetPersona { response, .. }) =>
                                     {
                                         let _ignored = response.send(Err(AppError::invalid_transition(
                                             "cannot change persona during an active turn",
@@ -223,7 +237,11 @@ where
             {
                 let _ignored = response.send(runtime.set_system_prompt(prompt));
             }
-                        RuntimeCommand::Shutdown { response } =>
+            RuntimeCommand::SetPersona { profile_id, prompt, response } =>
+            {
+                let _ignored = response.send(runtime.set_persona(profile_id, prompt).await);
+            }
+            RuntimeCommand::Shutdown { response } =>
             {
                 let result = runtime.stop().await;
                 let _ignored = response.send(result);

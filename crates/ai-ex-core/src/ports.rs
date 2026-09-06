@@ -48,6 +48,12 @@ pub trait EventSink: Send
 #[async_trait]
 pub trait MemoryPort: Send + Sync
 {
+    /// Switch all subsequent operations atomically, or leave the old scope unchanged.
+    async fn select_profile(&mut self, _profile_id: &str) -> Result<(), AppError>
+    {
+        Err(AppError::unavailable("memory adapter does not support isolated profiles"))
+    }
+
     async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError>;
 
     async fn recall_for_context(

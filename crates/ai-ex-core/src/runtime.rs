@@ -42,6 +42,7 @@ where
     memory: N,
     events: E,
     system_prompt: String,
+    profile_id: String,
     memory_recall_limit: usize,
 }
 
@@ -95,6 +96,7 @@ where
             memory,
             events,
             system_prompt: policy.system_prompt,
+            profile_id: "default".to_owned(),
             memory_recall_limit: policy.memory_recall_limit,
         }
     }
@@ -117,6 +119,29 @@ where
     pub fn state(&self) -> ConversationState
     {
         self.engine.state()
+    }
+
+    pub async fn set_persona(&mut self, profile_id: String, prompt: String) -> Result<(), AppError>
+    {
+        if self.engine.active_turn().is_some()
+        {
+            return Err(AppError::invalid_transition("cannot change persona during an active turn"));
+        }
+        if profile_id.trim().is_empty() || profile_id.chars().count() > 128 || prompt.chars().count() > 16_384
+        {
+            return Err(AppError::configuration("persona identity or prompt is outside supported bounds"));
+        }
+        if profile_id != self.profile_id
+        {
+            // Stop the previous body's remaining audio before changing its identity.
+            self.speech.interrupt().await?;
+            self.avatar.set_neutral().await?;
+            self.memory.select_profile(&profile_id).await?;
+            self.engine.clear_identity_context();
+            self.profile_id = profile_id;
+        }
+        self.system_prompt = prompt;
+        Ok(())
     }
 
     pub async fn run_turn(&mut self, input: impl Into<String>) -> Result<TurnId, AppError>

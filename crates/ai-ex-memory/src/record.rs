@@ -8,12 +8,19 @@ use uuid::Uuid;
 pub struct MemoryRecord
 {
     pub id: Uuid,
+    #[serde(default = "default_profile")]
+    pub profile_id: String,
     pub turn_id: TurnId,
     pub created_ms: u128,
     #[serde(default)]
     pub kind: MemoryKind,
     pub user_text: String,
     pub assistant_text: String,
+}
+
+pub fn default_profile() -> String
+{
+    "default".to_owned()
 }
 
 impl MemoryRecord

@@ -11,6 +11,9 @@ use crate::{
     Runtime, RuntimeControl, SpeechPort, TurnOutcome, spawn_runtime,
 };
 
+#[path = "persona_tests.rs"]
+mod persona_tests;
+
 #[derive(Default)]
 struct TestState
 {
