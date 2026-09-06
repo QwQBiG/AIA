@@ -6,7 +6,11 @@ use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot, StageSnapshot};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-const HEALTH_REFRESH_TICKS: u8 = 8;
+const HEALTH_REFRESH_TICKS: u8 = 40;
+
+#[cfg(test)]
+#[path = "worker_tests.rs"]
+mod tests;
 
 pub struct WorkerSettings
 {
@@ -74,11 +78,61 @@ pub fn spawn_worker(settings: WorkerSettings) -> Result<WorkerHandle, AppError>
 
 async fn run_worker(
     client: ControlClient,
-    mut commands: UnboundedReceiver<WorkerCommand>,
+    commands: UnboundedReceiver<WorkerCommand>,
     events: Sender<WorkerEvent>,
 )
 {
-    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    // Read-only polling must not hold up user commands. Dropping either future
+    // also cancels pending network I/O when the desktop channels close.
+    tokio::select!
+    {
+        _ = run_commands(&client, commands, &events) => {}
+        _ = run_polling(client.clone(), events.clone()) => {}
+    }
+}
+
+async fn run_commands(
+    client: &ControlClient,
+    mut commands: UnboundedReceiver<WorkerCommand>,
+    events: &Sender<WorkerEvent>,
+)
+{
+    while let Some(command) = commands.recv().await
+    {
+        match send_command(client, command).await
+        {
+            Ok(Some(profile)) =>
+            {
+                if !emit(events, WorkerEvent::Persona(profile))
+                    || !emit(events, WorkerEvent::Log("persona apply accepted".to_owned()))
+                {
+                    return;
+                }
+            }
+            Ok(None) =>
+            {
+                if !emit(events, WorkerEvent::Log("control command sent".to_owned()))
+                {
+                    return;
+                }
+            }
+            Err(error) =>
+            {
+                if !emit(events, WorkerEvent::Failure(error.to_string()))
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+async fn run_polling(
+    client: ControlClient,
+    events: Sender<WorkerEvent>,
+)
+{
+    let mut interval = tokio::time::interval(Duration::from_millis(50));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut connected = false;
     let mut cursor = 0;
@@ -88,38 +142,6 @@ async fn run_worker(
     {
         tokio::select!
         {
-            command = commands.recv() =>
-            {
-                let Some(command) = command else
-                {
-                    return;
-                };
-                match send_command(&client, command).await
-                {
-                    Ok(Some(profile)) =>
-                    {
-                        if !emit(&events, WorkerEvent::Persona(profile))
-                            || !emit(&events, WorkerEvent::Log("persona apply accepted".to_owned()))
-                        {
-                            return;
-                        }
-                    }
-                    Ok(None) =>
-                    {
-                        if !emit(&events, WorkerEvent::Log("control command sent".to_owned()))
-                        {
-                            return;
-                        }
-                    }
-                    Err(error) =>
-                    {
-                        if !emit(&events, WorkerEvent::Failure(error.to_string()))
-                        {
-                            return;
-                        }
-                    }
-                }
-            }
             _ = interval.tick() =>
             {
                 if !connected
@@ -233,8 +255,8 @@ async fn run_worker(
                         }
                     }
                 }
-                ticks = ticks.wrapping_add(1);
-                if connected && ticks % HEALTH_REFRESH_TICKS == 0
+                ticks = (ticks + 1) % HEALTH_REFRESH_TICKS;
+                if connected && ticks == 0
                 {
                     if let Ok(snapshot) = fetch_snapshot(&client).await
                         && !emit(&events, WorkerEvent::Snapshot(snapshot))

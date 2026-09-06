@@ -214,6 +214,27 @@ impl MemoryPort for RememberedText
 
 struct TestEvents;
 
+#[tokio::test]
+async fn actor_interrupts_remaining_audio_after_generation_has_finished()
+{
+    let state = Arc::new(TestState::default());
+    let runtime = Runtime::new(
+        CaptureModel(Arc::new(Mutex::new(None))),
+        TestSpeech(Arc::clone(&state)),
+        TestAvatar(Arc::clone(&state)),
+        TestMemory(Arc::clone(&state)),
+        TestEvents,
+    );
+    let handle = spawn_runtime(runtime, 4).unwrap();
+    handle.submit("hello".to_owned()).await.unwrap();
+    assert!(!state.speech_interrupted.load(Ordering::Acquire));
+    handle.interrupt("stop remaining speech").await.unwrap();
+    assert!(state.speech_interrupted.load(Ordering::Acquire));
+    assert!(state.avatar_neutral.load(Ordering::Acquire));
+    handle.interrupt("repeat stop").await.unwrap();
+    handle.shutdown().await.unwrap();
+}
+
 #[async_trait]
 impl EventSink for TestEvents
 {

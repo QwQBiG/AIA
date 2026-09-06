@@ -1,6 +1,8 @@
 # AIex
 
-AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新架构负责本地 LLM 流式对话、文本分句、持久记忆、语音队列、VTube Studio 控制和可观察性。
+AIex 是一个 Windows 优先、Rust-first 的本地数字人项目。当前主线提供流式对话、持久记忆、语音调度、内置 2D 外形与 VTube Studio 适配；长期目标是让人格、声音、外形、行为与场景可以自由组合。
+
+后续实施以 [数字人演进计划](docs/DIGITAL_HUMAN_ROADMAP.md) 为主线：先完善稳定运行与角色工作室，再推进跨载体表达、连续记忆、主动行为及可分享的组合包。网页、悬浮伙伴和 VRM 3D 均纳入计划，具体实现状态与验收条件见文档。
 
 旧 Python 实现位于 `main.py` 与 `src/`，当前仅作为行为参考；不再向旧实现增加新功能。新功能、修复和性能优化全部进入 Cargo workspace。
 
@@ -17,10 +19,22 @@ AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新�
 | 语音调度 | 可用 | 有界队列、背压、代际取消、当前播放停止令牌 |
 | 音频合成/播放 | 条件可用 | GPT-SoVITS 与 Rodio 实现完成；本机播放由 feature 控制 |
 | 全双工 ASR/VAD | 条件可用 | Rust VAD、HTTP Whisper、抢话和采集实现完成；原生采集由 feature 控制 |
-| 桌面 UI | 实现中 | UI reducer 与控制客户端已验证；独立 eframe 壳待依赖下载后编译 |
+| 桌面 UI | 条件可用 | 独立 eframe 包已通过编译和单元测试；真实窗口交互仍需验收 |
 | 视觉自动化 | 安全核心可用 | 视觉观察、能力许可和持久审计已完成；Windows 动作适配器尚未启用 |
 
 ## 快速开始
+
+### 数字人外形工作室
+
+无需模型、令牌或 VTube Studio，可直接预览内置 2D 伙伴和光球，调整配色、表情与动态效果：
+
+```powershell
+cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --preview
+```
+
+正常连接服务后，桌面的“数字人外形”面板会跟随实际运行状态；启用原生语音播放时，内置外形口型由音频能量驱动，离线工作室保留示意动画。详见 [声音与表达](docs/SPEECH_PRESENTATION.md)；后续角色包、网页/3D 载体、记忆连续性与表达协调见 [数字人演进路线](docs/DIGITAL_HUMAN_ROADMAP.md)。
+
+现在也可选择“图片角色”，导入自己的 PNG/JPEG 立绘与表情包，跟随倾听、思考、声音口型和情绪切换。示例生成器、清单格式与操作说明见 [图片外形包](docs/APPEARANCE_PACKS.md)。
 
 ### 小白用户：双击打开可视化向导
 
@@ -29,6 +43,8 @@ AIex 是一个 Windows 优先、Rust-first 的本地 AI VTuber 运行时。新�
 开发者需要同时查看结构化诊断时，双击 `AIex-Desktop-Developer.cmd`；服务原始 stdout/stderr 仍保留在启动终端。
 
 向导会选择 DeepSeek、KoboldCpp 或 Ollama，生成本地配置和控制令牌，也可以配置 Bilibili 房间号。勾选自动启动后，服务会在后台运行；普通界面显示连接、对话和急停状态。
+
+桌面记住“打开 AIex 时自动启动服务”的设置，复用已认证的服务或启动自己的托管服务；后者随窗口关闭而退出。旧配置默认不自动启动，可用 `--start-service` 为本次启用，或用 `--connect-only` 临时仅连接。需要服务独立持续运行时使用 `ai-ex-service --config "config/ai-ex.local.toml" --serve`（要求启用控制端）。详见 [服务运行方式](docs/DESKTOP_USER_GUIDE.md)。
 
 ### 开发者：同时看可视化状态和原始日志
 

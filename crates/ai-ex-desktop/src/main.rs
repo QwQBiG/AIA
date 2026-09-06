@@ -1,15 +1,21 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod appearance;
+mod appearance_import;
+mod image_appearance;
+mod preview;
+mod service_process;
 mod setup;
+mod setup_storage;
+mod startup;
 mod worker;
 
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::path::PathBuf;
 
-use ai_ex_config::AppConfig;
 use ai_ex_domain::AppError;
 use app::DesktopApp;
+use service_process::ManagedService;
 use worker::{WorkerSettings, spawn_worker};
 
 fn main()
@@ -24,9 +30,12 @@ fn main()
 fn run() -> Result<(), AppError>
 {
     let options = parse_options(std::env::args().skip(1))?;
+    if options.preview
+    {
+        return preview::run(options.appearance_pack);
+    }
     let setup_result = if options.setup
         || !options.config_path.exists()
-        || !control_token_exists(&options.config_path)
     {
         Some(setup::run(options.config_path.clone())?)
     }
@@ -38,31 +47,27 @@ fn run() -> Result<(), AppError>
         .as_ref()
         .map(|result| result.config_path.clone())
         .unwrap_or(options.config_path);
-    let content = std::fs::read_to_string(&config_path).map_err(|error| {
-        AppError::configuration(format!("cannot read {}: {error}", config_path.display()))
-    })?;
-    let config = AppConfig::parse(&content)?;
+    let config = startup::read_config(&config_path)?;
     if !config.control.enabled
     {
         return Err(AppError::configuration(
             "desktop requires control.enabled = true",
         ));
     }
-    let token = std::fs::read_to_string(&config.control.token_path).map_err(|error| {
-        AppError::configuration(format!(
-            "cannot read control token {}: {error}",
-            config.control.token_path,
-        ))
-    })?;
-    let _service_process = setup_result
-        .as_ref()
-        .filter(|result| result.start_service)
-        .map(|result|
-        {
-            spawn_service(&config_path, result.api_key.as_deref())
-        })
-        .transpose()?
-        .flatten();
+    let token = startup::read_token(&config)?;
+    let auto_start = !options.connect_only && (options.start_service || config.desktop.auto_start_service);
+    let _service_process = if auto_start && !startup::service_is_running(&config, &token)?
+    {
+        Some(ManagedService::spawn(
+            &config_path,
+            setup_result.as_ref().and_then(|result| result.api_key.as_deref()),
+            &config.deepseek.api_key_env,
+        )?)
+    }
+    else
+    {
+        None
+    };
     let worker = spawn_worker(WorkerSettings {
         address: config.control.bind,
         token: token.trim().to_owned(),
@@ -86,53 +91,15 @@ fn run() -> Result<(), AppError>
     .map_err(|error| AppError::unavailable(error.to_string()))
 }
 
-fn spawn_service(config_path: &Path, api_key: Option<&str>) -> Result<Option<Child>, AppError>
-{
-    let executable = std::env::current_exe()
-        .map_err(|error| AppError::unavailable(format!("cannot locate desktop executable: {error}")))?
-        .parent()
-        .map(|path| path.join("ai-ex-service.exe"));
-    let mut command = if let Some(executable) = executable.filter(|path| path.exists())
-    {
-        let mut command = Command::new(executable);
-        command.arg("--config").arg(config_path);
-        command
-    }
-    else
-    {
-        let mut command = Command::new("cargo");
-        command
-            .args(["run", "-p", "ai-ex-service", "--", "--config"])
-            .arg(config_path);
-        command
-    };
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    if let Some(api_key) = api_key
-    {
-        command.env("DEEPSEEK_API_KEY", api_key);
-    }
-    let child = command
-        .spawn()
-        .map_err(|error| AppError::unavailable(format!("cannot start ai-ex-service: {error}")))?;
-    Ok(Some(child))
-}
-
-fn control_token_exists(config_path: &Path) -> bool
-{
-    config_path
-        .parent()
-        .map(|parent| parent.join("control.token").exists())
-        .unwrap_or(false)
-}
-
 struct LaunchOptions
 {
     config_path: PathBuf,
     setup: bool,
     developer: bool,
+    preview: bool,
+    start_service: bool,
+    connect_only: bool,
+    appearance_pack: Option<PathBuf>,
 }
 
 fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOptions, AppError>
@@ -140,6 +107,10 @@ fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOption
     let mut config_path = PathBuf::from("config/ai-ex.local.toml");
     let mut setup = false;
     let mut developer = false;
+    let mut preview = false;
+    let mut start_service = false;
+    let mut connect_only = false;
+    let mut appearance_pack = None;
     let mut arguments = arguments;
     while let Some(argument) = arguments.next()
     {
@@ -152,11 +123,19 @@ fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOption
                 })?);
             }
             "--setup" => setup = true,
+            "--preview" => preview = true,
+            "--appearance-pack" =>
+            {
+                appearance_pack = Some(PathBuf::from(arguments.next().ok_or_else(||
+                    AppError::configuration("--appearance-pack requires a manifest path"))?));
+            }
+            "--start-service" => start_service = true,
+            "--connect-only" => connect_only = true,
             "--developer" | "--dev" => developer = true,
             "--help" | "-h" =>
             {
                 return Err(AppError::configuration(
-                    "usage: ai-ex-desktop [--config PATH] [--setup] [--developer]",
+                    "usage: ai-ex-desktop [--config PATH] [--setup] [--developer] [--start-service | --connect-only] [--preview [--appearance-pack PATH]]",
                 ));
             }
             _ =>
@@ -167,9 +146,25 @@ fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOption
             }
         }
     }
+    if start_service && connect_only
+    {
+        return Err(AppError::configuration("--start-service and --connect-only are mutually exclusive"));
+    }
+    if appearance_pack.is_some() && !preview
+    {
+        return Err(AppError::configuration("--appearance-pack requires --preview"));
+    }
+    if preview && (setup || start_service || connect_only)
+    {
+        return Err(AppError::configuration("--preview cannot be combined with --setup, --start-service, or --connect-only"));
+    }
     Ok(LaunchOptions {
         config_path,
         setup,
         developer,
+        preview,
+        start_service,
+        connect_only,
+        appearance_pack,
     })
 }

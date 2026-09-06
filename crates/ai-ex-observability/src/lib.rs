@@ -25,6 +25,8 @@ pub struct RuntimeSnapshot
     pub faults: u64,
     pub last_fault: Option<String>,
     pub last_sequence: u64,
+    #[serde(default)]
+    pub playback: ai_ex_domain::SpeechPlaybackSnapshot,
 }
 
 impl Default for RuntimeSnapshot
@@ -42,6 +44,7 @@ impl Default for RuntimeSnapshot
             faults: 0,
             last_fault: None,
             last_sequence: 0,
+            playback: ai_ex_domain::SpeechPlaybackSnapshot::default(),
         }
     }
 }
@@ -124,6 +127,7 @@ impl EventHub
                     snapshot.turns_started += 1;
                 }
                 SystemEvent::SentenceReady { .. } => snapshot.sentences_ready += 1,
+                SystemEvent::SpeechPlayback { playback } => snapshot.playback = *playback,
                 SystemEvent::EmotionChanged { emotion, .. } =>
                 {
                     snapshot.current_emotion = Some(*emotion);
@@ -159,20 +163,17 @@ impl EventHub
 
     pub fn publish_now(&self, event: SystemEvent)
     {
+        // Assign sequence, update snapshot and broadcast under the same lock.
+        // Audio and runtime publishers must never expose reordered events.
+        let mut history = self.history.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let sequence = self.sequence.fetch_add(1, Ordering::AcqRel) + 1;
         self.update(&event, sequence);
         let event = SequencedEvent { sequence, event };
+        if history.len() == self.capacity
         {
-            let mut history = self
-                .history
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if history.len() == self.capacity
-            {
-                history.pop_front();
-            }
-            history.push_back(event.clone());
+            history.pop_front();
         }
+        history.push_back(event.clone());
         let _ignored = self.events.send(event);
     }
 }
@@ -182,21 +183,7 @@ impl EventSink for EventHub
 {
     async fn publish(&mut self, event: SystemEvent)
     {
-        let sequence = self.sequence.fetch_add(1, Ordering::AcqRel) + 1;
-        self.update(&event, sequence);
-        let event = SequencedEvent { sequence, event };
-        {
-            let mut history = self
-                .history
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if history.len() == self.capacity
-            {
-                history.pop_front();
-            }
-            history.push_back(event.clone());
-        }
-        let _ignored = self.events.send(event);
+        self.publish_now(event);
     }
 }
 
@@ -332,5 +319,36 @@ mod tests
     fn rejects_zero_capacity()
     {
         assert!(EventHub::new(0).is_err());
+    }
+
+    #[test]
+    fn concurrent_audio_and_runtime_publishers_keep_snapshot_history_and_broadcast_in_order()
+    {
+        let hub = EventHub::new(512).unwrap();
+        let mut receiver = hub.subscribe();
+        std::thread::scope(|scope|
+        {
+            for _ in 0..8
+            {
+                let hub = hub.clone();
+                scope.spawn(move ||
+                {
+                    for _ in 0..32
+                    {
+                        hub.publish_now(SystemEvent::SpeechPlayback {
+                            playback: ai_ex_domain::SpeechPlaybackSnapshot::default(),
+                        });
+                    }
+                });
+            }
+        });
+        let history = hub.events_since(0, 512);
+        assert_eq!(history.len(), 256);
+        assert_eq!(hub.current().last_sequence, 256);
+        for (index, event) in history.iter().enumerate()
+        {
+            assert_eq!(event.sequence, index as u64 + 1);
+            assert_eq!(receiver.try_recv().unwrap().sequence, event.sequence);
+        }
     }
 }

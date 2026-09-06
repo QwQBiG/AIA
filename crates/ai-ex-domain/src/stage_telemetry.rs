@@ -16,6 +16,8 @@ pub struct StageSnapshot
 {
     pub schema_version: u16,
     pub actions: Vec<StageActionSummary>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 impl Default for StageSnapshot
@@ -33,6 +35,7 @@ impl StageSnapshot
         Self {
             schema_version: STAGE_TELEMETRY_SCHEMA_VERSION,
             actions: Vec::new(),
+            capabilities: Vec::new(),
         }
     }
 }

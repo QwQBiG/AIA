@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod presentation;
+pub use presentation::{AnimationFrame, PresentationState};
+
 use ai_ex_domain::{AppError, ConversationState, SystemEvent, TurnId};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};
 use serde::{Deserialize, Serialize};
@@ -121,6 +124,7 @@ impl UiState
                 }
             }
             SystemEvent::SentenceReady { .. } => self.runtime.sentences_ready += 1,
+            SystemEvent::SpeechPlayback { playback } => self.runtime.playback = playback,
             SystemEvent::EmotionChanged { emotion, .. } =>
             {
                 self.runtime.current_emotion = Some(emotion);

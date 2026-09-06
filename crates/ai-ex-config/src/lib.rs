@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod appearance;
+
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -11,6 +13,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct AppConfig
 {
+    pub desktop: DesktopConfig,
     pub model: ModelConfig,
     pub conversation: ConversationConfig,
     pub persona: PersonaConfig,
@@ -32,6 +35,25 @@ pub struct AppConfig
 
 impl AppConfig
 {
+    pub fn to_toml(&self) -> Result<String, AppError>
+    {
+        self.validate()?;
+        toml::to_string_pretty(self).map_err(|error|
+            AppError::configuration(format!("cannot serialize configuration: {error}")))
+    }
+
+    pub fn merge_toml(&self, source: &str) -> Result<String, AppError>
+    {
+        let mut document: toml::Value = toml::from_str(source)
+            .map_err(|error| AppError::configuration(format!("invalid existing TOML: {error}")))?;
+        let updated = toml::from_str(&self.to_toml()?)
+            .map_err(|error| AppError::configuration(format!("cannot merge TOML: {error}")))?;
+        let previous = toml::from_str(&Self::parse(source)?.to_toml()?)
+            .map_err(|error| AppError::configuration(format!("cannot read previous TOML: {error}")))?;
+        merge_values(&mut document, updated, Some(&previous));
+        toml::to_string_pretty(&document)
+            .map_err(|error| AppError::configuration(format!("cannot serialize TOML: {error}")))
+    }
     pub async fn load(path: impl AsRef<Path>) -> Result<Self, AppError>
     {
         let path = path.as_ref();
@@ -161,6 +183,42 @@ impl AppConfig
 fn is_http_url(value: &str) -> bool
 {
     value.starts_with("http://") || value.starts_with("https://")
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DesktopConfig
+{
+    pub auto_start_service: bool,
+}
+
+fn merge_values(original: &mut toml::Value, updated: toml::Value, previous: Option<&toml::Value>)
+{
+    if let (toml::Value::Table(target), toml::Value::Table(changes)) = (&mut *original, &updated)
+    {
+        if let Some(toml::Value::Table(previous)) = previous
+        {
+            for key in previous.keys().filter(|key| !changes.contains_key(*key))
+            {
+                target.remove(key);
+            }
+        }
+        for (key, value) in changes
+        {
+            if let Some(existing) = target.get_mut(key)
+            {
+                merge_values(existing, value.clone(), previous.and_then(|table| table.get(key)));
+            }
+            else
+            {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    else
+    {
+        *original = updated;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

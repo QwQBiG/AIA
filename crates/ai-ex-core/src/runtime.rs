@@ -243,9 +243,12 @@ where
 
     pub async fn interrupt(&mut self, reason: impl Into<String>) -> Result<(), AppError>
     {
-        let active = self.engine.active_turn().ok_or_else(|| {
-            AppError::invalid_transition("there is no active turn")
-        })?;
+        let Some(active) = self.engine.active_turn() else
+        {
+            // Generation can finish while queued audio is still playing.
+            self.speech.interrupt().await?;
+            return self.avatar.set_neutral().await;
+        };
         self.model.cancel(active).await?;
         self.speech.interrupt().await?;
         self.avatar.set_neutral().await?;

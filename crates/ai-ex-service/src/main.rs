@@ -3,6 +3,10 @@
 mod args;
 mod automation_replay;
 mod events;
+mod lifecycle;
+
+#[cfg(test)]
+mod speech_tests;
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -120,6 +124,10 @@ async fn run() -> Result<(), AppError>
 {
     let args = Args::parse(std::env::args().skip(1))?;
     let config = AppConfig::load(&args.config).await?;
+    if (args.serve || args.managed) && !config.control.enabled
+    {
+        return Err(AppError::configuration("--serve and --managed require control.enabled = true"));
+    }
     if let Some(path) = args.replay_events.as_ref()
     {
         let mut memory = if config.memory.enabled
@@ -231,7 +239,7 @@ async fn run() -> Result<(), AppError>
     let stage_output = StageOutput::new(stage_router);
     let speech_port = stage_output.speech();
     let avatar_port = stage_output.avatar();
-    let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player));
+    let speech_task = tokio::spawn(run_speech_worker(receiver, tts, player, event_hub.clone()));
     let events = TeeEventSink::new(ConsoleEvents, event_hub.clone());
     let live_memory = memory.clone();
     let runtime = Runtime::with_policy(
@@ -251,6 +259,7 @@ async fn run() -> Result<(), AppError>
     {
         runtime.submit(prompt).await?;
         runtime.shutdown().await?;
+        drop(stage_output);
         join_speech_worker(speech_task).await?;
         return Ok(());
     }
@@ -286,6 +295,40 @@ async fn run() -> Result<(), AppError>
     )
     .await?;
     let duplex_task = spawn_duplex(&config, runtime.clone())?;
+    let session_result = if args.serve || args.managed
+    {
+        lifecycle::wait_for_shutdown(args.managed).await
+    }
+    else
+    {
+        run_interactive(&runtime, &event_hub, &safety).await
+    };
+    if let Some(task) = bilibili_runtime.task
+    {
+        task.abort();
+    }
+    if let Some(task) = duplex_task
+    {
+        task.abort();
+    }
+    if let Some(task) = control_task
+    {
+        task.abort();
+    }
+    let shutdown_result = runtime.shutdown().await;
+    drop(stage_output);
+    let speech_result = join_speech_worker(speech_task).await;
+    session_result?;
+    shutdown_result?;
+    speech_result
+}
+
+async fn run_interactive(
+    runtime: &RuntimeHandle,
+    event_hub: &EventHub,
+    safety: &SafetyGate,
+) -> Result<(), AppError>
+{
     println!(
         "AIex Rust interactive mode. Commands: /status, /interrupt, /emergency-stop, /quit.",
     );
@@ -296,9 +339,13 @@ async fn run() -> Result<(), AppError>
         .map_err(|error| AppError::unavailable(error.to_string()))?
     {
         let line = line.trim();
-        if line.is_empty() || line == "/quit"
+        if line == "/quit"
         {
             break;
+        }
+        if line.is_empty()
+        {
+            continue;
         }
         if line == "/interrupt"
         {
@@ -337,20 +384,6 @@ async fn run() -> Result<(), AppError>
             }
         });
     }
-    if let Some(task) = bilibili_runtime.task
-    {
-        task.abort();
-    }
-    if let Some(task) = duplex_task
-    {
-        task.abort();
-    }
-    if let Some(task) = control_task
-    {
-        task.abort();
-    }
-    runtime.shutdown().await?;
-    join_speech_worker(speech_task).await?;
     Ok(())
 }
 
@@ -1066,6 +1099,7 @@ async fn run_speech_worker(
     mut receiver: SpeechReceiver,
     tts: Option<GptSovitsClient>,
     player: AudioPlayer,
+    events: EventHub,
 )
 {
     while let Some(job) = receiver.receive().await
@@ -1075,11 +1109,21 @@ async fn run_speech_worker(
             tracing::debug!(turn_id = ?job.turn_id, "TTS disabled; speech job skipped");
             continue;
         };
-        match tts.synthesize(&job.text).await
+        let synthesis = tokio::select!
+        {
+            biased;
+            _ = player.wait_for_cancellation(&job) => continue,
+            result = tts.synthesize(&job.text) => result,
+        };
+        match synthesis
         {
             Ok(audio) =>
             {
-                if let Err(error) = player.play_wav(&job, audio.bytes).await
+                let playback_events = events.clone();
+                if let Err(error) = player.play_wav_observed(&job, audio.bytes, move |playback|
+                {
+                    playback_events.publish_now(ai_ex_domain::SystemEvent::SpeechPlayback { playback });
+                }).await
                 {
                     tracing::error!(%error, "audio playback failed");
                 }

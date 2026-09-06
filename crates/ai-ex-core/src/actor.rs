@@ -215,11 +215,9 @@ where
                     }
                 }
             }
-            RuntimeCommand::Interrupt { response, .. } =>
+            RuntimeCommand::Interrupt { reason, response } =>
             {
-                let _ignored = response.send(Err(AppError::invalid_transition(
-                    "runtime has no active turn",
-                )));
+                let _ignored = response.send(runtime.interrupt(reason).await);
             }
             RuntimeCommand::SetSystemPrompt { prompt, response } =>
             {

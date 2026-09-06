@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ai_ex_domain::AppError;
 use tokio::io::{AsyncWriteExt, BufReader};
@@ -15,7 +16,12 @@ pub struct ControlClient
     address: SocketAddr,
     token: Arc<str>,
     max_message_bytes: usize,
+    request_timeout: Duration,
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
 
 impl ControlClient
 {
@@ -49,10 +55,20 @@ impl ControlClient
             address,
             token: token.into(),
             max_message_bytes,
+            request_timeout: Duration::from_secs(5),
         })
     }
 
     pub async fn send(&self, command: ControlCommand) -> Result<ControlPayload, AppError>
+    {
+        tokio::time::timeout(self.request_timeout, self.send_request(command))
+            .await
+            .map_err(|_| AppError::connectivity(
+                "control request timed out; command outcome may be unknown",
+            ))?
+    }
+
+    async fn send_request(&self, command: ControlCommand) -> Result<ControlPayload, AppError>
     {
         let request_id = Uuid::new_v4();
         let request = ControlRequest {

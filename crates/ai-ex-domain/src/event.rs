@@ -28,6 +28,7 @@ pub enum SystemEvent
     ModelChunk { turn_id: TurnId, text: String },
     EmotionChanged { turn_id: TurnId, emotion: Emotion },
     SentenceReady { turn_id: TurnId, text: String },
+    SpeechPlayback { playback: crate::SpeechPlaybackSnapshot },
     TurnFinished { turn_id: TurnId, full_text: String },
     TurnInterrupted { turn_id: TurnId, reason: String },
     StateChanged { from: ConversationState, to: ConversationState },

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +15,7 @@ pub struct StageJournal
     entries: Arc<Mutex<VecDeque<StageActionSummary>>>,
     next_sequence: Arc<AtomicU64>,
     capacity: usize,
+    capabilities: Arc<Vec<String>>,
 }
 
 fn summarize_action(action: &StageAction) -> String
@@ -42,10 +43,23 @@ impl StageJournal
 {
     pub fn new(capacity: usize) -> Self
     {
+        Self::with_capabilities(capacity, BTreeSet::new())
+    }
+
+    pub fn with_capabilities(
+        capacity: usize,
+        capabilities: BTreeSet<StageCapability>,
+    ) -> Self
+    {
+        let capabilities = capabilities
+            .into_iter()
+            .map(|capability| format!("{capability:?}").to_ascii_lowercase())
+            .collect();
         Self {
             entries: Arc::new(Mutex::new(VecDeque::with_capacity(capacity.max(1)))),
             next_sequence: Arc::new(AtomicU64::new(0)),
             capacity: capacity.max(1),
+            capabilities: Arc::new(capabilities),
         }
     }
 
@@ -78,6 +92,7 @@ impl StageJournal
         StageSnapshot {
             schema_version: STAGE_TELEMETRY_SCHEMA_VERSION,
             actions: entries.iter().cloned().collect(),
+            capabilities: self.capabilities.as_ref().clone(),
         }
     }
 }
@@ -93,9 +108,10 @@ impl StageOutput
 {
     pub fn new(router: StageRouter) -> Self
     {
+        let capabilities = router.capabilities();
         Self {
             router: Arc::new(AsyncMutex::new(router)),
-            journal: StageJournal::new(256),
+            journal: StageJournal::with_capabilities(256, capabilities),
         }
     }
 
@@ -239,6 +255,8 @@ mod tests
             .expect("mouth bridges");
         let snapshot = output.journal().snapshot();
         assert_eq!(snapshot.schema_version, STAGE_TELEMETRY_SCHEMA_VERSION);
+        assert!(snapshot.capabilities.contains(&"speech".to_owned()));
+        assert!(snapshot.capabilities.contains(&"expression".to_owned()));
         assert!(snapshot.actions.iter().any(|action| action.kind == "speak"));
         assert!(snapshot.actions.iter().any(|action| action.kind == "expression"));
         assert!(snapshot.actions.iter().any(|action| action.kind == "mouth"));

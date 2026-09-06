@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+#[cfg(any(feature = "native-playback", test))]
+mod envelope;
+
+#[cfg(feature = "native-playback")]
+mod native;
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,36 +28,14 @@ impl AudioPlayer
     #[cfg(feature = "native-playback")]
     pub async fn play_wav(&self, job: &SpeechJob, bytes: Vec<u8>) -> Result<(), AppError>
     {
-        if bytes.is_empty()
-        {
-            return Err(AppError::protocol("cannot play empty audio"));
-        }
-        if self.cancelled(job)
-        {
-            return Ok(());
-        }
-        let generation = Arc::clone(&self.generation);
-        let expected = job.generation;
-        tokio::task::spawn_blocking(move ||
-        {
-            let stream = rodio::OutputStreamBuilder::open_default_stream()
-                .map_err(|error| AppError::unavailable(error.to_string()))?;
-            let cursor = std::io::Cursor::new(bytes);
-            let sink = rodio::play(stream.mixer(), cursor)
-                .map_err(|error| AppError::protocol(error.to_string()))?;
-            while !sink.empty()
-            {
-                if generation.load(Ordering::Acquire) != expected
-                {
-                    sink.stop();
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|error| AppError::unavailable(error.to_string()))?
+        self.play_wav_observed(job, bytes, |_| {}).await
+    }
+
+    #[cfg(not(feature = "native-playback"))]
+    pub async fn play_wav_observed<F>(&self, job: &SpeechJob, bytes: Vec<u8>, _observer: F) -> Result<(), AppError>
+    where F: Fn(ai_ex_domain::SpeechPlaybackSnapshot) + Send + 'static,
+    {
+        self.play_wav(job, bytes).await
     }
 
     #[cfg(not(feature = "native-playback"))]
@@ -80,6 +64,14 @@ impl AudioPlayer
     fn cancelled(&self, job: &SpeechJob) -> bool
     {
         job.generation != self.generation.load(Ordering::Acquire)
+    }
+
+    pub async fn wait_for_cancellation(&self, job: &SpeechJob)
+    {
+        while !self.cancelled(job)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
     }
 
     #[cfg(not(feature = "native-playback"))]
@@ -240,6 +232,20 @@ impl StageExecutor for SpeechQueue
 mod tests
 {
     use super::*;
+
+    #[tokio::test]
+    async fn cancellation_wakes_pending_synthesis_without_cancelling_new_jobs()
+    {
+        let (mut queue, mut receiver) = SpeechQueue::new(2).unwrap();
+        let player = receiver.player();
+        queue.enqueue(TurnId::new(), "old".to_owned()).await.unwrap();
+        let old = receiver.receive().await.unwrap();
+        SpeechPort::interrupt(&mut queue).await.unwrap();
+        queue.enqueue(TurnId::new(), "new".to_owned()).await.unwrap();
+        let new = receiver.receive().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_millis(100), player.wait_for_cancellation(&old)).await.unwrap();
+        assert!(!player.cancelled(&new));
+    }
 
     #[tokio::test]
     async fn stage_executor_routes_speech_and_interrupts()

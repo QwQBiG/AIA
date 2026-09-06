@@ -6,19 +6,33 @@ use std::thread;
 use std::time::Duration;
 
 use ai_ex_domain::AppError;
+use ai_ex_config::{AppConfig, ModelBackend};
 use eframe::egui;
-use uuid::Uuid;
+
+#[cfg(test)]
+#[path = "setup_config_tests.rs"]
+mod config_tests;
 
 #[derive(Debug, Clone)]
 pub struct SetupResult
 {
     pub config_path: PathBuf,
     pub api_key: Option<String>,
-    pub start_service: bool,
 }
 
 pub fn run(default_path: PathBuf) -> Result<SetupResult, AppError>
 {
+    let original = if default_path.exists()
+    {
+        let text = std::fs::read_to_string(&default_path)
+            .map_err(|error| AppError::configuration(format!("cannot read existing configuration: {error}")))?;
+        AppConfig::parse(&text)?;
+        Some(text)
+    }
+    else
+    {
+        None
+    };
     let result = Arc::new(Mutex::new(None));
     let shared = Arc::clone(&result);
     let options = eframe::NativeOptions {
@@ -30,8 +44,8 @@ pub fn run(default_path: PathBuf) -> Result<SetupResult, AppError>
     eframe::run_native(
         "AIex 首次设置",
         options,
-        Box::new(move |context| {
-            Ok(Box::new(SetupApp::new(context, default_path, shared)))
+        Box::new(move |_context| {
+            Ok(Box::new(SetupApp::new(default_path, shared, original)))
         }),
     )
     .map_err(|error| AppError::unavailable(error.to_string()))?;
@@ -44,6 +58,7 @@ pub fn run(default_path: PathBuf) -> Result<SetupResult, AppError>
 
 struct SetupApp
 {
+    original: Option<String>,
     config_path: PathBuf,
     provider: ProviderChoice,
     model: String,
@@ -81,16 +96,6 @@ impl ProviderChoice
         }
     }
 
-    fn backend(self) -> &'static str
-    {
-        match self
-        {
-            Self::DeepSeek => "deepseek",
-            Self::KoboldCpp => "koboldcpp",
-            Self::Ollama => "ollama",
-        }
-    }
-
     fn description(self) -> &'static str
     {
         match self
@@ -115,12 +120,13 @@ impl ProviderChoice
 impl SetupApp
 {
     fn new(
-        _context: &eframe::CreationContext<'_>,
         config_path: PathBuf,
         result: Arc<Mutex<Option<SetupResult>>>,
+        original: Option<String>,
     ) -> Self
     {
-        Self {
+        let mut app = Self {
+            original,
             config_path,
             provider: ProviderChoice::DeepSeek,
             model: "deepseek-v4-flash".to_owned(),
@@ -136,7 +142,30 @@ impl SetupApp
             checking: false,
             probe_receiver: None,
             result,
+        };
+        if let Some(config) = app.original.as_deref().and_then(|text| AppConfig::parse(text).ok())
+        {
+            app.provider = match config.model.backend
+            {
+                ModelBackend::DeepSeek => ProviderChoice::DeepSeek,
+                ModelBackend::KoboldCpp => ProviderChoice::KoboldCpp,
+                ModelBackend::Ollama => ProviderChoice::Ollama,
+            };
+            let (endpoint, model) = match app.provider
+            {
+                ProviderChoice::DeepSeek => (config.deepseek.base_url, config.deepseek.model),
+                ProviderChoice::KoboldCpp => (config.koboldcpp.base_url, "koboldcpp".to_owned()),
+                ProviderChoice::Ollama => (config.ollama.base_url, config.ollama.model),
+            };
+            app.endpoint = endpoint;
+            app.model = model;
+            app.persona_name = config.persona.name;
+            app.bilibili_enabled = config.bilibili.enabled;
+            app.bilibili_room_id = config.bilibili.room_id.to_string();
+            app.bilibili_cookie_env = config.bilibili.cookie_env.unwrap_or_default();
+            app.start_service = config.desktop.auto_start_service;
         }
+        app
     }
 
     fn provider_changed(&mut self)
@@ -203,9 +232,9 @@ impl SetupApp
         }
         if self.provider == ProviderChoice::DeepSeek
             && self.api_key.trim().is_empty()
-            && std::env::var_os("DEEPSEEK_API_KEY").is_none()
+            && std::env::var_os(self.api_key_env()).is_none()
         {
-            self.set_status("DeepSeek 连接检查需要 API Key；密钥不会写入配置文件。", true);
+            self.set_status(format!("DeepSeek 需要 API Key，可填写或设置 {}；密钥不会写入配置文件。", self.api_key_env()), true);
             return;
         }
         let endpoint = self.endpoint.trim().to_owned();
@@ -231,9 +260,9 @@ impl SetupApp
         }
         if self.provider == ProviderChoice::DeepSeek
             && self.api_key.trim().is_empty()
-            && std::env::var_os("DEEPSEEK_API_KEY").is_none()
+            && std::env::var_os(self.api_key_env()).is_none()
         {
-            self.set_status("DeepSeek 需要 API Key；可以粘贴到这里，或先设置 DEEPSEEK_API_KEY 环境变量。密钥不会写入配置文件。", true);
+            self.set_status(format!("DeepSeek 需要 API Key；可以填写或设置 {} 环境变量。密钥不会写入配置文件。", self.api_key_env()), true);
             return;
         }
         let bilibili_room_id = if self.bilibili_enabled
@@ -253,17 +282,8 @@ impl SetupApp
             0
         };
 
-        let Some(parent) = self.config_path.parent() else
-        {
-            self.set_status("配置路径没有有效目录。", true);
-            return;
-        };
-        let token_path = parent.join("control.token");
-        let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let config = self.config_text(bilibili_room_id);
-        let result = std::fs::create_dir_all(parent)
-            .and_then(|_| std::fs::write(&self.config_path, config))
-            .and_then(|_| std::fs::write(&token_path, format!("{token}\n")));
+        let result = self.config_text(bilibili_room_id).and_then(|document|
+            crate::setup_storage::save(&self.config_path, &document, self.original.as_deref()));
         match result
         {
             Ok(()) =>
@@ -281,7 +301,6 @@ impl SetupApp
                     *target = Some(SetupResult {
                         config_path: self.config_path.clone(),
                         api_key,
-                        start_service: self.start_service,
                     });
                 }
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -290,39 +309,62 @@ impl SetupApp
         }
     }
 
-    fn config_text(&self, bilibili_room_id: u64) -> String
+    fn api_key_env(&self) -> String
     {
-        let token_path = self
-            .config_path
-            .parent()
-            .map(|path| path.join("control.token"))
-            .unwrap_or_else(|| PathBuf::from("control.token"));
-        let token_path = token_path.to_string_lossy().replace('\\', "/");
-        let common = format!(
-            "# AIex generated configuration\n[model]\nbackend = \"{}\"\n\n[persona]\nprofile_id = \"default\"\nrevision = 1\nname = \"{}\"\nsystem_prompt = \"\"\ntone = \"warm, concise, and curious\"\ntaboos = []\nlive_mode = \"controlled\"\n\n[control]\nenabled = true\nbind = \"127.0.0.1:7878\"\ntoken_path = \"{token_path}\"\nmax_message_bytes = 65536\n\n[vts]\nenabled = false\n\n[memory]\nenabled = false\n\n[bilibili]\nenabled = {}\nroom_id = {}\nendpoint = \"wss://broadcastlv.chat.bilibili.com:443/sub\"\ncookie_env = \"{}\"\nreconnect_delay_ms = 2000\nauto_react = false\nresponse_mode = \"suggest\"\nreaction_cooldown_ms = 5000\n",
-            self.provider.backend(),
-            self.persona_name.replace('"', "'"),
-            self.bilibili_enabled,
-            bilibili_room_id,
-            self.bilibili_cookie_env.trim().replace(char::from(34), "'"),
-        );
+        self.original.as_deref().and_then(|source| AppConfig::parse(source).ok())
+            .unwrap_or_default().deepseek.api_key_env
+    }
+
+    fn config_text(&self, bilibili_room_id: u64) -> Result<String, AppError>
+    {
+        let mut config = self.original.as_deref().map(AppConfig::parse).transpose()?.unwrap_or_default();
+        if self.original.is_none()
+        {
+            let path = std::path::absolute(&self.config_path)
+                .map_err(|error| AppError::configuration(format!("invalid configuration path: {error}")))?;
+            config.control.token_path = path.with_file_name("control.token").to_string_lossy().into_owned();
+            config.vts.enabled = false;
+            config.memory.enabled = false;
+        }
+        config.control.enabled = true;
+        config.desktop.auto_start_service = self.start_service;
+        if self.original.is_some() && config.persona.name != self.persona_name.trim()
+        {
+            config.persona.revision = config.persona.revision.checked_add(1)
+                .ok_or_else(|| AppError::configuration("persona revision limit reached"))?;
+        }
+        config.persona.name = self.persona_name.trim().to_owned();
+        config.bilibili.enabled = self.bilibili_enabled;
+        if self.bilibili_enabled
+        {
+            config.bilibili.room_id = bilibili_room_id;
+        }
+        config.bilibili.cookie_env = (!self.bilibili_cookie_env.trim().is_empty())
+            .then(|| self.bilibili_cookie_env.trim().to_owned());
         match self.provider
         {
-            ProviderChoice::DeepSeek => format!(
-                "{common}\n[deepseek]\nbase_url = \"{}\"\nmodel = \"{}\"\napi_key_env = \"DEEPSEEK_API_KEY\"\ntimeout_seconds = 120\nthinking = false\nreasoning_effort = \"high\"\n",
-                self.endpoint,
-                self.model,
-            ),
-            ProviderChoice::KoboldCpp => format!(
-                "{common}\n[koboldcpp]\nbase_url = \"{}\"\nmodel = \"{}\"\ntimeout_seconds = 120\nmax_context_length = 2048\nmax_length = 256\ntemperature = 0.7\n",
-                self.endpoint,
-                self.model,
-            ),
-            ProviderChoice::Ollama => format!(
-                "{common}\n[ollama]\nbase_url = \"{}\"\nmodel = \"{}\"\ntimeout_seconds = 120\n",
-                self.endpoint,
-                self.model,
-            ),
+            ProviderChoice::DeepSeek =>
+            {
+                config.model.backend = ModelBackend::DeepSeek;
+                config.deepseek.base_url = self.endpoint.trim().to_owned();
+                config.deepseek.model = self.model.trim().to_owned();
+            }
+            ProviderChoice::KoboldCpp =>
+            {
+                config.model.backend = ModelBackend::KoboldCpp;
+                config.koboldcpp.base_url = self.endpoint.trim().to_owned();
+            }
+            ProviderChoice::Ollama =>
+            {
+                config.model.backend = ModelBackend::Ollama;
+                config.ollama.base_url = self.endpoint.trim().to_owned();
+                config.ollama.model = self.model.trim().to_owned();
+            }
+        }
+        match self.original.as_deref()
+        {
+            Some(original) => config.merge_toml(original),
+            None => config.to_toml(),
         }
     }
 }
@@ -510,7 +552,7 @@ impl eframe::App for SetupApp
                 });
                 ui.label("只填写环境变量名，不要把 Cookie 粘贴到配置或聊天窗口。");
             }
-            ui.checkbox(&mut self.start_service, "保存后自动启动服务（推荐）");
+            ui.checkbox(&mut self.start_service, "打开 AIex 时自动启动服务（推荐）");
             ui.add_space(8.0);
             ui.label(format!("配置文件：{}", self.config_path.display()));
             ui.label("首次启动会自动生成本地控制令牌；开发者可以在 config/control.token 和日志文件中检查状态。");

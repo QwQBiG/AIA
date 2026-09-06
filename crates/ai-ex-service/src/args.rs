@@ -7,6 +7,8 @@ pub struct Args
 {
     pub config: PathBuf,
     pub check: bool,
+    pub serve: bool,
+    pub managed: bool,
     pub prompt: Option<String>,
     pub replay_events: Option<PathBuf>,
     pub replay_report: Option<PathBuf>,
@@ -22,6 +24,8 @@ impl Args
     {
         let mut config = PathBuf::from("config/ai-ex.example.toml");
         let mut check = false;
+        let mut serve = false;
+        let mut managed = false;
         let mut prompt = None;
         let mut replay_events = None;
         let mut replay_report = None;
@@ -42,6 +46,8 @@ impl Args
                     config = PathBuf::from(path);
                 }
                 "--check" => check = true,
+                "--serve" => serve = true,
+                "--managed" => managed = true,
                 "--replay-events" =>
                 {
                     let path = values.next().ok_or_else(|| {
@@ -92,7 +98,7 @@ impl Args
                 "--help" | "-h" =>
                 {
                     return Err(AppError::configuration(
-                        "usage: ai-ex-service [--config PATH] [--check | --replay-events PATH [--replay-report PATH] | --replay-automation PATH | --replay-stage PATH | --prompt TEXT | \
+                        "usage: ai-ex-service [--config PATH] [--serve | --managed | --check | --replay-events PATH [--replay-report PATH] | --replay-automation PATH | --replay-stage PATH | --prompt TEXT | \
                          --vision-image PATH --vision-prompt TEXT]",
                     ));
                 }
@@ -115,6 +121,8 @@ impl Args
             ));
         }
         let selected_modes = usize::from(check)
+            + usize::from(serve)
+            + usize::from(managed)
             + usize::from(replay_events.is_some())
             + usize::from(replay_automation.is_some())
             + usize::from(replay_stage.is_some())
@@ -123,12 +131,14 @@ impl Args
         if selected_modes > 1
         {
             return Err(AppError::configuration(
-                "--check, --replay-events, --replay-automation, --replay-stage, --prompt, and vision analysis modes are mutually exclusive",
+                "--serve, --managed, --check, --replay-events, --replay-automation, --replay-stage, --prompt, and vision analysis modes are mutually exclusive",
             ));
         }
         Ok(Self {
             config,
             check,
+            serve,
+            managed,
             prompt,
             replay_events,
             replay_report,
@@ -144,6 +154,18 @@ impl Args
 mod tests
 {
     use super::*;
+
+    #[test]
+    fn background_modes_are_explicit_and_exclusive()
+    {
+        assert!(Args::parse(["--serve".to_owned()]).unwrap().serve);
+        assert!(Args::parse(["--managed".to_owned()]).unwrap().managed);
+        for conflict in ["--managed", "--check", "--serve"]
+        {
+            let first = if conflict == "--serve" { "--managed" } else { "--serve" };
+            assert!(Args::parse([first.to_owned(), conflict.to_owned()]).is_err());
+        }
+    }
 
     #[test]
     fn rejects_missing_prompt_value()

@@ -2,6 +2,9 @@
 
 mod record;
 
+#[cfg(test)]
+mod persistence_tests;
+
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -278,7 +281,7 @@ impl MemoryStore
                 .await
                 .map_err(|error| AppError::unavailable(error.to_string()))?;
         }
-        tokio::fs::write(destination, content)
+        write_new_synced(destination, content.as_bytes())
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
         Ok(records.len())
@@ -304,19 +307,16 @@ impl MemoryStore
             return Ok(0);
         }
         let content = serialize_records(&retained)?;
-        let temporary = self.inner.path.with_extension("jsonl.tmp");
-        tokio::fs::write(&temporary, content)
+        let temporary = self.inner.path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        write_new_synced(&temporary, content.as_bytes())
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
-        match tokio::fs::remove_file(&self.inner.path).await
+        // Replace directly: deleting the original first loses data if rename fails.
+        if let Err(error) = tokio::fs::rename(&temporary, &self.inner.path).await
         {
-            Ok(()) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(AppError::unavailable(error.to_string())),
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return Err(AppError::unavailable(error.to_string()));
         }
-        tokio::fs::rename(&temporary, &self.inner.path)
-            .await
-            .map_err(|error| AppError::unavailable(error.to_string()))?;
         *self.inner.records.write().await = retained;
         Ok(removed)
     }
@@ -354,6 +354,27 @@ impl MemoryPort for MemoryStore
         self.remember_kind(MemoryKind::Conversation, turn_id, user_text, assistant_text)
             .await
     }
+}
+
+async fn write_new_synced(path: &Path, content: &[u8]) -> std::io::Result<()>
+{
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await?;
+    let result = async {
+        file.write_all(content).await?;
+        file.flush().await?;
+        file.sync_all().await
+    }
+    .await;
+    drop(file);
+    if result.is_err()
+    {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    result
 }
 
 fn serialize_records(records: &[MemoryRecord]) -> Result<String, AppError>

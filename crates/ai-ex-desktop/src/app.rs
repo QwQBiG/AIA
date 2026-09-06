@@ -6,6 +6,7 @@ use ai_ex_ui_model::{ApplyOutcome, ConnectionState, TurnStatus, UiState};
 use eframe::egui;
 
 use crate::worker::{WorkerCommand, WorkerEvent, WorkerHandle};
+use crate::appearance::AppearancePanel;
 
 pub struct DesktopApp
 {
@@ -26,6 +27,7 @@ pub struct DesktopApp
     persona_apply_pending: bool,
     taboos_editor: String,
     stage: StageSnapshot,
+    appearance: AppearancePanel,
 }
 
 impl DesktopApp
@@ -51,6 +53,7 @@ impl DesktopApp
             persona_apply_pending: false,
             taboos_editor: String::new(),
             stage: StageSnapshot::default(),
+            appearance: AppearancePanel::load(context.storage),
         }
     }
 
@@ -300,7 +303,7 @@ impl DesktopApp
                     }
                 }
                 ConnectionState::Connecting => "建议：等待服务完成连接；不要重复启动多个服务进程。".to_owned(),
-                ConnectionState::Disconnected => "建议：重新双击 AIex-Desktop.cmd；首次设置时勾选“保存后自动启动服务”，再打开“开发者诊断”查看原因。".to_owned(),
+                ConnectionState::Disconnected => "建议：在设置中勾选“打开 AIex 时自动启动服务”，再打开“开发者诊断”查看连接失败的原因。".to_owned(),
             };
             ui.small(guidance);
             if let Some(item) = self.active_model_health()
@@ -571,6 +574,14 @@ impl DesktopApp
         ui.collapsing("舞台/OBS 动作遥测", |ui|
         {
             ui.small(format!("schema={}，最近 {} 个动作", self.stage.schema_version, self.stage.actions.len()));
+            if self.stage.capabilities.is_empty()
+            {
+                ui.weak("舞台能力尚未同步；旧服务快照可能没有能力字段。");
+            }
+            else
+            {
+                ui.small(format!("当前能力：{}", self.stage.capabilities.join("、")));
+            }
             if self.stage.actions.is_empty()
             {
                 ui.weak("尚未收到舞台动作；可发送一条对话或运行 dry-run 回放后刷新。");
@@ -639,7 +650,8 @@ impl DesktopApp
     fn show_conversation(&self, ui: &mut egui::Ui)
     {
         egui::ScrollArea::vertical()
-            .max_height((ui.available_height() - 130.0).max(180.0))
+            .id_salt("conversation_history")
+            .max_height((ui.available_height() - 130.0).max(60.0))
             .stick_to_bottom(true)
             .auto_shrink([false, false])
             .show(ui, |ui|
@@ -672,6 +684,7 @@ impl DesktopApp
         let response = ui.add(
             egui::TextEdit::multiline(&mut self.input)
                 .desired_rows(3)
+                .desired_width(f32::INFINITY)
                 .hint_text("输入消息；Ctrl + Enter 发送"),
         );
         let keyboard_submit = response.has_focus()
@@ -801,19 +814,38 @@ impl eframe::App for DesktopApp
     {
         self.drain_events();
         self.show_header(ui);
-        self.show_beginner_panel(ui);
-        self.show_persona_panel(ui);
-        self.show_health(ui);
-        self.show_model_panel(ui);
-        self.show_policy_panel(ui);
-        self.show_automation_panel(ui);
-        self.show_developer_panel(ui);
-        self.show_stage_panel(ui);
+        let settings_height = (ui.available_height() * 0.5).clamp(120.0, 360.0);
+        egui::ScrollArea::vertical()
+            .id_salt("character_settings")
+            .max_height(settings_height)
+            .show(ui, |ui|
+            {
+                egui::CollapsingHeader::new("数字人外形")
+                    .default_open(true)
+                    .show(ui, |ui|
+                    {
+                        let state = ai_ex_ui_model::PresentationState::from_ui(&self.state);
+                        self.appearance.show(ui, state, &self.persona.name, 150.0);
+                    });
+                self.show_beginner_panel(ui);
+                self.show_persona_panel(ui);
+                self.show_health(ui);
+                self.show_model_panel(ui);
+                self.show_policy_panel(ui);
+                self.show_automation_panel(ui);
+                self.show_developer_panel(ui);
+                self.show_stage_panel(ui);
+            });
         self.show_conversation(ui);
         self.show_composer(ui);
         self.show_persona_confirmation(ui.ctx());
         self.show_emergency_confirmation(ui.ctx());
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage)
+    {
+        self.appearance.save(storage);
     }
 }
 
@@ -828,7 +860,7 @@ fn turn_status(status: TurnStatus) -> (&'static str, egui::Color32)
     }
 }
 
-fn configure_appearance(context: &egui::Context)
+pub(crate) fn configure_appearance(context: &egui::Context)
 {
     context.set_visuals(egui::Visuals::dark());
     let mut style = (*context.style_of(egui::Theme::Dark)).clone();
