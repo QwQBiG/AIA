@@ -19,6 +19,13 @@ mod scene;
 #[path = "scene_app_tests.rs"]
 mod scene_tests;
 
+#[path = "resume_app.rs"]
+mod resume;
+
+#[cfg(test)]
+#[path = "resume_app_tests.rs"]
+mod resume_tests;
+
 pub struct DesktopApp
 {
     state: UiState,
@@ -45,14 +52,18 @@ pub struct DesktopApp
     scene_files: crate::scene_files::SceneFiles,
     pending_scene: Option<scene::PendingScene>,
     applying_scene: Option<scene::PendingScene>,
+    resume: crate::scene_resume::SceneResume,
+    persona_synced: bool,
 }
 
 impl DesktopApp
 {
-    pub fn new(context: &eframe::CreationContext<'_>, worker: WorkerHandle, developer_mode: bool) -> Self
+    pub fn new(context: &eframe::CreationContext<'_>, worker: WorkerHandle, developer_mode: bool, launch: crate::scene_resume::ResumeLaunch) -> Self
     {
         configure_appearance(&context.egui_ctx);
-        Self::with_storage(worker, developer_mode, context.storage)
+        let mut app = Self::with_storage(worker, developer_mode, context.storage);
+        app.resume = crate::scene_resume::SceneResume::load(context.storage, launch);
+        app
     }
 
     fn with_storage(worker: WorkerHandle, developer_mode: bool, storage: Option<&dyn eframe::Storage>) -> Self
@@ -82,6 +93,8 @@ impl DesktopApp
             scene_files: Default::default(),
             pending_scene: None,
             applying_scene: None,
+            resume: Default::default(),
+            persona_synced: false,
         }
     }
 
@@ -132,6 +145,7 @@ impl DesktopApp
             {
                 WorkerEvent::Connection(connected) =>
                 {
+                    if !connected { self.persona_synced = false; }
                     self.push_log(if connected { "control connected" } else { "control disconnected" });
                     self.state.connection = if connected
                     {
@@ -145,6 +159,7 @@ impl DesktopApp
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
                 WorkerEvent::Persona(profile) =>
                 {
+                    self.persona_synced = self.state.connection == ConnectionState::Connected;
                     if !self.persona_apply_pending
                     {
                         if self.active_persona != profile
@@ -167,6 +182,7 @@ impl DesktopApp
                 }
                 WorkerEvent::PersonaApplied(profile) =>
                 {
+                    self.persona_synced = true;
                     self.finish_scene(&profile);
                     self.active_persona = profile.clone();
                     self.taboos_editor = profile.taboos.join("\n");
@@ -271,8 +287,15 @@ impl DesktopApp
         }
     }
 
+    fn can_submit(&self) -> bool
+    {
+        self.state.connection == ConnectionState::Connected && !self.persona_apply_pending && !self.confirm_persona
+            && self.resume.phase == crate::scene_resume::ResumePhase::Idle
+    }
+
     fn submit(&mut self)
     {
+        if !self.can_submit() { return; }
         let text = self.input.trim();
         if text.is_empty()
         {
@@ -758,7 +781,7 @@ impl DesktopApp
             });
         ui.horizontal(|ui|
         {
-            let enabled = self.state.connection == ConnectionState::Connected;
+            let enabled = self.can_submit();
             if ui.add_enabled(enabled, egui::Button::new("发送")).clicked()
                 || (enabled && keyboard_submit)
             {
@@ -830,6 +853,7 @@ impl DesktopApp
             self.last_error = Some("服务未连接，无法应用角色。".to_owned());
             return;
         }
+        self.resume.phase = crate::scene_resume::ResumePhase::Idle;
         self.persona_apply_pending = true;
         if self.worker.commands.send(WorkerCommand::SetPersona(profile)).is_err()
         {
@@ -845,6 +869,7 @@ impl DesktopApp
 
     fn cancel_pending_persona(&mut self)
     {
+        self.resume.phase = crate::scene_resume::ResumePhase::Idle;
         self.confirm_persona = false;
         self.pending_persona = None;
         if self.pending_scene.take().is_some()
@@ -898,7 +923,7 @@ impl DesktopApp
 
 impl eframe::App for DesktopApp
 {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame)
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame)
     {
         self.drain_events();
         self.poll_scene(ui.ctx());
@@ -933,12 +958,18 @@ impl eframe::App for DesktopApp
         self.show_composer(ui);
         self.show_persona_confirmation(ui.ctx());
         self.show_emergency_confirmation(ui.ctx());
+        if self.resume.dirty && let Some(storage) = frame.storage_mut()
+        {
+            self.save_resume(storage);
+            storage.flush();
+        }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage)
     {
         self.appearance.save(storage);
+        self.save_resume(storage);
     }
 }
 

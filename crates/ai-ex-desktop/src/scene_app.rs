@@ -13,7 +13,21 @@ impl DesktopApp
 {
     pub(super) fn poll_scene(&mut self, context: &egui::Context)
     {
-        if let Some(ready) = self.scene_files.poll(context) { self.prepare_scene(context, ready); }
+        self.begin_resume(context);
+        let restoring = self.resume.phase == crate::scene_resume::ResumePhase::Loading;
+        if let Some(ready) = self.scene_files.poll(context)
+        {
+            self.prepare_scene(context, ready);
+            if restoring
+            {
+                self.resume.phase = if self.pending_scene.is_some() { crate::scene_resume::ResumePhase::Prepared } else { crate::scene_resume::ResumePhase::Idle };
+            }
+        }
+        else if restoring && !self.scene_files.is_loading()
+        {
+            self.resume.phase = crate::scene_resume::ResumePhase::Idle;
+        }
+        self.apply_resume_if_ready();
     }
 
     pub(super) fn show_scene_panel(&mut self, ui: &mut egui::Ui)
@@ -63,6 +77,7 @@ impl DesktopApp
             });
             if self.scene_files.is_loading() { ui.label("正在处理场景与图片资源……"); }
             if let Some(feedback) = &self.scene_files.feedback { ui.label(feedback); }
+            self.show_resume_controls(ui);
         });
     }
 
@@ -119,6 +134,10 @@ impl DesktopApp
     {
         if let Some(scene) = &self.pending_scene
         {
+            if self.resume.phase == crate::scene_resume::ResumePhase::Prepared
+            {
+                ui.label(if self.resume.automatic { "正在等待服务连接与角色同步，以恢复启动组合；可以取消。" } else { "这是已记住的启动组合，确认后恢复到当前服务。" });
+            }
             ui.label(format!("同时应用场景：{}", scene.manifest.name));
             let body = match scene.manifest.appearance.body
             {

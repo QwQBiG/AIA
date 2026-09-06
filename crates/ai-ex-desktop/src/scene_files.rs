@@ -14,6 +14,7 @@ pub enum SceneAction
 {
     Import(PathBuf),
     Export(PathBuf, Box<SceneManifest>, Option<PathBuf>),
+    Restore(Box<crate::scene_resume::ResumeSnapshot>),
 }
 
 pub struct ReadyScene
@@ -49,6 +50,12 @@ fn execute(action: SceneAction) -> Result<SceneResult, AppError>
 {
     match action
     {
+        SceneAction::Restore(snapshot) =>
+        {
+            snapshot.validate()?;
+            let appearance = snapshot.source.as_ref().map(|path| DecodedAppearance::load(path)).transpose()?;
+            Ok(SceneResult::Loaded(Box::new(ReadyScene { manifest: snapshot.scene, appearance })))
+        }
         SceneAction::Import(path) =>
         {
             let bundle = SceneBundle::load(&path)?;

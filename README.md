@@ -40,6 +40,8 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --preview
 
 通过 [场景组合](docs/SCENE_PACKS.md) 可将已应用的角色、外形与显示偏好一起保存和重载，图片素材随包携带。桌面提供预览确认、失败保留与保存新目录；可从“安静陪伴”和“轻快主持”两套示例开始修改。
 
+也可以将当前组合设为启动组合，让下次打开继续使用同一份角色与外形。启动选择按服务配置分别保存；桌面新启动服务时自动恢复，连接已有服务时先预览确认。
+
 ### 小白用户：双击打开可视化向导
 
 在 Windows 资源管理器中双击仓库根目录的 `AIex-Desktop.cmd` 即可打开桌面端；如果已经构建了 `crates/ai-ex-desktop/target/release`/`debug` 二进制，它会直接启动，否则才回退到 Cargo 开发启动。首次打开会进入可视化设置向导，不需要先手写 TOML 或控制令牌。

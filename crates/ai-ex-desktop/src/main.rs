@@ -3,6 +3,7 @@
 mod app;
 mod character_files;
 mod scene_files;
+mod scene_resume;
 mod appearance;
 mod appearance_import;
 mod image_appearance;
@@ -58,7 +59,7 @@ fn run() -> Result<(), AppError>
     }
     let token = startup::read_token(&config)?;
     let auto_start = !options.connect_only && (options.start_service || config.desktop.auto_start_service);
-    let _service_process = if auto_start && !startup::service_is_running(&config, &token)?
+    let managed_service = if auto_start && !startup::service_is_running(&config, &token)?
     {
         Some(ManagedService::spawn(
             &config_path,
@@ -70,6 +71,7 @@ fn run() -> Result<(), AppError>
     {
         None
     };
+    let resume = scene_resume::ResumeLaunch::new(&config_path, &config.control.bind, managed_service.is_some())?;
     let worker = spawn_worker(WorkerSettings {
         address: config.control.bind,
         token: token.trim().to_owned(),
@@ -87,7 +89,7 @@ fn run() -> Result<(), AppError>
         native_options,
         Box::new(move |context|
         {
-            Ok(Box::new(DesktopApp::new(context, worker, developer)))
+            Ok(Box::new(DesktopApp::new(context, worker, developer, resume)))
         }),
     )
     .map_err(|error| AppError::unavailable(error.to_string()))
