@@ -383,7 +383,7 @@ async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppErr
 async fn fetch_persona_current(client: &ControlClient, epoch: &AtomicU64) -> Result<Option<PersonaSnapshot>, AppError>
 {
     let before = epoch.load(Ordering::Acquire);
-    if before % 2 != 0
+    if !before.is_multiple_of(2)
     {
         return Ok(None);
     }

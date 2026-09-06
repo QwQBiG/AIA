@@ -29,6 +29,8 @@ pub enum SystemEvent
     EmotionChanged { turn_id: TurnId, emotion: Emotion },
     SentenceReady { turn_id: TurnId, text: String },
     SpeechPlayback { playback: crate::SpeechPlaybackSnapshot },
+    SpeechProgress { sentence_id: uuid::Uuid, position_ms: u64, mouth_level: u16 },
+    SpeechCancelled,
     TurnFinished { turn_id: TurnId, full_text: String },
     TurnInterrupted { turn_id: TurnId, reason: String },
     StateChanged { from: ConversationState, to: ConversationState },

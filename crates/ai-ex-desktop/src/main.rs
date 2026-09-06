@@ -14,6 +14,7 @@ mod setup;
 mod setup_storage;
 mod startup;
 mod worker;
+mod speech_panel;
 
 use std::path::PathBuf;
 

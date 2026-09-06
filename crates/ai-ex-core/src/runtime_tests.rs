@@ -230,7 +230,8 @@ async fn actor_interrupts_remaining_audio_after_generation_has_finished()
     );
     let handle = spawn_runtime(runtime, 4).unwrap();
     handle.submit("hello".to_owned()).await.unwrap();
-    assert!(!state.speech_interrupted.load(Ordering::Acquire));
+    // Starting an input has already cancelled any preceding audio.
+    state.speech_interrupted.store(false, Ordering::Release);
     handle.interrupt("stop remaining speech").await.unwrap();
     assert!(state.speech_interrupted.load(Ordering::Acquire));
     assert!(state.avatar_neutral.load(Ordering::Acquire));

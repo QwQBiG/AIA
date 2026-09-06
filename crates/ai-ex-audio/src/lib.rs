@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ai_ex_core::SpeechPort;
-use ai_ex_domain::{AppError, ComponentHealth, TurnId};
+use ai_ex_domain::{AppError, ComponentHealth, Emotion, SpeechPlaybackSnapshot, TurnId};
 use ai_ex_stage::{StageAction, StageCapability, StageExecutor};
 use ai_ex_text::clean_for_speech;
 use async_trait::async_trait;
@@ -89,7 +89,21 @@ pub struct SpeechJob
 {
     pub turn_id: TurnId,
     pub text: String,
+    pub sentence_id: uuid::Uuid,
+    pub emotion: Emotion,
     generation: u64,
+}
+
+impl SpeechJob
+{
+    pub fn playback_snapshot(&self, position_ms: u64, duration_ms: u64, mouth_level: u16) -> SpeechPlaybackSnapshot
+    {
+        SpeechPlaybackSnapshot {
+            turn_id: Some(self.turn_id), active: true,
+            sentence_id: Some(self.sentence_id), text: self.text.clone(), emotion: Some(self.emotion),
+            position_ms: position_ms.min(duration_ms), duration_ms, mouth_level: mouth_level.min(1000),
+        }
+    }
 }
 
 pub struct SpeechQueue
@@ -166,6 +180,11 @@ impl SpeechPort for SpeechQueue
 {
     async fn enqueue(&mut self, turn_id: TurnId, sentence: String) -> Result<(), AppError>
     {
+        self.enqueue_expressive(turn_id, sentence, Emotion::Neutral).await
+    }
+
+    async fn enqueue_expressive(&mut self, turn_id: TurnId, sentence: String, emotion: Emotion) -> Result<(), AppError>
+    {
         let sentence = clean_for_speech(&sentence);
         if sentence.is_empty()
         {
@@ -174,6 +193,8 @@ impl SpeechPort for SpeechQueue
         let job = SpeechJob {
             turn_id,
             text: sentence,
+            sentence_id: uuid::Uuid::new_v4(),
+            emotion,
             generation: self.generation.load(Ordering::Acquire),
         };
         self.sender
@@ -210,8 +231,9 @@ impl StageExecutor for SpeechQueue
             StageAction::Speak {
                 turn_id,
                 text,
+                emotion,
                 ..
-            } => SpeechPort::enqueue(self, turn_id, text).await,
+            } => SpeechPort::enqueue_expressive(self, turn_id, text, emotion.unwrap_or(Emotion::Neutral)).await,
             StageAction::Stop => SpeechPort::interrupt(self).await,
             StageAction::Expression { .. }
             | StageAction::Mouth { .. }
@@ -259,6 +281,7 @@ mod tests
                 turn_id: TurnId::new(),
                 text: "hello".to_owned(),
                 interruptible: true,
+                emotion: None,
             },
         )
         .await

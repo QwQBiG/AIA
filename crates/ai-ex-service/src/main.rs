@@ -4,6 +4,7 @@ mod args;
 mod automation_replay;
 mod events;
 mod lifecycle;
+mod playback;
 
 #[cfg(test)]
 mod speech_tests;
@@ -1122,10 +1123,10 @@ async fn run_speech_worker(
         {
             Ok(audio) =>
             {
-                let playback_events = events.clone();
+                let playback_events = playback::PlaybackPublisher::new(events.clone());
                 if let Err(error) = player.play_wav_observed(&job, audio.bytes, move |playback|
                 {
-                    playback_events.publish_now(ai_ex_domain::SystemEvent::SpeechPlayback { playback });
+                    playback_events.observe(playback);
                 }).await
                 {
                     tracing::error!(%error, "audio playback failed");

@@ -26,6 +26,7 @@ fn summarize_action(action: &StageAction) -> String
             turn_id,
             text,
             interruptible,
+            ..
         } => format!("turn_id={turn_id:?} text_chars={} interruptible={interruptible}", text.chars().count()),
         StageAction::Subtitle {
             text,
@@ -150,12 +151,18 @@ impl crate::SpeechPort for StageSpeechPort
 {
     async fn enqueue(&mut self, turn_id: TurnId, sentence: String) -> Result<(), AppError>
     {
+        self.enqueue_expressive(turn_id, sentence, Emotion::Neutral).await
+    }
+
+    async fn enqueue_expressive(&mut self, turn_id: TurnId, sentence: String, emotion: Emotion) -> Result<(), AppError>
+    {
         let mut router = self.router.lock().await;
         let subtitle_enabled = router.capabilities().contains(&StageCapability::Subtitle);
         let speech = StageAction::Speak {
             turn_id,
             text: sentence.clone(),
             interruptible: true,
+            emotion: Some(emotion),
         };
         self.journal.record(&speech);
         router.execute(speech).await?;

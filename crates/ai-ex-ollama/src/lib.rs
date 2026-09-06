@@ -233,15 +233,12 @@ async fn process_line(
     {
         return Err(AppError::protocol(error));
     }
-    if let Some(message) = chunk.message
+    if let Some(message) = chunk.message && !message.content.is_empty()
     {
-        if !message.content.is_empty()
-        {
-            sender
-                .send(Ok(message.content))
-                .await
-                .map_err(|_| AppError::unavailable("conversation receiver closed"))?;
-        }
+        sender
+            .send(Ok(message.content))
+            .await
+            .map_err(|_| AppError::unavailable("conversation receiver closed"))?;
     }
     Ok(chunk.done)
 }

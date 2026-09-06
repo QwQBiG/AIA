@@ -17,6 +17,7 @@ ai-ex-text = { path = "../ai-ex-text" }
 async-trait.workspace = true
 rodio = { workspace = true, optional = true }
 tokio.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

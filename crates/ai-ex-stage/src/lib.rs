@@ -16,6 +16,8 @@ pub enum StageAction
         turn_id: TurnId,
         text: String,
         interruptible: bool,
+        #[serde(default)]
+        emotion: Option<Emotion>,
     },
     Expression {
         emotion: Emotion,
@@ -343,6 +345,7 @@ mod tests
                 turn_id: TurnId::new(),
                 text: String::new(),
                 interruptible: true,
+                emotion: None,
             })
             .await
             .expect_err("empty speech is invalid");

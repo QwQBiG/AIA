@@ -970,6 +970,7 @@ impl eframe::App for DesktopApp
                 self.show_developer_panel(ui);
                 self.show_stage_panel(ui);
             });
+        crate::speech_panel::show(ui, &self.state);
         self.show_conversation(ui);
         self.show_composer(ui);
         self.show_persona_confirmation(ui.ctx());

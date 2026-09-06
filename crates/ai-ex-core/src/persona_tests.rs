@@ -79,6 +79,7 @@ async fn active_turn_rejects_identity_switch_without_interrupting_the_reply()
             tokio::task::yield_now().await;
         }
     }).await.unwrap();
+    state.speech_interrupted.store(false, Ordering::Release);
     assert!(handle.set_persona("other".to_owned(), "other persona".to_owned()).await.is_err());
     assert!(!state.speech_interrupted.load(Ordering::Acquire));
     handle.shutdown().await.unwrap();

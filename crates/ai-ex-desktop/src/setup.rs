@@ -438,12 +438,9 @@ fn endpoint_host_port(scheme: &str, authority: &str) -> Result<(String, u16), Ap
             .unwrap_or_else(|| default_port(scheme));
         return Ok((format!("[{host}]"), port));
     }
-    if let Some((host, port)) = authority.rsplit_once(':')
+    if let Some((host, port)) = authority.rsplit_once(':') && !host.is_empty()
     {
-        if !host.is_empty()
-        {
-            return Ok((host.to_owned(), parse_port(port)?));
-        }
+        return Ok((host.to_owned(), parse_port(port)?));
     }
     Ok((authority.to_owned(), default_port(scheme)))
 }

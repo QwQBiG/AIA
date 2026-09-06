@@ -95,6 +95,7 @@ impl UiState
 
     fn reduce(&mut self, event: SystemEvent)
     {
+        self.runtime.observe_speech_event(&event);
         match event
         {
             SystemEvent::TurnStarted { turn_id, user_text } =>
@@ -124,7 +125,7 @@ impl UiState
                 }
             }
             SystemEvent::SentenceReady { .. } => self.runtime.sentences_ready += 1,
-            SystemEvent::SpeechPlayback { playback } => self.runtime.playback = playback,
+            SystemEvent::SpeechPlayback { .. } | SystemEvent::SpeechProgress { .. } | SystemEvent::SpeechCancelled => {},
             SystemEvent::EmotionChanged { emotion, .. } =>
             {
                 self.runtime.current_emotion = Some(emotion);

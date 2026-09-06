@@ -263,6 +263,7 @@ mod tests
                 turn_id: ai_ex_domain::TurnId::new(),
                 text: "hello".to_owned(),
                 interruptible: true,
+                emotion: None,
             })
             .await
             .expect_err("OBS must reject speech");

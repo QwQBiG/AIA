@@ -36,7 +36,7 @@ impl AudioPlayer
         }
         let generation = Arc::clone(&self.generation);
         let expected = job.generation;
-        let turn_id = job.turn_id;
+        let job = job.clone();
         tokio::task::spawn_blocking(move ||
         {
             let decoder = rodio::Decoder::try_from(Cursor::new(bytes))
@@ -64,11 +64,9 @@ impl AudioPlayer
                 return Ok(());
             }
             let _guard = PlaybackGuard(&observer);
-            let report = |position_ms| observer(SpeechPlaybackSnapshot {
-                turn_id: Some(turn_id), active: true,
-                mouth_level: envelope.level_at(position_ms),
-                position_ms, duration_ms: envelope.duration_ms,
-            });
+            let report = |position_ms| observer(job.playback_snapshot(
+                position_ms, envelope.duration_ms, envelope.level_at(position_ms),
+            ));
             sink.play();
             report(0);
             let mut last_report_ms = 0;

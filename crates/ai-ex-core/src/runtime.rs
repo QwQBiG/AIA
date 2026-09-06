@@ -1,4 +1,4 @@
-use ai_ex_domain::{AppError, ConversationState, Message, Role, SystemEvent, TurnId};
+use ai_ex_domain::{AppError, ConversationState, Emotion, Message, Role, SystemEvent, TurnId};
 use ai_ex_text::ResponsePreamble;
 
 use crate::{
@@ -44,6 +44,7 @@ where
     system_prompt: String,
     profile_id: String,
     memory_recall_limit: usize,
+    speech_emotion: Emotion,
 }
 
 impl<M, S, A, N, E> Runtime<M, S, A, N, E>
@@ -98,6 +99,7 @@ where
             system_prompt: policy.system_prompt,
             profile_id: "default".to_owned(),
             memory_recall_limit: policy.memory_recall_limit,
+            speech_emotion: Emotion::Neutral,
         }
     }
 
@@ -134,7 +136,7 @@ where
         if profile_id != self.profile_id
         {
             // Stop the previous body's remaining audio before changing its identity.
-            self.speech.interrupt().await?;
+            self.cancel_speech().await?;
             self.avatar.set_neutral().await?;
             self.memory.select_profile(&profile_id).await?;
             self.engine.clear_identity_context();
@@ -271,11 +273,11 @@ where
         let Some(active) = self.engine.active_turn() else
         {
             // Generation can finish while queued audio is still playing.
-            self.speech.interrupt().await?;
+            self.cancel_speech().await?;
             return self.avatar.set_neutral().await;
         };
         self.model.cancel(active).await?;
-        self.speech.interrupt().await?;
+        self.cancel_speech().await?;
         self.avatar.set_neutral().await?;
         self.engine.interrupt(reason)?;
         self.dispatch_events().await
@@ -288,7 +290,7 @@ where
             self.model.cancel(active).await?;
             self.engine.interrupt("runtime stopped")?;
         }
-        self.speech.interrupt().await?;
+        self.cancel_speech().await?;
         self.avatar.set_neutral().await?;
         self.engine.stop();
         self.dispatch_events().await
@@ -300,13 +302,20 @@ where
         {
             match &event
             {
+                SystemEvent::TurnStarted { .. } =>
+                {
+                    self.cancel_speech().await?;
+                    self.speech_emotion = Emotion::Neutral;
+                    self.avatar.set_neutral().await?;
+                }
                 SystemEvent::SentenceReady { turn_id, text } =>
                 {
-                    self.speech.enqueue(*turn_id, text.clone()).await?;
+                    self.speech.enqueue_expressive(*turn_id, text.clone(), self.speech_emotion).await?;
                     self.avatar.set_speaking(true).await?;
                 }
                 SystemEvent::EmotionChanged { emotion, .. } =>
                 {
+                    self.speech_emotion = *emotion;
                     self.avatar.set_emotion(*emotion).await?;
                 }
                 SystemEvent::TurnFinished { .. } | SystemEvent::TurnInterrupted { .. } =>
@@ -315,7 +324,7 @@ where
                 }
                 SystemEvent::Fault { .. } =>
                 {
-                    self.speech.interrupt().await?;
+                    self.cancel_speech().await?;
                     self.avatar.set_neutral().await?;
                 }
                 _ =>
@@ -324,6 +333,13 @@ where
             }
             self.events.publish(event).await;
         }
+        Ok(())
+    }
+
+    async fn cancel_speech(&mut self) -> Result<(), AppError>
+    {
+        self.speech.interrupt().await?;
+        self.events.publish(SystemEvent::SpeechCancelled).await;
         Ok(())
     }
 }

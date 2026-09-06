@@ -13,7 +13,7 @@ impl SpeechEnvelope
     pub fn from_samples(samples: &[f32], channels: u16, sample_rate: u32) -> Result<Self, AppError>
     {
         if channels == 0 || channels > 8 || sample_rate == 0 || sample_rate > 192_000
-            || samples.is_empty() || samples.len() % channels as usize != 0
+            || samples.is_empty() || !samples.len().is_multiple_of(channels as usize)
         {
             return Err(AppError::protocol("invalid speech PCM format or incomplete frame"));
         }

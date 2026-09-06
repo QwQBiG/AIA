@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionState, UiState};
 
+#[cfg(test)]
+#[path = "speech_tests.rs"]
+mod speech_tests;
+
 /// Renderer-independent expression. It describes presentation, not consciousness
 /// or measured audio amplitude. Renderers may implement only part of this state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +28,7 @@ impl PresentationState
         let connected = ui.connection == ConnectionState::Connected;
         let synchronized = connected && !ui.needs_resync;
         let mut activity = if synchronized { ui.runtime.state } else { ConversationState::Idle };
-        let playback_allowed = synchronized && !matches!(
+        let playback_allowed = synchronized && !ui.runtime.speech_cancelled && !matches!(
             activity, ConversationState::Stopped | ConversationState::Failed | ConversationState::Interrupted | ConversationState::Listening,
         );
         let playing = playback_allowed && ui.runtime.playback.active;
@@ -39,9 +43,19 @@ impl PresentationState
             connected,
             synchronized,
             activity,
-            emotion: if expressive { ui.runtime.current_emotion.unwrap_or(Emotion::Neutral) } else { Emotion::Neutral },
+            emotion: if playing { ui.runtime.playback.emotion.unwrap_or(Emotion::Neutral) }
+                else if expressive { ui.runtime.current_emotion.unwrap_or(Emotion::Neutral) }
+                else { Emotion::Neutral },
             mouth_level: Some(if playing { ui.runtime.playback.mouth_level.min(1000) } else { 0 }),
         }
+    }
+
+    pub fn subtitle(ui: &UiState) -> Option<&str>
+    {
+        let presentation = Self::from_ui(ui);
+        (presentation.connected && presentation.synchronized && !ui.runtime.speech_cancelled
+            && presentation.activity == ConversationState::Speaking && ui.runtime.playback.active
+            && !ui.runtime.playback.text.is_empty()).then_some(ui.runtime.playback.text.as_str())
     }
 
     pub fn label(self) -> &'static str
@@ -149,6 +163,7 @@ mod tests
         let playback = SpeechPlaybackSnapshot {
             turn_id: Some(turn_id), active: true, mouth_level: 750,
             position_ms: 40, duration_ms: 1000,
+            ..Default::default()
         };
         for (index, event) in [
             SystemEvent::TurnStarted { turn_id, user_text: "hello".to_owned() },

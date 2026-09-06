@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod speech;
+
 use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
@@ -27,6 +29,10 @@ pub struct RuntimeSnapshot
     pub last_sequence: u64,
     #[serde(default)]
     pub playback: ai_ex_domain::SpeechPlaybackSnapshot,
+    #[serde(default)]
+    pub speech_turn: Option<TurnId>,
+    #[serde(default)]
+    pub speech_cancelled: bool,
 }
 
 impl Default for RuntimeSnapshot
@@ -45,6 +51,8 @@ impl Default for RuntimeSnapshot
             last_fault: None,
             last_sequence: 0,
             playback: ai_ex_domain::SpeechPlaybackSnapshot::default(),
+            speech_turn: None,
+            speech_cancelled: false,
         }
     }
 }
@@ -119,6 +127,7 @@ impl EventHub
         self.snapshot.send_modify(|snapshot|
         {
             snapshot.last_sequence = sequence;
+            snapshot.observe_speech_event(event);
             match event
             {
                 SystemEvent::TurnStarted { turn_id, .. } =>
@@ -127,7 +136,7 @@ impl EventHub
                     snapshot.turns_started += 1;
                 }
                 SystemEvent::SentenceReady { .. } => snapshot.sentences_ready += 1,
-                SystemEvent::SpeechPlayback { playback } => snapshot.playback = *playback,
+                SystemEvent::SpeechPlayback { .. } | SystemEvent::SpeechProgress { .. } | SystemEvent::SpeechCancelled => {},
                 SystemEvent::EmotionChanged { emotion, .. } =>
                 {
                     snapshot.current_emotion = Some(*emotion);

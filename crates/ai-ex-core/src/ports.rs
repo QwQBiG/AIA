@@ -24,6 +24,10 @@ pub trait LanguageModelPort: Send
 pub trait SpeechPort: Send
 {
     async fn enqueue(&mut self, turn_id: TurnId, sentence: String) -> Result<(), AppError>;
+    async fn enqueue_expressive(&mut self, turn_id: TurnId, sentence: String, _emotion: Emotion) -> Result<(), AppError>
+    {
+        self.enqueue(turn_id, sentence).await
+    }
     async fn interrupt(&mut self) -> Result<(), AppError>;
 }
 

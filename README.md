@@ -2,6 +2,8 @@
 
 AIex 是一个 Windows 优先、Rust-first 的本地数字人项目。当前主线提供流式对话、持久记忆、语音调度、内置 2D 外形与 VTube Studio 适配；长期目标是让人格、声音、外形、行为与场景可以自由组合。
 
+当前阶段版本为 **0.2.0-alpha.1：数字伙伴工作室 Alpha**。角色收藏、独立记忆、原生多外形、可携带的场景组合和启动恢复已连成一条使用路径；原生语音提供逐句字幕、情绪与能量口型。开始使用和验收边界见 [版本说明](docs/releases/0.2.0-alpha.1.md)。
+
 后续实施以 [数字人演进计划](docs/DIGITAL_HUMAN_ROADMAP.md) 为主线：先完善稳定运行与角色工作室，再推进跨载体表达、连续记忆、主动行为及可分享的组合包。网页、悬浮伙伴和 VRM 3D 均纳入计划，具体实现状态与验收条件见文档。
 
 旧 Python 实现位于 `main.py` 与 `src/`，当前仅作为行为参考；不再向旧实现增加新功能。新功能、修复和性能优化全部进入 Cargo workspace。
@@ -62,7 +64,7 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
 
 桌面默认显示新手控制台；点击右上角“开发者诊断”可展开结构化事件，启动它的终端仍保留服务 stdout/stderr，适合定位连接、模型和事件问题。
 
-要求：Rust 1.85 或更高版本；推荐使用仓库已验证的 Rust 1.96。
+本版本开发与 CI 基线为 Rust 1.96，两个 Cargo 清单采用相同要求。
 
 ```powershell
 cargo test --workspace
