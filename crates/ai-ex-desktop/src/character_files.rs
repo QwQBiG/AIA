@@ -17,8 +17,8 @@ pub enum FileAction
 
 enum FileResult
 {
-    Imported(CharacterManifest),
-    Exported(PathBuf),
+    Imported(PathBuf, Box<CharacterManifest>),
+    Exported(PathBuf, Box<CharacterManifest>),
 }
 
 #[derive(Default)]
@@ -28,13 +28,16 @@ pub struct CharacterFiles
     pub author: String,
     pub license: String,
     pub feedback: Option<String>,
+    pub draft_source: String,
+    pub baseline: Option<CharacterManifest>,
     pending: Option<Receiver<Result<FileResult, AppError>>>,
 }
 
 impl CharacterFiles
 {
-    pub fn show(&mut self, ui: &mut egui::Ui, persona: &ai_ex_domain::PersonaSnapshot)
+    pub fn show(&mut self, ui: &mut egui::Ui, persona: &ai_ex_domain::PersonaSnapshot) -> bool
     {
+        let mut changed = false;
         ui.collapsing("角色包（导入 / 导出）", |ui|
         {
             ui.weak("保存人格设定以便复用；外形、服务凭据和私人记忆分别管理。");
@@ -44,12 +47,12 @@ impl CharacterFiles
                 ui.horizontal(|ui|
                 {
                     ui.label("作者");
-                    ui.text_edit_singleline(&mut self.author);
+                    changed |= ui.text_edit_singleline(&mut self.author).changed();
                 });
                 ui.horizontal(|ui|
                 {
                     ui.label("使用条件");
-                    ui.text_edit_singleline(&mut self.license);
+                    changed |= ui.text_edit_singleline(&mut self.license).changed();
                 });
                 ui.horizontal(|ui|
                 {
@@ -77,6 +80,7 @@ impl CharacterFiles
                 ui.label(feedback);
             }
         });
+        changed
     }
 
     pub fn is_loading(&self) -> bool
@@ -96,8 +100,13 @@ impl CharacterFiles
         {
             let result = match action
             {
-                FileAction::Import(path) => CharacterManifest::load(&path).map(FileResult::Imported),
-                FileAction::Export(path, manifest) => manifest.save_new(&path).map(FileResult::Exported),
+                FileAction::Import(path) => CharacterManifest::load(&path).map(|manifest|
+                {
+                    let path = if path.is_dir() { path.join("character.toml") } else { path };
+                    FileResult::Imported(std::path::absolute(&path).unwrap_or(path), Box::new(manifest))
+                }),
+                FileAction::Export(path, manifest) => manifest.save_new(&path).map(|path|
+                    FileResult::Exported(std::path::absolute(&path).unwrap_or(path), manifest)),
             };
             let _ignored = sender.send(result);
             context.request_repaint();
@@ -124,15 +133,19 @@ impl CharacterFiles
         self.pending = None;
         match result
         {
-            Ok(FileResult::Imported(manifest)) =>
+            Ok(FileResult::Imported(path, manifest)) =>
             {
+                self.draft_source = format!("角色包：{}", path.display());
+                self.baseline = Some((*manifest).clone());
                 self.author = manifest.author.clone();
                 self.license = manifest.license.clone();
                 self.feedback = Some("角色包已载入草稿；预览并应用后才会切换当前角色。".to_owned());
-                Some(manifest)
+                Some(*manifest)
             }
-            Ok(FileResult::Exported(path)) =>
+            Ok(FileResult::Exported(path, manifest)) =>
             {
+                self.draft_source = format!("角色包：{}", path.display());
+                self.baseline = Some(*manifest);
                 self.feedback = Some(format!("角色草稿已导出：{}", path.display()));
                 None
             }

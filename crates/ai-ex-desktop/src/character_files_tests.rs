@@ -32,9 +32,14 @@ fn background_character_files_preserve_metadata_on_failure_and_refuse_overwrite(
     assert_eq!(CharacterManifest::load(&path).unwrap(), manifest);
     files.begin(&context, FileAction::Import(path.clone()));
     assert_eq!(finish(&mut files, &context).unwrap(), manifest);
+    let source = files.draft_source.clone();
+    assert!(source.contains("character.toml"));
+    assert_eq!(files.baseline.as_ref().unwrap(), &manifest);
     files.begin(&context, FileAction::Import(directory.join("missing.toml")));
     assert!(finish(&mut files, &context).is_none());
     assert_eq!(files.author, "author");
+    assert_eq!(files.draft_source, source);
+    assert_eq!(files.baseline.as_ref().unwrap(), &manifest);
     assert!(files.feedback.as_deref().unwrap().contains("失败"));
     manifest.persona.name = "must not overwrite".to_owned();
     files.begin(&context, FileAction::Export(path.clone(), Box::new(manifest)));

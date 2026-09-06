@@ -108,6 +108,7 @@ impl DesktopApp
         {
             if scene.manifest.character.persona == *profile
             {
+                self.active_source = format!("场景：{}", scene.manifest.name);
                 self.appearance = scene.appearance;
                 self.active_character = scene.manifest.character;
                 self.character_files.author = self.active_character.author.clone();
@@ -118,6 +119,7 @@ impl DesktopApp
             }
             else
             {
+                self.active_source = "服务应答（与请求场景不一致）".to_owned();
                 self.active_character = CharacterManifest::from_persona(profile.clone());
                 self.scene_files.feedback = Some("服务返回的角色与场景不一致，保留原外形；请重新载入场景。".to_owned());
             }
@@ -127,6 +129,12 @@ impl DesktopApp
             self.active_character = CharacterManifest::from_persona(profile.clone());
             self.active_character.author = self.character_files.author.clone();
             self.active_character.license = self.character_files.license.clone();
+            self.active_source = if self.character_files.draft_source.is_empty() { "手动角色设置".to_owned() } else { self.character_files.draft_source.clone() };
+            if self.character_files.baseline.as_ref().is_some_and(|baseline| baseline != &self.active_character)
+                && !self.active_source.ends_with("（含本次编辑）")
+            {
+                self.active_source.push_str("（含本次编辑）");
+            }
         }
     }
 

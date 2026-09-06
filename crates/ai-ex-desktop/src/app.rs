@@ -26,6 +26,13 @@ mod resume;
 #[path = "resume_app_tests.rs"]
 mod resume_tests;
 
+#[path = "library_app.rs"]
+mod library;
+
+#[cfg(test)]
+#[path = "library_app_tests.rs"]
+mod library_tests;
+
 pub struct DesktopApp
 {
     state: UiState,
@@ -54,6 +61,8 @@ pub struct DesktopApp
     applying_scene: Option<scene::PendingScene>,
     resume: crate::scene_resume::SceneResume,
     persona_synced: bool,
+    character_library: crate::character_library::CharacterLibrary,
+    active_source: String,
 }
 
 impl DesktopApp
@@ -95,6 +104,8 @@ impl DesktopApp
             applying_scene: None,
             resume: Default::default(),
             persona_synced: false,
+            character_library: crate::character_library::CharacterLibrary::load(storage),
+            active_source: String::new(),
         }
     }
 
@@ -165,7 +176,9 @@ impl DesktopApp
                         if self.active_persona != profile
                         {
                             self.active_character = ai_ex_config::character::CharacterManifest::from_persona(profile.clone());
+                            self.active_source = "服务同步（未提供包来源）".to_owned();
                         }
+                        if self.active_source.is_empty() { self.active_source = "服务同步（未提供包来源）".to_owned(); }
                         self.active_persona = profile.clone();
                     }
                     if !self.persona_apply_pending && !self.persona_dirty && self.pending_persona.is_none() && !self.character_files.is_loading()
@@ -174,6 +187,7 @@ impl DesktopApp
                         self.persona = profile;
                         self.persona_dirty = false;
                         self.persona_apply_pending = false;
+                        self.sync_character_draft_metadata();
                     }
                     else
                     {
@@ -189,6 +203,7 @@ impl DesktopApp
                     self.persona = profile;
                     self.persona_dirty = false;
                     self.persona_apply_pending = false;
+                    self.sync_character_draft_metadata();
                 }
                 WorkerEvent::PersonaApplyFailed(error) =>
                 {
@@ -412,11 +427,12 @@ impl DesktopApp
         let mut request_confirm = false;
         ui.collapsing("角色设置（新手）", |ui|
         {
+            self.show_character_library(ui);
             ui.add_enabled_ui(!self.persona_apply_pending && !self.confirm_persona, |ui|
             {
-                self.character_files.show(ui, &self.persona);
+                if self.character_files.show(ui, &self.persona) { self.persona_dirty = true; }
             });
-            ui.add_enabled_ui(!self.character_files.is_loading() && !self.persona_apply_pending, |ui|
+            ui.add_enabled_ui(!self.character_files.is_loading() && !self.persona_apply_pending && !self.confirm_persona, |ui|
             {
             ui.label("修改角色后必须预览并确认；活动回复期间服务会拒绝切换。开发者可同时观察事件日志。");
             ui.horizontal(|ui|
@@ -958,9 +974,10 @@ impl eframe::App for DesktopApp
         self.show_composer(ui);
         self.show_persona_confirmation(ui.ctx());
         self.show_emergency_confirmation(ui.ctx());
-        if self.resume.dirty && let Some(storage) = frame.storage_mut()
+        if (self.resume.dirty || self.character_library.dirty) && let Some(storage) = frame.storage_mut()
         {
             self.save_resume(storage);
+            self.save_library(storage);
             storage.flush();
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -970,6 +987,7 @@ impl eframe::App for DesktopApp
     {
         self.appearance.save(storage);
         self.save_resume(storage);
+        self.save_library(storage);
     }
 }
 

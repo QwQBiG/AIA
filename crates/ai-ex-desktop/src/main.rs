@@ -2,6 +2,7 @@
 
 mod app;
 mod character_files;
+mod character_library;
 mod scene_files;
 mod scene_resume;
 mod appearance;
