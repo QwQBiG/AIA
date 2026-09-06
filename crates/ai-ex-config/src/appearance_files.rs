@@ -7,6 +7,7 @@ use ai_ex_domain::AppError;
 
 use super::AppearanceManifest;
 
+#[derive(Clone)]
 pub struct LoadedAppearance
 {
     pub source: PathBuf,

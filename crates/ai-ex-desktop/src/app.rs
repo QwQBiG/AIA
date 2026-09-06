@@ -12,6 +12,13 @@ use crate::appearance::AppearancePanel;
 #[path = "character_app_tests.rs"]
 mod character_tests;
 
+#[path = "scene_app.rs"]
+mod scene;
+
+#[cfg(test)]
+#[path = "scene_app_tests.rs"]
+mod scene_tests;
+
 pub struct DesktopApp
 {
     state: UiState,
@@ -34,6 +41,10 @@ pub struct DesktopApp
     stage: StageSnapshot,
     appearance: AppearancePanel,
     character_files: crate::character_files::CharacterFiles,
+    active_character: ai_ex_config::character::CharacterManifest,
+    scene_files: crate::scene_files::SceneFiles,
+    pending_scene: Option<scene::PendingScene>,
+    applying_scene: Option<scene::PendingScene>,
 }
 
 impl DesktopApp
@@ -67,6 +78,10 @@ impl DesktopApp
             stage: StageSnapshot::default(),
             appearance: AppearancePanel::load(storage),
             character_files: Default::default(),
+            active_character: ai_ex_config::character::CharacterManifest::from_persona(Default::default()),
+            scene_files: Default::default(),
+            pending_scene: None,
+            applying_scene: None,
         }
     }
 
@@ -132,6 +147,10 @@ impl DesktopApp
                 {
                     if !self.persona_apply_pending
                     {
+                        if self.active_persona != profile
+                        {
+                            self.active_character = ai_ex_config::character::CharacterManifest::from_persona(profile.clone());
+                        }
                         self.active_persona = profile.clone();
                     }
                     if !self.persona_apply_pending && !self.persona_dirty && self.pending_persona.is_none() && !self.character_files.is_loading()
@@ -148,6 +167,7 @@ impl DesktopApp
                 }
                 WorkerEvent::PersonaApplied(profile) =>
                 {
+                    self.finish_scene(&profile);
                     self.active_persona = profile.clone();
                     self.taboos_editor = profile.taboos.join("\n");
                     self.persona = profile;
@@ -156,6 +176,10 @@ impl DesktopApp
                 }
                 WorkerEvent::PersonaApplyFailed(error) =>
                 {
+                    if self.applying_scene.take().is_some()
+                    {
+                        self.scene_files.feedback = Some("场景未获服务确认，外形保持原样；请检查连接与当前角色后重试。".to_owned());
+                    }
                     self.persona_apply_pending = false;
                     self.last_error = Some(error);
                 }
@@ -771,6 +795,7 @@ impl DesktopApp
             {
                 ui.heading(format!("{} @ revision {}", profile.name, profile.revision));
                 ui.label(format!("档案：{}", profile.profile_id));
+                self.show_scene_confirmation(ui);
                 ui.label("相同档案 ID 保留经历；换档案会切换记忆范围并清空短期对话。活动回复期间会拒绝应用。");
                 egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui|
                 {
@@ -790,30 +815,43 @@ impl DesktopApp
             });
         if apply
         {
-            if self.state.connection != ConnectionState::Connected
-            {
-                self.last_error = Some("服务未连接，无法应用角色。".to_owned());
-            }
-            else
-            {
-                self.persona_apply_pending = true;
-                if self.worker.commands.send(WorkerCommand::SetPersona(profile)).is_err()
-                {
-                    self.persona_apply_pending = false;
-                    self.last_error = Some("桌面网络工作线程已停止。".to_owned());
-                    return;
-                }
-                self.push_log("persona apply requested");
-                self.confirm_persona = false;
-                self.pending_persona = None;
-            }
+            self.apply_pending_persona(profile);
         }
         else if cancel
         {
-            self.confirm_persona = false;
-            self.pending_persona = None;
-            self.push_log("persona draft discarded");
+            self.cancel_pending_persona();
         }
+    }
+
+    fn apply_pending_persona(&mut self, profile: PersonaSnapshot)
+    {
+        if self.state.connection != ConnectionState::Connected
+        {
+            self.last_error = Some("服务未连接，无法应用角色。".to_owned());
+            return;
+        }
+        self.persona_apply_pending = true;
+        if self.worker.commands.send(WorkerCommand::SetPersona(profile)).is_err()
+        {
+            self.persona_apply_pending = false;
+            self.last_error = Some("桌面网络工作线程已停止。".to_owned());
+            return;
+        }
+        self.push_log("persona apply requested");
+        self.applying_scene = self.pending_scene.take();
+        self.confirm_persona = false;
+        self.pending_persona = None;
+    }
+
+    fn cancel_pending_persona(&mut self)
+    {
+        self.confirm_persona = false;
+        self.pending_persona = None;
+        if self.pending_scene.take().is_some()
+        {
+            self.scene_files.feedback = Some("已取消场景切换，当前组合与草稿保留。".to_owned());
+        }
+        self.push_log("persona draft discarded");
     }
 
     fn show_emergency_confirmation(&mut self, context: &egui::Context)
@@ -863,6 +901,7 @@ impl eframe::App for DesktopApp
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame)
     {
         self.drain_events();
+        self.poll_scene(ui.ctx());
         self.show_header(ui);
         let settings_height = (ui.available_height() * 0.5).clamp(120.0, 360.0);
         egui::ScrollArea::vertical()
@@ -875,10 +914,14 @@ impl eframe::App for DesktopApp
                     .show(ui, |ui|
                     {
                         let state = ai_ex_ui_model::PresentationState::from_ui(&self.state);
-                        self.appearance.show(ui, state, &self.active_persona.name, 150.0);
+                        ui.add_enabled_ui(!self.scene_busy(), |ui|
+                        {
+                            self.appearance.show(ui, state, &self.active_persona.name, 150.0);
+                        });
                     });
                 self.show_beginner_panel(ui);
-                self.show_persona_panel(ui);
+                ui.add_enabled_ui(!self.scene_busy(), |ui| self.show_persona_panel(ui));
+                self.show_scene_panel(ui);
                 self.show_health(ui);
                 self.show_model_panel(ui);
                 self.show_policy_panel(ui);

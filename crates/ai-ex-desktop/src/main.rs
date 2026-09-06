@@ -2,6 +2,7 @@
 
 mod app;
 mod character_files;
+mod scene_files;
 mod appearance;
 mod appearance_import;
 mod image_appearance;

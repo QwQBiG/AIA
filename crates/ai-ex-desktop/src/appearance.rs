@@ -4,6 +4,9 @@ use eframe::egui::{self, Color32};
 #[path = "appearance_paint.rs"]
 mod paint;
 
+#[path = "appearance_scene.rs"]
+mod scene;
+
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod tests;

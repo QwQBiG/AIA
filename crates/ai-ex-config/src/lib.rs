@@ -2,6 +2,7 @@
 
 pub mod appearance;
 pub mod character;
+pub mod scene;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;

@@ -22,7 +22,11 @@ impl DecodedAppearance
 {
     pub fn load(path: &Path) -> Result<Self, AppError>
     {
-        let loaded = LoadedAppearance::load(path)?;
+        Self::from_loaded(LoadedAppearance::load(path)?)
+    }
+
+    pub fn from_loaded(loaded: LoadedAppearance) -> Result<Self, AppError>
+    {
         let mut images = BTreeMap::new();
         let mut total_pixels = 0_u64;
         for (key, bytes) in loaded.images
