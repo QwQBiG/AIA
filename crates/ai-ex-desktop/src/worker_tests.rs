@@ -4,6 +4,39 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
 #[tokio::test]
+async fn persona_refresh_discards_responses_that_overlap_an_apply()
+{
+    for changed in [false, true]
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = ControlClient::new(&listener.local_addr().unwrap().to_string(), "x".repeat(32), 4096).unwrap();
+        let epoch = std::sync::Arc::new(AtomicU64::new(0));
+        let server_epoch = epoch.clone();
+        let server = tokio::spawn(async move
+        {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(stream);
+            let mut line = String::new();
+            stream.read_line(&mut line).await.unwrap();
+            let request: ControlRequest = serde_json::from_str(&line).unwrap();
+            if changed
+            {
+                server_epoch.fetch_add(2, Ordering::AcqRel);
+            }
+            let response = ControlResponse::Success {
+                request_id: request.request_id, payload: ControlPayload::Persona(PersonaSnapshot::default()),
+            };
+            stream.get_mut().write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes()).await.unwrap();
+        });
+        let result = fetch_persona_current(&client, &epoch).await.unwrap();
+        assert_eq!(result.is_none(), changed);
+        server.await.unwrap();
+        epoch.store(3, Ordering::Release);
+        assert!(fetch_persona_current(&client, &epoch).await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
 async fn stalled_poll_does_not_block_interrupt_stop_or_worker_exit()
 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1,5 +1,6 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ai_ex_control::{ControlClient, ControlCommand, ControlPayload};
 use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot, StageSnapshot};
@@ -34,6 +35,8 @@ pub enum WorkerEvent
     Health(Vec<ComponentHealth>),
     Stage(StageSnapshot),
     Persona(PersonaSnapshot),
+    PersonaApplied(PersonaSnapshot),
+    PersonaApplyFailed(String),
     Events(Vec<SequencedEvent>),
     Log(String),
     Failure(String),
@@ -84,10 +87,11 @@ async fn run_worker(
 {
     // Read-only polling must not hold up user commands. Dropping either future
     // also cancels pending network I/O when the desktop channels close.
+    let persona_epoch = AtomicU64::new(0);
     tokio::select!
     {
-        _ = run_commands(&client, commands, &events) => {}
-        _ = run_polling(client.clone(), events.clone()) => {}
+        _ = run_commands(&client, commands, &events, &persona_epoch) => {}
+        _ = run_polling(client.clone(), events.clone(), &persona_epoch) => {}
     }
 }
 
@@ -95,15 +99,26 @@ async fn run_commands(
     client: &ControlClient,
     mut commands: UnboundedReceiver<WorkerCommand>,
     events: &Sender<WorkerEvent>,
+    persona_epoch: &AtomicU64,
 )
 {
     while let Some(command) = commands.recv().await
     {
-        match send_command(client, command).await
+        let persona_command = matches!(&command, WorkerCommand::SetPersona(_));
+        if persona_command
+        {
+            persona_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        let result = send_command(client, command).await;
+        if persona_command
+        {
+            persona_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        match result
         {
             Ok(Some(profile)) =>
             {
-                if !emit(events, WorkerEvent::Persona(profile))
+                if !emit(events, WorkerEvent::PersonaApplied(profile))
                     || !emit(events, WorkerEvent::Log("persona apply accepted".to_owned()))
                 {
                     return;
@@ -118,6 +133,10 @@ async fn run_commands(
             }
             Err(error) =>
             {
+                if persona_command && !emit(events, WorkerEvent::PersonaApplyFailed(error.to_string()))
+                {
+                    return;
+                }
                 if !emit(events, WorkerEvent::Failure(error.to_string()))
                 {
                     return;
@@ -130,6 +149,7 @@ async fn run_commands(
 async fn run_polling(
     client: ControlClient,
     events: Sender<WorkerEvent>,
+    persona_epoch: &AtomicU64,
 )
 {
     let mut interval = tokio::time::interval(Duration::from_millis(50));
@@ -176,15 +196,16 @@ async fn run_polling(
                             {
                                 return;
                             }
-                            match fetch_persona(&client).await
+                            match fetch_persona_current(&client, persona_epoch).await
                             {
-                                Ok(profile) =>
+                                Ok(Some(profile)) =>
                                 {
                                     if !emit(&events, WorkerEvent::Persona(profile))
                                     {
                                         return;
                                     }
                                 }
+                                Ok(None) => {}
                                 Err(error) =>
                                 {
                                     if !emit(&events, WorkerEvent::Log(format!("persona refresh failed: {error}")))
@@ -283,15 +304,16 @@ async fn run_polling(
                             }
                         }
                     }
-                    match fetch_persona(&client).await
+                    match fetch_persona_current(&client, persona_epoch).await
                     {
-                        Ok(profile) =>
+                        Ok(Some(profile)) =>
                         {
                             if !emit(&events, WorkerEvent::Persona(profile))
                             {
                                 return;
                             }
                         }
+                        Ok(None) => {}
                         Err(error) =>
                         {
                             if !emit(&events, WorkerEvent::Log(format!("persona refresh failed: {error}")))
@@ -356,6 +378,17 @@ async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppErr
         ControlPayload::Persona(profile) => Ok(profile),
         _ => Err(AppError::protocol("persona returned an unexpected payload")),
     }
+}
+
+async fn fetch_persona_current(client: &ControlClient, epoch: &AtomicU64) -> Result<Option<PersonaSnapshot>, AppError>
+{
+    let before = epoch.load(Ordering::Acquire);
+    if before % 2 != 0
+    {
+        return Ok(None);
+    }
+    let profile = fetch_persona(client).await?;
+    Ok((epoch.load(Ordering::Acquire) == before).then_some(profile))
 }
 
 async fn fetch_stage(client: &ControlClient) -> Result<StageSnapshot, AppError>

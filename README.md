@@ -36,6 +36,8 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --preview
 
 现在也可选择“图片角色”，导入自己的 PNG/JPEG 立绘与表情包，跟随倾听、思考、声音口型和情绪切换。示例生成器、清单格式与操作说明见 [图片外形包](docs/APPEARANCE_PACKS.md)。
 
+人格设定也可独立保存为 [角色包](docs/CHARACTER_PACKS.md)。桌面角色设置支持导入草稿、预览应用和导出新文件；仓库提供陪伴与主持两个示例角色。外形选择与角色身份分别管理，相同角色 ID 复用其记忆。
+
 ### 小白用户：双击打开可视化向导
 
 在 Windows 资源管理器中双击仓库根目录的 `AIex-Desktop.cmd` 即可打开桌面端；如果已经构建了 `crates/ai-ex-desktop/target/release`/`debug` 二进制，它会直接启动，否则才回退到 Cargo 开发启动。首次打开会进入可视化设置向导，不需要先手写 TOML 或控制令牌。

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod appearance;
+pub mod character;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;

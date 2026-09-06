@@ -8,6 +8,10 @@ use eframe::egui;
 use crate::worker::{WorkerCommand, WorkerEvent, WorkerHandle};
 use crate::appearance::AppearancePanel;
 
+#[cfg(test)]
+#[path = "character_app_tests.rs"]
+mod character_tests;
+
 pub struct DesktopApp
 {
     state: UiState,
@@ -21,6 +25,7 @@ pub struct DesktopApp
     log_filter: String,
     export_feedback: Option<String>,
     persona: PersonaSnapshot,
+    active_persona: PersonaSnapshot,
     persona_dirty: bool,
     pending_persona: Option<PersonaSnapshot>,
     confirm_persona: bool,
@@ -28,6 +33,7 @@ pub struct DesktopApp
     taboos_editor: String,
     stage: StageSnapshot,
     appearance: AppearancePanel,
+    character_files: crate::character_files::CharacterFiles,
 }
 
 impl DesktopApp
@@ -35,6 +41,11 @@ impl DesktopApp
     pub fn new(context: &eframe::CreationContext<'_>, worker: WorkerHandle, developer_mode: bool) -> Self
     {
         configure_appearance(&context.egui_ctx);
+        Self::with_storage(worker, developer_mode, context.storage)
+    }
+
+    fn with_storage(worker: WorkerHandle, developer_mode: bool, storage: Option<&dyn eframe::Storage>) -> Self
+    {
         Self {
             state: UiState::new(200).expect("valid UI capacity"),
             worker,
@@ -47,13 +58,15 @@ impl DesktopApp
             log_filter: String::new(),
             export_feedback: None,
             persona: PersonaSnapshot::default(),
+            active_persona: PersonaSnapshot::default(),
             persona_dirty: false,
             pending_persona: None,
             confirm_persona: false,
             persona_apply_pending: false,
             taboos_editor: String::new(),
             stage: StageSnapshot::default(),
-            appearance: AppearancePanel::load(context.storage),
+            appearance: AppearancePanel::load(storage),
+            character_files: Default::default(),
         }
     }
 
@@ -117,7 +130,11 @@ impl DesktopApp
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
                 WorkerEvent::Persona(profile) =>
                 {
-                    if self.persona_apply_pending || (!self.persona_dirty && self.pending_persona.is_none())
+                    if !self.persona_apply_pending
+                    {
+                        self.active_persona = profile.clone();
+                    }
+                    if !self.persona_apply_pending && !self.persona_dirty && self.pending_persona.is_none() && !self.character_files.is_loading()
                     {
                         self.taboos_editor = profile.taboos.join("\n");
                         self.persona = profile;
@@ -128,6 +145,19 @@ impl DesktopApp
                     {
                         self.push_log(format!("persona update received while editing: {}@{}", profile.profile_id, profile.revision));
                     }
+                }
+                WorkerEvent::PersonaApplied(profile) =>
+                {
+                    self.active_persona = profile.clone();
+                    self.taboos_editor = profile.taboos.join("\n");
+                    self.persona = profile;
+                    self.persona_dirty = false;
+                    self.persona_apply_pending = false;
+                }
+                WorkerEvent::PersonaApplyFailed(error) =>
+                {
+                    self.persona_apply_pending = false;
+                    self.last_error = Some(error);
                 }
                 WorkerEvent::Stage(snapshot) =>
                 {
@@ -201,10 +231,6 @@ impl DesktopApp
                 }
                 WorkerEvent::Failure(error) =>
                 {
-                    if self.persona_apply_pending
-                    {
-                        self.persona_apply_pending = false;
-                    }
                     self.push_log(format!("failure: {error}"));
                     self.last_error = Some(error);
                 }
@@ -327,10 +353,24 @@ impl DesktopApp
 
     fn show_persona_panel(&mut self, ui: &mut egui::Ui)
     {
+        if let Some(manifest) = self.character_files.poll(ui.ctx())
+        {
+            self.persona = manifest.persona;
+            self.taboos_editor = self.persona.taboos.join("\n");
+            self.persona_dirty = true;
+            self.pending_persona = None;
+            self.confirm_persona = false;
+        }
         let mut changed = false;
         let mut request_confirm = false;
         ui.collapsing("角色设置（新手）", |ui|
         {
+            ui.add_enabled_ui(!self.persona_apply_pending && !self.confirm_persona, |ui|
+            {
+                self.character_files.show(ui, &self.persona);
+            });
+            ui.add_enabled_ui(!self.character_files.is_loading() && !self.persona_apply_pending, |ui|
+            {
             ui.label("修改角色后必须预览并确认；活动回复期间服务会拒绝切换。开发者可同时观察事件日志。");
             ui.horizontal(|ui|
             {
@@ -389,6 +429,7 @@ impl DesktopApp
             {
                 ui.weak("正在等待服务确认角色切换……");
             }
+            });
         });
         if changed
         {
@@ -482,9 +523,9 @@ impl DesktopApp
         {
             ui.label(format!(
                 "当前人格：{} @ revision {} · 直播模式：{}",
-                self.persona.name,
-                self.persona.revision,
-                self.persona.live_mode,
+                self.active_persona.name,
+                self.active_persona.revision,
+                self.active_persona.live_mode,
             ));
             if let Some(memory) = self.health.iter().find(|item| item.component == "memory")
             {
@@ -730,7 +771,11 @@ impl DesktopApp
             {
                 ui.heading(format!("{} @ revision {}", profile.name, profile.revision));
                 ui.label(format!("档案：{}", profile.profile_id));
-                ui.label("确认后会替换后续回合的人格提示词；当前活动回合仍保持原人格。");
+                ui.label("相同档案 ID 保留经历；换档案会切换记忆范围并清空短期对话。活动回复期间会拒绝应用。");
+                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui|
+                {
+                    ui.label(profile.compiled_system_prompt());
+                });
                 ui.horizontal(|ui|
                 {
                     if ui.button("取消").clicked()
@@ -752,7 +797,12 @@ impl DesktopApp
             else
             {
                 self.persona_apply_pending = true;
-                self.send(WorkerCommand::SetPersona(profile));
+                if self.worker.commands.send(WorkerCommand::SetPersona(profile)).is_err()
+                {
+                    self.persona_apply_pending = false;
+                    self.last_error = Some("桌面网络工作线程已停止。".to_owned());
+                    return;
+                }
                 self.push_log("persona apply requested");
                 self.confirm_persona = false;
                 self.pending_persona = None;
@@ -825,7 +875,7 @@ impl eframe::App for DesktopApp
                     .show(ui, |ui|
                     {
                         let state = ai_ex_ui_model::PresentationState::from_ui(&self.state);
-                        self.appearance.show(ui, state, &self.persona.name, 150.0);
+                        self.appearance.show(ui, state, &self.active_persona.name, 150.0);
                     });
                 self.show_beginner_panel(ui);
                 self.show_persona_panel(ui);

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod character_files;
 mod appearance;
 mod appearance_import;
 mod image_appearance;
