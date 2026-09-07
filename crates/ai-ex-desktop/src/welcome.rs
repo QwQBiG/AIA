@@ -18,6 +18,10 @@ pub fn show_error(message: String) -> Result<(), AppError> {
     window(false, Some(message)).map(|_| ())
 }
 
+pub fn recover(message: String) -> Result<Option<Choice>, AppError> {
+    window(false, Some(message))
+}
+
 fn window(configured: bool, error: Option<String>) -> Result<Option<Choice>, AppError> {
     let choice = Arc::new(Mutex::new(None));
     let result = choice.clone();
@@ -59,19 +63,21 @@ impl Welcome {
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, "暂时无法启动");
             ui.label(error);
-            ui.label("完整解压程序包后再运行。连接配置有误时，可重新打开程序，选择“连接设置”。");
+            ui.label("连接信息有误时可修改设置再试，也可以先离线体验人物。若提示文件缺失或损坏，请按错误说明修复，或在新目录完整解压程序包。");
             if ui.button("复制错误信息").clicked() {
                 ui.ctx().copy_text(error.clone());
             }
+            self.button(ui, "连接设置", Choice::Setup);
+            self.button(ui, "先体验外形", Choice::Preview);
             if ui.button("关闭").clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
             return;
         }
-        ui.label("先选一种使用方式，之后可以随时重新打开程序切换。");
+        ui.label("先认识你的伙伴，再按自己的节奏连接模型、组装角色。");
         ui.add_space(18.0);
         self.button(ui, "先体验外形", Choice::Preview);
-        ui.label("无需账号或模型，立即体验伙伴、光球和自定义图片外形。");
+        ui.label("无需账号或模型，立即体验人物表情、配色和自定义图片外形。");
         ui.add_space(12.0);
         self.button(
             ui,

@@ -29,6 +29,9 @@ pub enum WorkerCommand {
 pub enum WorkerEvent {
     Connection(bool),
     Snapshot(RuntimeSnapshot),
+    HistoryGap(RuntimeSnapshot),
+    SubmitRejected { text: String, error: String },
+    SubmitUncertain { text: String, error: String },
     Health(Vec<ComponentHealth>),
     Stage(StageSnapshot),
     Persona(PersonaSnapshot),
@@ -87,11 +90,153 @@ async fn run_worker(
 
 async fn run_commands(
     client: &ControlClient,
-    mut commands: UnboundedReceiver<WorkerCommand>,
+    commands: UnboundedReceiver<WorkerCommand>,
     events: &Sender<WorkerEvent>,
     persona_epoch: &AtomicU64,
 ) {
+    let (regular, receiver) = tokio::sync::mpsc::channel(32);
+    let (urgent, priority) = tokio::sync::watch::channel(UrgentCommands::default());
+    let (completed, completion) = tokio::sync::watch::channel(0_u64);
+    let command_epoch = AtomicU64::new(0);
+    tokio::select! {
+        _ = route_commands(commands, regular, urgent, events, &command_epoch) => {}
+        _ = async {
+            tokio::join!(
+                execute_commands(client, receiver, events, persona_epoch, &command_epoch, completion),
+                execute_urgent(client, priority, events, completed),
+            );
+        } => {}
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct UrgentCommands {
+    interrupt: u64,
+    stop: u64,
+    epoch: u64,
+}
+
+struct QueuedCommand {
+    epoch: u64,
+    command: WorkerCommand,
+}
+
+fn reject_command(events: &Sender<WorkerEvent>, command: WorkerCommand, message: &str) -> bool {
+    let event = match command {
+        WorkerCommand::Submit(text) => WorkerEvent::SubmitRejected {
+            text,
+            error: message.to_owned(),
+        },
+        WorkerCommand::SetPersona(_) => WorkerEvent::PersonaApplyFailed(message.to_owned()),
+        _ => WorkerEvent::Failure(message.to_owned()),
+    };
+    emit(events, event)
+}
+
+async fn route_commands(
+    mut commands: UnboundedReceiver<WorkerCommand>,
+    regular: tokio::sync::mpsc::Sender<QueuedCommand>,
+    urgent: tokio::sync::watch::Sender<UrgentCommands>,
+    events: &Sender<WorkerEvent>,
+    command_epoch: &AtomicU64,
+) {
     while let Some(command) = commands.recv().await {
+        match command {
+            WorkerCommand::Interrupt => urgent.send_modify(|pending| {
+                pending.epoch = command_epoch.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+                pending.interrupt = pending.interrupt.wrapping_add(1);
+            }),
+            WorkerCommand::EmergencyStop => urgent.send_modify(|pending| {
+                pending.epoch = command_epoch.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+                pending.stop = pending.stop.wrapping_add(1);
+            }),
+            command => {
+                let queued = QueuedCommand {
+                    epoch: command_epoch.load(Ordering::Acquire),
+                    command,
+                };
+                if let Err(error) = regular.try_send(queued)
+                    && !reject_command(
+                        events,
+                        error.into_inner().command,
+                        "桌面操作队列已满或已停止，请稍后重试。",
+                    )
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+async fn execute_urgent(
+    client: &ControlClient,
+    mut priority: tokio::sync::watch::Receiver<UrgentCommands>,
+    events: &Sender<WorkerEvent>,
+    completed: tokio::sync::watch::Sender<u64>,
+) {
+    let mut handled = UrgentCommands::default();
+    while priority.changed().await.is_ok() {
+        let pending = *priority.borrow_and_update();
+        // Both intents are retained, while repeated clicks occupy no queue.
+        let commands = [
+            (pending.stop != handled.stop, WorkerCommand::EmergencyStop),
+            (
+                pending.interrupt != handled.interrupt,
+                WorkerCommand::Interrupt,
+            ),
+        ];
+        for (requested, command) in commands {
+            if requested {
+                let event = match send_command(client, command).await {
+                    Ok(_) => WorkerEvent::Log("control command sent".to_owned()),
+                    Err(error) => WorkerEvent::Failure(error.to_string()),
+                };
+                if !emit(events, event) {
+                    return;
+                }
+            }
+        }
+        handled = pending;
+        if completed.send(pending.epoch).is_err() {
+            return;
+        }
+    }
+}
+
+async fn execute_commands(
+    client: &ControlClient,
+    mut commands: tokio::sync::mpsc::Receiver<QueuedCommand>,
+    events: &Sender<WorkerEvent>,
+    persona_epoch: &AtomicU64,
+    command_epoch: &AtomicU64,
+    mut completion: tokio::sync::watch::Receiver<u64>,
+) {
+    while let Some(queued) = commands.recv().await {
+        // Preserve user ordering across the priority lane: new messages follow
+        // its acknowledgement, while obsolete waiting messages are returned.
+        while queued.epoch > *completion.borrow() {
+            if completion.changed().await.is_err() {
+                return;
+            }
+        }
+        if queued.epoch != command_epoch.load(Ordering::Acquire)
+            && matches!(&queued.command, WorkerCommand::Submit(_))
+        {
+            if !reject_command(
+                events,
+                queued.command,
+                "已取消打断前尚未发出的消息，文字已退回。",
+            ) {
+                return;
+            }
+            continue;
+        }
+        let command = queued.command;
+        let submitted_text = match &command {
+            WorkerCommand::Submit(text) => Some(text.clone()),
+            _ => None,
+        };
         let persona_command = matches!(&command, WorkerCommand::SetPersona(_));
         if persona_command {
             persona_epoch.fetch_add(1, Ordering::AcqRel);
@@ -117,6 +262,30 @@ async fn run_commands(
                 }
             }
             Err(error) => {
+                if let Some(text) = submitted_text {
+                    let definite = matches!(
+                        error.kind,
+                        ai_ex_domain::ErrorKind::Configuration
+                            | ai_ex_domain::ErrorKind::InvalidTransition
+                            | ai_ex_domain::ErrorKind::Safety
+                            | ai_ex_domain::ErrorKind::Unavailable
+                    );
+                    let event = if definite {
+                        WorkerEvent::SubmitRejected {
+                            text,
+                            error: error.to_string(),
+                        }
+                    } else {
+                        WorkerEvent::SubmitUncertain {
+                            text,
+                            error: error.to_string(),
+                        }
+                    };
+                    if !emit(events, event) {
+                        return;
+                    }
+                    continue;
+                }
                 if persona_command
                     && !emit(events, WorkerEvent::PersonaApplyFailed(error.to_string()))
                 {
@@ -138,7 +307,9 @@ async fn run_polling(
     let mut interval = tokio::time::interval(Duration::from_millis(50));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut connected = false;
+    let mut initialized = false;
     let mut cursor = 0;
+    let mut instance_id = None;
     let mut ticks = 0_u8;
     let mut failure_reported = false;
     loop {
@@ -168,15 +339,33 @@ async fn run_polling(
                                     continue;
                                 }
                             };
-                            cursor = snapshot.last_sequence;
-                            connected = true;
-                            failure_reported = false;
                             if !emit(&events, WorkerEvent::Connection(true))
-                                || !emit(&events, WorkerEvent::Snapshot(snapshot))
                                 || !emit(&events, WorkerEvent::Health(health))
                             {
                                 return;
                             }
+                            if !initialized {
+                                cursor = snapshot.last_sequence;
+                                instance_id = snapshot.instance_id;
+                                if !emit(&events, WorkerEvent::Snapshot(snapshot)) {
+                                    return;
+                                }
+                                initialized = true;
+                            } else {
+                                match synchronize_snapshot(&client, &events, &mut cursor, snapshot, &mut instance_id).await {
+                                    Ok(true) => {}
+                                    Ok(false) => return,
+                                    Err(error) => {
+                                        if !emit(&events, WorkerEvent::Connection(false))
+                                            || !emit(&events, WorkerEvent::Failure(error.to_string())) {
+                                            return;
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            connected = true;
+                            failure_reported = false;
                             match fetch_persona_current(&client, persona_epoch).await
                             {
                                 Ok(Some(profile)) =>
@@ -228,24 +417,14 @@ async fn run_polling(
                     }
                     continue;
                 }
-                match poll(&client, cursor).await
+                let polled = match poll(&client, cursor).await {
+                    Ok(items) => forward_events(&client, &events, &mut cursor, items, &mut instance_id).await,
+                    Err(error) => Err(error),
+                };
+                match polled
                 {
-                    Ok(items) =>
-                    {
-                        if let Some(last) = items.last()
-                        {
-                            cursor = last.sequence;
-                        }
-                        if !items.is_empty()
-                        {
-                            let count = items.len();
-                            if !emit(&events, WorkerEvent::Events(items))
-                                || !emit(&events, WorkerEvent::Log(format!("received {count} event(s)")))
-                            {
-                                return;
-                            }
-                        }
-                    }
+                    Ok(true) => {}
+                    Ok(false) => return,
                     Err(error) =>
                     {
                         connected = false;
@@ -260,10 +439,20 @@ async fn run_polling(
                 ticks = (ticks + 1) % HEALTH_REFRESH_TICKS;
                 if connected && ticks == 0
                 {
-                    if let Ok(snapshot) = fetch_snapshot(&client).await
-                        && !emit(&events, WorkerEvent::Snapshot(snapshot))
-                    {
-                        return;
+                    if let Ok(snapshot) = fetch_snapshot(&client).await {
+                        match synchronize_snapshot(&client, &events, &mut cursor, snapshot, &mut instance_id).await {
+                            Ok(true) => {}
+                            Ok(false) => return,
+                            Err(error) => {
+                                connected = false;
+                                failure_reported = true;
+                                if !emit(&events, WorkerEvent::Connection(false))
+                                    || !emit(&events, WorkerEvent::Failure(error.to_string())) {
+                                    return;
+                                }
+                                continue;
+                            }
+                        }
                     }
                     match fetch_health(&client).await
                     {
@@ -352,6 +541,70 @@ async fn send_command(
             "control command returned an unexpected payload",
         )),
     }
+}
+
+async fn synchronize_snapshot(
+    client: &ControlClient,
+    events: &Sender<WorkerEvent>,
+    cursor: &mut u64,
+    snapshot: RuntimeSnapshot,
+    instance_id: &mut Option<uuid::Uuid>,
+) -> Result<bool, AppError> {
+    if snapshot.instance_id != *instance_id || snapshot.last_sequence < *cursor {
+        // Identity also detects a restarted service whose sequence caught up.
+        // Sequence rollback remains a fallback for older services without IDs.
+        *cursor = snapshot.last_sequence;
+        *instance_id = snapshot.instance_id;
+        return Ok(emit(events, WorkerEvent::HistoryGap(snapshot)));
+    }
+    if snapshot.last_sequence > *cursor {
+        let items = poll(client, *cursor).await?;
+        if !forward_events(client, events, cursor, items, instance_id).await? {
+            return Ok(false);
+        }
+    }
+    // A runtime snapshot contains no conversation text. Publish it only after
+    // every event it covers, and never replace newer event state with it.
+    // Catch-up is bounded to one page; further pages arrive on the next tick.
+    Ok(snapshot.instance_id != *instance_id
+        || snapshot.last_sequence != *cursor
+        || emit(events, WorkerEvent::Snapshot(snapshot)))
+}
+
+async fn forward_events(
+    client: &ControlClient,
+    events: &Sender<WorkerEvent>,
+    cursor: &mut u64,
+    items: Vec<SequencedEvent>,
+    instance_id: &mut Option<uuid::Uuid>,
+) -> Result<bool, AppError> {
+    let Some(first) = items.first() else {
+        return Ok(true);
+    };
+    if first.sequence != cursor.saturating_add(1) {
+        // Retention may have expired during disconnection. A fresh snapshot
+        // re-establishes a known boundary without pretending to recover text.
+        let snapshot = fetch_snapshot(client).await?;
+        *cursor = snapshot.last_sequence;
+        *instance_id = snapshot.instance_id;
+        return Ok(emit(events, WorkerEvent::HistoryGap(snapshot)));
+    }
+    if items
+        .windows(2)
+        .any(|pair| pair[1].sequence != pair[0].sequence.saturating_add(1))
+    {
+        return Err(AppError::protocol("control event batch is not contiguous"));
+    }
+    let sequence = items.last().expect("nonempty events").sequence;
+    let count = items.len();
+    if !emit(events, WorkerEvent::Events(items)) {
+        return Ok(false);
+    }
+    *cursor = sequence;
+    Ok(emit(
+        events,
+        WorkerEvent::Log(format!("received {count} event(s)")),
+    ))
 }
 
 async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppError> {

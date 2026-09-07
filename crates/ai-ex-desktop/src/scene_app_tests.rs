@@ -18,7 +18,7 @@ fn ready() -> ReadyScene {
             name: "Quiet".to_owned(),
             character,
             appearance: SceneAppearance {
-                body: SceneBody::Orb,
+                body: SceneBody::Companion,
                 accent: [10, 80, 160],
                 scale: 0.5,
                 reduced_motion: true,

@@ -3,7 +3,7 @@ id = "aiex.quiet"
 name = "安静陪伴"
 
 [appearance]
-body = "orb"
+body = "companion"
 accent = [110, 170, 225]
 reduced_motion = true
 scale = 0.8

@@ -11,7 +11,7 @@
 | [桌面使用](DESKTOP_USER_GUIDE.md) | 首次设置、托管/独立服务、诊断与重连 |
 | [模型后端](MODEL_BACKENDS.md) | 模型地址、凭据、配置与健康检查 |
 | [声音与表达](SPEECH_PRESENTATION.md) | 语音、字幕、口型、取消与已知限制 |
-| [当前版本说明](releases/0.3.1-alpha.1.md) | 交付范围与本地自动验收基线 |
+| [当前版本说明](releases/0.4.0-alpha.1.md) | 交付范围与本地自动验收基线 |
 
 ## 角色与自由组合
 

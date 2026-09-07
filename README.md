@@ -1,12 +1,12 @@
 # AIex
 
-一个 Windows 优先、以 Rust 为核心的本地数字伙伴工作室。人格、记忆和表现相互独立：同一个角色可以使用原生 2D 伙伴、光球、图片立绘，也可以隐藏外形或连接 VTube Studio。
+一个 Windows 优先、以 Rust 为核心的本地数字伙伴工作室。人格、记忆和表现相互独立：同一个角色可以使用原生人物立绘、自定义图片，也可以隐藏外形或连接 VTube Studio。
 
-当前版本：**0.3.1-alpha.1 · Windows 便携体验版**。[版本说明](docs/releases/0.3.1-alpha.1.md)记录交付能力及限制；[演进路线](docs/DIGITAL_HUMAN_ROADMAP.md)记录后续设计。
+当前版本：**0.4.0-alpha.1 · 人物与对话工作室**。[版本说明](docs/releases/0.4.0-alpha.1.md)记录交付能力及限制；[演进路线](docs/DIGITAL_HUMAN_ROADMAP.md)记录后续设计。
 
 **首次体验只需完整解压程序包，双击 `AIex.exe`。** 无需安装 Rust、Python 或 VTube Studio。[整体验收流程](docs/MANUAL_TEST_PLAN.md)从界面操作开始。
 
-[下载 Windows 便携包](https://github.com/QwQBiG/AIA/releases/download/v0.3.1-alpha.1/AIex-Windows-x64-0.3.1-alpha.1.zip) · [查看发布与校验文件](https://github.com/QwQBiG/AIA/releases/tag/v0.3.1-alpha.1)
+[下载 Windows 便携包](https://github.com/QwQBiG/AIA/releases/download/v0.4.0-alpha.1/AIex-Windows-x64-0.4.0-alpha.1.zip) · [查看发布与校验文件](https://github.com/QwQBiG/AIA/releases/tag/v0.4.0-alpha.1)
 
 ## 可以做什么
 
@@ -14,7 +14,7 @@
 | --- | --- |
 | 自定义角色 | 新建、独立复制、收藏多个版本、导入导出、预览确认后应用 |
 | 记忆连续性 | 按角色 ID 隔离本地 JSONL 记忆；换外形不换身份 |
-| 多种外形 | 内置伙伴、光球、PNG/JPEG 表情组、隐藏外形；VTS 可选 |
+| 多种外形 | 内置人物立绘、PNG/JPEG 表情组、隐藏外形；VTS 可选 |
 | 组合场景 | 保存角色与外形，图片随包携带；支持启动时恢复已选组合 |
 | 对话与打断 | 三种模型适配器、流式回答、有界排队、慢模型和语音拥堵时取消 |
 | 声音与表达 | 配置 GPT-SoVITS 后朗读；原生字幕、情绪与能量口型跟随实际播放 |
@@ -23,11 +23,17 @@
 
 网页、桌面悬浮窗口、VRM 3D、图形化声音/行为包编辑器尚未实现。场景包目前组合角色与外形，模型凭据、声音配置和私人记忆不随包导出。Windows 自动化动作适配器尚未启用。
 
+![聊天页与内置人物（离屏渲染）](docs/assets/studio-chat.png)
+
+使用示例对话进行离屏渲染。人物与聊天并排，配色和外形可自行调整；另见[人物表情与配色预览](docs/assets/portrait-expressions.png)。
+
 ## 快速开始
 
-1. 将 `AIex-Windows-x64-0.3.1-alpha.1.zip` 完整解压到可写入的文件夹。
-2. 双击其中的 **`AIex.exe`**，点击 **“先体验外形”**。无需账号或模型即可切换伙伴、光球、表情和图片外形。
-3. 准备好模型服务后，重新打开程序，点击 **“连接模型并开始对话”**，按界面填写连接信息并保存。后台服务已随包提供，会自动启动。
+1. 将 `AIex-Windows-x64-0.4.0-alpha.1.zip` 完整解压到可写入的文件夹。
+2. 双击其中的 **`AIex.exe`**，点击 **“先体验外形”**。无需账号或模型即可体验人物表情、调整配色和导入图片外形。
+3. 直接在预览底部点击 **“开始对话”**，按界面填写模型连接信息并保存。预览中的外形会沿用，后台服务已随包提供，会自动启动。
+
+主窗口分为 **聊天 / 角色与外形 / 场景组合 / 设置与诊断**。输入区支持 Enter 换行，Ctrl+Enter 或“发送”提交；中文输入法确认候选不会直接发送。要修改模型或回到离线预览，在设置页进入“连接设置”或“首页”。
 
 真实对话需要自己的云端密钥，或已经运行的 Ollama / KoboldCpp。模型和声音资源没有内置；语音、麦克风、VTS、OBS 默认关闭。云端密钥只在本次进程中使用；未设置对应环境变量时，下次打开会再次进入连接设置。
 
@@ -130,7 +136,7 @@ flowchart LR
 
 ## 验证与文档
 
-[整体验收流程](docs/MANUAL_TEST_PLAN.md)提供简短体验清单，以及可展开的深度检查和故障记录方法。自动验证范围见[本版说明](docs/releases/0.3.1-alpha.1.md)；真实窗口操作和音频设备仍需整机验收。
+[整体验收流程](docs/MANUAL_TEST_PLAN.md)提供简短体验清单，以及可展开的深度检查和故障记录方法。自动验证范围见[本版说明](docs/releases/0.4.0-alpha.1.md)；真实窗口操作和音频设备仍需整机验收。
 
 - [角色收藏](docs/CHARACTER_LIBRARY.md) · [角色包](docs/CHARACTER_PACKS.md) · [图片外形](docs/APPEARANCE_PACKS.md) · [场景组合](docs/SCENE_PACKS.md)
 - [人格与记忆](docs/PERSONA_MEMORY.md) · [控制协议](docs/CONTROL_PROTOCOL.md) · [插件协议](docs/PLUGIN_PROTOCOL.md)

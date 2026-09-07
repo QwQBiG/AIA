@@ -1,12 +1,25 @@
 use std::collections::VecDeque;
-use std::path::Path;
 
 use ai_ex_domain::{ComponentHealth, PersonaSnapshot, StageSnapshot, SystemEvent};
-use ai_ex_ui_model::{ApplyOutcome, ConnectionState, TurnStatus, UiState};
+use ai_ex_ui_model::{ApplyOutcome, ConnectionState, UiState};
 use eframe::egui;
 
 use crate::appearance::AppearancePanel;
 use crate::worker::{WorkerCommand, WorkerEvent, WorkerHandle};
+
+#[path = "app_chat.rs"]
+mod chat;
+#[path = "app_layout.rs"]
+mod layout;
+#[path = "app_navigation.rs"]
+mod navigation;
+#[path = "app_theme.rs"]
+mod theme;
+pub(crate) use theme::configure_appearance;
+
+#[cfg(test)]
+#[path = "app_ui_tests.rs"]
+mod ui_tests;
 
 #[cfg(test)]
 #[path = "character_app_tests.rs"]
@@ -62,6 +75,14 @@ pub struct DesktopApp {
     persona_synced: bool,
     character_library: crate::character_library::CharacterLibrary,
     active_source: String,
+    page: layout::Page,
+    composer_ime_active: bool,
+    navigation: crate::navigation::Navigation,
+    pending_navigation: Option<crate::navigation::Destination>,
+    owned_service: Option<crate::service_process::ManagedService>,
+    notice: Option<String>,
+    retained_messages: VecDeque<navigation::RetainedMessage>,
+    show_retained: bool,
 }
 
 impl DesktopApp {
@@ -113,7 +134,25 @@ impl DesktopApp {
             persona_synced: false,
             character_library: crate::character_library::CharacterLibrary::load(storage),
             active_source: String::new(),
+            page: layout::Page::Conversation,
+            composer_ime_active: false,
+            navigation: Default::default(),
+            pending_navigation: None,
+            owned_service: None,
+            notice: None,
+            retained_messages: VecDeque::new(),
+            show_retained: false,
         }
+    }
+
+    pub fn with_navigation(mut self, navigation: crate::navigation::Navigation) -> Self {
+        self.navigation = navigation;
+        self
+    }
+
+    pub fn with_service(mut self, service: Option<crate::service_process::ManagedService>) -> Self {
+        self.owned_service = service;
+        self
     }
 
     fn push_log(&mut self, message: impl Into<String>) {
@@ -167,6 +206,37 @@ impl DesktopApp {
                     };
                 }
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
+                WorkerEvent::HistoryGap(snapshot) => {
+                    self.state.recover_snapshot(snapshot);
+                    let message = "连接已恢复，部分历史无法补齐；可以继续对话。";
+                    self.notice = Some(message.to_owned());
+                    self.push_log(message);
+                }
+                WorkerEvent::SubmitRejected { text, error } => {
+                    if self.input.is_empty() {
+                        self.input = text;
+                    } else {
+                        self.retained_messages
+                            .push_back(navigation::RetainedMessage {
+                                text,
+                                state: navigation::DeliveryState::NotDelivered,
+                            });
+                    }
+                    self.push_log(&error);
+                    self.last_error = Some(error);
+                    self.notice = Some("有消息未送达，草稿已保留。".to_owned());
+                }
+                WorkerEvent::SubmitUncertain { text, error } => {
+                    self.retained_messages
+                        .push_back(navigation::RetainedMessage {
+                            text,
+                            state: navigation::DeliveryState::Uncertain,
+                        });
+                    self.push_log(&error);
+                    self.last_error = Some(error);
+                    self.notice =
+                        Some("有消息的发送结果待核对，原文已保留；请先检查聊天记录。".to_owned());
+                }
                 WorkerEvent::Persona(profile) => {
                     self.persona_synced = self.state.connection == ConnectionState::Connected;
                     if !self.persona_apply_pending {
@@ -180,7 +250,7 @@ impl DesktopApp {
                         if self.active_source.is_empty() {
                             self.active_source = "服务同步（未提供包来源）".to_owned();
                         }
-                        self.active_persona = profile.clone();
+                        self.update_active_persona(&profile);
                     }
                     if !self.persona_apply_pending
                         && !self.persona_dirty
@@ -202,7 +272,7 @@ impl DesktopApp {
                 WorkerEvent::PersonaApplied(profile) => {
                     self.persona_synced = true;
                     self.finish_scene(&profile);
-                    self.active_persona = profile.clone();
+                    self.update_active_persona(&profile);
                     self.taboos_editor = profile.taboos.join("\n");
                     self.persona = profile;
                     self.persona_dirty = false;
@@ -302,14 +372,27 @@ impl DesktopApp {
         }
     }
 
-    fn send(&mut self, command: WorkerCommand) {
+    fn send(&mut self, command: WorkerCommand) -> bool {
         if self.worker.commands.send(command).is_err() {
             self.last_error = Some("桌面网络工作线程已停止。".to_owned());
+            return false;
         }
+        true
+    }
+
+    fn update_active_persona(&mut self, profile: &PersonaSnapshot) {
+        if self.active_persona.profile_id != profile.profile_id {
+            self.state.turns.clear();
+            self.state.runtime.current_emotion = None;
+            self.state.runtime.playback = Default::default();
+        }
+        self.active_persona = profile.clone();
     }
 
     fn can_submit(&self) -> bool {
         self.state.connection == ConnectionState::Connected
+            && !self.state.needs_resync
+            && self.persona_synced
             && !self.persona_apply_pending
             && !self.confirm_persona
             && self.resume.phase == crate::scene_resume::ResumePhase::Idle
@@ -324,111 +407,26 @@ impl DesktopApp {
             return;
         }
         let text = text.to_owned();
-        self.send(WorkerCommand::Submit(text));
-        self.input.clear();
-    }
-
-    fn show_header(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("AIex");
-            ui.separator();
-            let (label, color) = match self.state.connection {
-                ConnectionState::Connected => ("已连接", egui::Color32::from_rgb(80, 200, 140)),
-                ConnectionState::Connecting => ("连接中", egui::Color32::YELLOW),
-                ConnectionState::Disconnected => ("未连接", egui::Color32::LIGHT_RED),
-            };
-            ui.colored_label(color, label);
-            ui.separator();
-            ui.label(format!("状态：{:?}", self.state.runtime.state));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(if self.show_developer {
-                        "隐藏开发者诊断"
-                    } else {
-                        "开发者诊断"
-                    })
-                    .clicked()
-                {
-                    self.show_developer = !self.show_developer;
-                }
-                if ui.button("急停").clicked() {
-                    self.confirm_emergency_stop = true;
-                }
-                if ui.button("打断").clicked() {
-                    self.send(WorkerCommand::Interrupt);
-                }
-            });
-        });
-        if let Some(error) = &self.last_error {
-            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        if self.send(WorkerCommand::Submit(text)) {
+            self.input.clear();
         }
-        ui.separator();
     }
 
-    fn show_beginner_panel(&self, ui: &mut egui::Ui) {
-        ui.group(|ui|
-        {
-            ui.heading("新手控制台");
-            ui.label("这里可以完成日常使用；需要排查问题时，点击右上角“开发者诊断”。");
-            ui.horizontal_wrapped(|ui|
-            {
-                let (label, color) = match self.state.connection
-                {
-                    ConnectionState::Connected => ("服务已连接，可以开始对话", egui::Color32::from_rgb(80, 200, 140)),
-                    ConnectionState::Connecting => ("正在连接服务，请稍候", egui::Color32::YELLOW),
-                    ConnectionState::Disconnected => ("服务未连接，请确认服务已启动", egui::Color32::LIGHT_RED),
-                };
-                ui.colored_label(color, label);
-                ui.separator();
-                ui.label(format!("运行状态：{:?}", self.state.runtime.state));
-            });
-            let guidance = match self.state.connection
-            {
-                ConnectionState::Connected =>
-                {
-                    if let Some(item) = self.health.iter().find(|item| !item.ready)
-                    {
-                        format!("建议：检查 {} —— {}", item.component, item.detail)
-                    }
-                    else
-                    {
-                        "建议：可以直接输入消息开始对话。".to_owned()
-                    }
-                }
-                ConnectionState::Connecting => "建议：等待服务完成连接；不要重复启动多个服务进程。".to_owned(),
-                ConnectionState::Disconnected => "建议：在设置中勾选“打开 AIex 时自动启动服务”，再打开“开发者诊断”查看连接失败的原因。".to_owned(),
-            };
-            ui.small(guidance);
-            if let Some(item) = self.active_model_health()
-            {
-                let state = if item.ready { "模型已就绪" } else { "模型不可用" };
-                ui.label(format!("当前模型 Provider：{}（{}）", item.component, state));
-            }
-            let ready = self.health.iter().filter(|item| item.ready).count();
-            let total = self.health.len();
-            if total == 0
-            {
-                ui.weak("正在读取模型、插件和安全状态……");
-            }
-            else
-            {
-                ui.label(format!("组件状态：{ready}/{total} 项就绪"));
-            }
-            ui.small("使用下方输入框发送消息；“打断”停止当前回复；“急停”会撤销自动化许可。AIex 默认不会执行未经授权的外部动作。");
-        });
-    }
-
-    fn show_persona_panel(&mut self, ui: &mut egui::Ui) {
-        if let Some(manifest) = self.character_files.poll(ui.ctx()) {
+    fn poll_character(&mut self, context: &egui::Context) {
+        if let Some(manifest) = self.character_files.poll(context) {
             self.persona = manifest.persona;
             self.taboos_editor = self.persona.taboos.join("\n");
             self.persona_dirty = true;
             self.pending_persona = None;
             self.confirm_persona = false;
         }
+    }
+
+    fn show_persona_panel(&mut self, ui: &mut egui::Ui) {
+        self.poll_character(ui.ctx());
         let mut changed = false;
         let mut request_confirm = false;
-        ui.collapsing("角色设置（新手）", |ui|
+        egui::CollapsingHeader::new("角色设定与收藏").default_open(true).show(ui, |ui|
         {
             self.show_character_library(ui);
             ui.add_enabled_ui(!self.persona_apply_pending && !self.confirm_persona, |ui|
@@ -721,58 +719,6 @@ impl DesktopApp {
         });
     }
 
-    fn show_conversation(&self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .id_salt("conversation_history")
-            .max_height((ui.available_height() - 130.0).max(60.0))
-            .stick_to_bottom(true)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for turn in &self.state.turns {
-                    ui.group(|ui| {
-                        ui.strong(format!("你：{}", turn.user_text));
-                        ui.add_space(6.0);
-                        ui.label(format!("AIex：{}", turn.assistant_text));
-                        let (status, color) = turn_status(turn.status);
-                        ui.small(egui::RichText::new(status).color(color));
-                    });
-                    ui.add_space(8.0);
-                }
-                if self.state.turns.is_empty() {
-                    ui.centered_and_justified(|ui| {
-                        ui.weak("连接服务后，从这里开始对话。");
-                    });
-                }
-            });
-    }
-
-    fn show_composer(&mut self, ui: &mut egui::Ui) {
-        ui.separator();
-        let response = ui.add(
-            egui::TextEdit::multiline(&mut self.input)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY)
-                .hint_text("输入消息；Ctrl + Enter 发送"),
-        );
-        let keyboard_submit = response.has_focus()
-            && ui.input(|input| input.key_pressed(egui::Key::Enter) && input.modifiers.ctrl);
-        ui.horizontal(|ui| {
-            let enabled = self.can_submit();
-            if ui.add_enabled(enabled, egui::Button::new("发送")).clicked()
-                || (enabled && keyboard_submit)
-            {
-                self.submit();
-            }
-            ui.weak(format!(
-                "完成 {} · 打断 {} · 故障 {} · 事件 #{}",
-                self.state.runtime.turns_completed,
-                self.state.runtime.turns_interrupted,
-                self.state.runtime.faults,
-                self.state.runtime.last_sequence,
-            ));
-        });
-    }
-
     fn show_persona_confirmation(&mut self, context: &egui::Context) {
         if !self.confirm_persona {
             return;
@@ -885,38 +831,7 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        self.drain_events();
-        self.poll_scene(ui.ctx());
-        self.show_header(ui);
-        let settings_height = (ui.available_height() * 0.5).clamp(120.0, 360.0);
-        egui::ScrollArea::vertical()
-            .id_salt("character_settings")
-            .max_height(settings_height)
-            .show(ui, |ui| {
-                egui::CollapsingHeader::new("数字人外形")
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        let state = ai_ex_ui_model::PresentationState::from_ui(&self.state);
-                        ui.add_enabled_ui(!self.scene_busy(), |ui| {
-                            self.appearance
-                                .show(ui, state, &self.active_persona.name, 150.0);
-                        });
-                    });
-                self.show_beginner_panel(ui);
-                ui.add_enabled_ui(!self.scene_busy(), |ui| self.show_persona_panel(ui));
-                self.show_scene_panel(ui);
-                self.show_health(ui);
-                self.show_model_panel(ui);
-                self.show_policy_panel(ui);
-                self.show_automation_panel(ui);
-                self.show_developer_panel(ui);
-                self.show_stage_panel(ui);
-            });
-        crate::speech_panel::show(ui, &self.state);
-        self.show_conversation(ui);
-        self.show_composer(ui);
-        self.show_persona_confirmation(ui.ctx());
-        self.show_emergency_confirmation(ui.ctx());
+        self.show_contents(ui);
         if (self.resume.dirty || self.character_library.dirty)
             && let Some(storage) = frame.storage_mut()
         {
@@ -933,42 +848,4 @@ impl eframe::App for DesktopApp {
         self.save_resume(storage);
         self.save_library(storage);
     }
-}
-
-fn turn_status(status: TurnStatus) -> (&'static str, egui::Color32) {
-    match status {
-        TurnStatus::Streaming => ("生成中", egui::Color32::LIGHT_BLUE),
-        TurnStatus::Completed => ("完成", egui::Color32::GRAY),
-        TurnStatus::Interrupted => ("已打断", egui::Color32::YELLOW),
-        TurnStatus::Failed => ("失败", egui::Color32::LIGHT_RED),
-    }
-}
-
-pub(crate) fn configure_appearance(context: &egui::Context) {
-    context.set_visuals(egui::Visuals::dark());
-    let mut style = (*context.style_of(egui::Theme::Dark)).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(14.0, 7.0);
-    context.set_style_of(egui::Theme::Dark, style);
-
-    let font_paths = [
-        Path::new("C:/Windows/Fonts/msyh.ttc"),
-        Path::new("C:/Windows/Fonts/simhei.ttf"),
-    ];
-    let Some(bytes) = font_paths.iter().find_map(|path| std::fs::read(path).ok()) else {
-        return;
-    };
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "ai-ex-cjk".to_owned(),
-        egui::FontData::from_owned(bytes).into(),
-    );
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .insert(0, "ai-ex-cjk".to_owned());
-    }
-    context.set_fonts(fonts);
 }

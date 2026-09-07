@@ -9,7 +9,7 @@ fn example() -> SceneManifest {
         name: "安静陪伴".to_owned(),
         character: CharacterManifest::from_persona(Default::default()),
         appearance: SceneAppearance {
-            body: SceneBody::Orb,
+            body: SceneBody::Companion,
             accent: [30, 90, 180],
             reduced_motion: true,
             scale: 0.8,
@@ -22,7 +22,7 @@ fn example() -> SceneManifest {
 fn shipped_scenes_reuse_the_documented_character_identities() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
     for (scene, character, body) in [
-        ("quiet", "companion", SceneBody::Orb),
+        ("quiet", "companion", SceneBody::Companion),
         ("host", "host", SceneBody::Companion),
     ] {
         let bundle = SceneBundle::load(&root.join("scenes").join(scene)).unwrap();
@@ -63,6 +63,21 @@ fn scene_round_trip_and_strict_nested_validation() {
     assert!(scene.validate().is_ok());
     scene.schema_version = 2;
     assert!(scene.validate().is_err());
+}
+
+#[test]
+fn legacy_body_imports_as_a_character_and_exports_canonical_body() {
+    let original = example();
+    let legacy = original
+        .to_toml()
+        .unwrap()
+        .replace("body = \"companion\"", "body = \"orb\"");
+    let restored = SceneManifest::parse(&legacy).unwrap();
+    assert_eq!(restored, original);
+    let exported = restored.to_toml().unwrap();
+    assert!(exported.contains("body = \"companion\""));
+    assert!(!exported.contains("body = \"orb\""));
+    assert_eq!(SceneManifest::parse(&exported).unwrap(), original);
 }
 
 #[test]
@@ -111,7 +126,7 @@ fn scene_bundle_contains_its_images_and_relocates_without_original_paths() {
     let missing = root.join("missing-assets");
     assert!(SceneBundle::save_new(&missing, &scene, None).is_err());
     assert!(!missing.exists());
-    let plain = root.join("orb");
+    let plain = root.join("companion");
     SceneBundle::save_new(&plain, &example(), None).unwrap();
     assert_eq!(SceneBundle::load(&plain).unwrap().manifest, example());
     std::fs::remove_file(plain.join("scene.toml")).unwrap();

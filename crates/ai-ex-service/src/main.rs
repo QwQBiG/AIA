@@ -1151,10 +1151,9 @@ impl ControlBackend for ServiceControl {
                         "control submit text must not be empty",
                     ));
                 }
-                let runtime = self.runtime.clone();
-                let text = text.to_owned();
+                let pending = self.runtime.enqueue(text.to_owned()).await?;
                 tokio::spawn(async move {
-                    if let Err(error) = runtime.submit(text).await {
+                    if let Err(error) = pending.wait().await {
                         tracing::error!(%error, "control turn failed");
                     }
                 });

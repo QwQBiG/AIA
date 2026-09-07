@@ -14,7 +14,6 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceKind {
     Companion,
-    Orb,
     Images,
     Hidden,
 }
@@ -47,7 +46,6 @@ impl AppearancePanel {
         };
         if let Some(storage) = storage {
             result.kind = match storage.get_string("appearance.kind").as_deref() {
-                Some("orb") => AppearanceKind::Orb,
                 Some("images") => AppearanceKind::Images,
                 Some("hidden") => AppearanceKind::Hidden,
                 _ => AppearanceKind::Companion,
@@ -76,7 +74,6 @@ impl AppearancePanel {
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
         let kind = match self.kind {
             AppearanceKind::Companion => "companion",
-            AppearanceKind::Orb => "orb",
             AppearanceKind::Images => "images",
             AppearanceKind::Hidden => "hidden",
         };
@@ -100,13 +97,10 @@ impl AppearancePanel {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, state: PresentationState, name: &str, height: f32) {
-        if self.images.poll(ui.ctx()) {
-            self.kind = AppearanceKind::Images;
-        }
+        self.poll(ui.ctx());
         let previous = self.kind;
         ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.kind, AppearanceKind::Companion, "2D 伙伴");
-            ui.selectable_value(&mut self.kind, AppearanceKind::Orb, "光球");
+            ui.selectable_value(&mut self.kind, AppearanceKind::Companion, "人物立绘");
             ui.selectable_value(&mut self.kind, AppearanceKind::Images, "图片角色");
             ui.selectable_value(&mut self.kind, AppearanceKind::Hidden, "隐藏外形");
             if self.kind == AppearanceKind::Images {
@@ -123,6 +117,22 @@ impl AppearancePanel {
         if self.kind == AppearanceKind::Images {
             self.images.controls(ui);
         }
+        self.show_portrait(ui, state, name, height);
+    }
+
+    pub fn poll(&mut self, context: &egui::Context) {
+        if self.images.poll(context) {
+            self.kind = AppearanceKind::Images;
+        }
+    }
+
+    pub fn show_portrait(
+        &mut self,
+        ui: &mut egui::Ui,
+        state: PresentationState,
+        name: &str,
+        height: f32,
+    ) {
         if self.kind != AppearanceKind::Hidden {
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), height),
@@ -136,7 +146,7 @@ impl AppearancePanel {
             {
                 pack.draw(ui.painter(), rect, state, frame, self.image_scale);
             } else {
-                paint::draw(ui.painter(), rect, self.kind, state, frame, accent);
+                paint::draw(ui.painter(), rect, state, frame, accent);
             }
             if !self.reduced_motion && state.connected && state.synchronized {
                 ui.ctx()

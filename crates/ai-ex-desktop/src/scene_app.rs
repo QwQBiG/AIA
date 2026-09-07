@@ -156,8 +156,7 @@ impl DesktopApp {
             }
             ui.label(format!("同时应用场景：{}", scene.manifest.name));
             let body = match scene.manifest.appearance.body {
-                ai_ex_config::scene::SceneBody::Companion => "2D 伙伴",
-                ai_ex_config::scene::SceneBody::Orb => "光球",
+                ai_ex_config::scene::SceneBody::Companion => "人物立绘",
                 ai_ex_config::scene::SceneBody::Images => "图片角色",
                 ai_ex_config::scene::SceneBody::Hidden => "隐藏外形",
             };

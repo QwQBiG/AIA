@@ -12,6 +12,7 @@ enum RuntimeCommand {
     Submit {
         input: String,
         response: oneshot::Sender<Result<TurnOutcome, AppError>>,
+        admission: Option<oneshot::Sender<Result<(), AppError>>>,
     },
     Interrupt {
         reason: String,
@@ -36,19 +37,38 @@ pub struct RuntimeHandle {
     sender: mpsc::Sender<RuntimeCommand>,
 }
 
+/// An admitted turn whose generation can be awaited separately from enqueueing.
+pub struct PendingTurn(oneshot::Receiver<Result<TurnOutcome, AppError>>);
+
+impl PendingTurn {
+    pub async fn wait(self) -> Result<TurnOutcome, AppError> {
+        self.0
+            .await
+            .map_err(|_| AppError::unavailable("runtime response dropped"))?
+    }
+}
+
 impl RuntimeHandle {
     pub async fn submit(&self, input: impl Into<String>) -> Result<TurnOutcome, AppError> {
+        self.enqueue(input).await?.wait().await
+    }
+
+    /// Acknowledge only after the actor has reserved a turn or queue position.
+    pub async fn enqueue(&self, input: impl Into<String>) -> Result<PendingTurn, AppError> {
         let (response, receiver) = oneshot::channel();
+        let (admission, admitted) = oneshot::channel();
         self.sender
             .send(RuntimeCommand::Submit {
                 input: input.into(),
                 response,
+                admission: Some(admission),
             })
             .await
             .map_err(|_| AppError::unavailable("runtime actor stopped"))?;
-        receiver
+        admitted
             .await
-            .map_err(|_| AppError::unavailable("runtime response dropped"))?
+            .map_err(|_| AppError::unavailable("runtime admission dropped"))??;
+        Ok(PendingTurn(receiver))
     }
 
     pub async fn interrupt(&self, reason: impl Into<String>) -> Result<(), AppError> {
@@ -149,7 +169,16 @@ async fn run_actor<M, S, A, N, E>(
             },
         };
         match command {
-            RuntimeCommand::Submit { input, response } => {
+            RuntimeCommand::Submit {
+                input,
+                response,
+                admission,
+            } => {
+                if let Some(admission) = admission
+                    && admission.send(Ok(())).is_err()
+                {
+                    continue;
+                }
                 let mut shutdown_response: Option<oneshot::Sender<Result<(), AppError>>> = None;
                 let mut deferred_interrupt = None;
                 {
@@ -196,12 +225,18 @@ async fn run_actor<M, S, A, N, E>(
                                             }
                                         }
                                     }
-                                    Some(RuntimeCommand::Submit { input, response }) =>
+                                    Some(RuntimeCommand::Submit { input, response, admission }) =>
                                     {
                                         if pending.len() < pending_capacity {
-                                            pending.push_back(RuntimeCommand::Submit { input, response });
+                                            if admission.is_none_or(|admission| admission.send(Ok(())).is_ok()) {
+                                                pending.push_back(RuntimeCommand::Submit { input, response, admission: None });
+                                            }
                                         } else {
-                                            let _ignored = response.send(Err(AppError::unavailable("conversation queue is full; wait for a pending turn")));
+                                            let error = AppError::unavailable("conversation queue is full; wait for a pending turn");
+                                            if let Some(admission) = admission {
+                                                let _ignored = admission.send(Err(error.clone()));
+                                            }
+                                            let _ignored = response.send(Err(error));
                                         }
                                     }
                                     None =>

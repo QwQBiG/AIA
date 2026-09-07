@@ -6,8 +6,8 @@
 
 在桌面展开“场景组合（保存 / 载入）”，填写场景文件夹或 `scene.toml` 路径，点击“载入并预览”。仓库提供两个示例：
 
-- `config/scenes/quiet`：小艾与蓝色光球，减少动态效果。
-- `config/scenes/host`：阿星与暖色 2D 伙伴，保留动态效果。
+- `config/scenes/quiet`：小艾与蓝色人物立绘，减少动态效果。
+- `config/scenes/host`：阿星与暖色人物立绘，保留动态效果。
 
 程序先在后台检查整个包并解码图片，随后展示角色提示词与外形偏好。点击“确认应用”后，服务确认角色切换才会更新外形。预览和取消保留当前组合与原编辑草稿；回复进行中被服务拒绝时也保留当前组合。
 
@@ -38,7 +38,7 @@ id = "my.scene"
 name = "我的组合"
 
 [appearance]
-body = "orb"
+body = "companion"
 accent = [110, 170, 225]
 reduced_motion = true
 scale = 0.8
@@ -58,7 +58,9 @@ taboos = []
 live_mode = "controlled"
 ```
 
-`body` 支持 `companion`、`orb`、`images`、`hidden`；`scale` 范围为 0.25–1，仅影响图片大小。图片场景必须在 `[appearance]` 中填写 `package = "appearance/appearance.toml"`，其他外形不能声明此路径。
+`body` 支持 `companion`（人物立绘）、`images`、`hidden`；`scale` 范围为 0.25–1，仅影响图片大小。图片场景必须在 `[appearance]` 中填写 `package = "appearance/appearance.toml"`，其他外形不能声明此路径。
+
+旧版 `body = "orb"` 和本机同名外形偏好仍可读取，会自动使用人物立绘，保留原来的角色、配色及动态偏好。再次保存或导出时统一写为 `companion`，不需要手动修改旧文件。
 
 场景 ID 使用不超过 128 字节的英文字母、数字、点、下划线或短横线；名称不超过 128 个字符。清单最多 128 KiB，内嵌角色继续遵守角色包限制。未知字段和不支持的版本会被拒绝。资源只能使用包内相对路径，不能引用绝对路径、上级目录或网络地址；图片继续遵守外形包的文件大小和像素限制。
 

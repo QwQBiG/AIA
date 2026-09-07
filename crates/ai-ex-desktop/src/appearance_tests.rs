@@ -1,5 +1,6 @@
 use super::*;
 use ai_ex_domain::{ConversationState, Emotion};
+use eframe::Storage as _;
 
 #[derive(Default)]
 struct Storage(std::collections::HashMap<String, String>);
@@ -24,14 +25,14 @@ impl eframe::Storage for Storage {
 fn appearance_preferences_round_trip_and_invalid_color_falls_back() {
     let mut storage = Storage::default();
     let panel = AppearancePanel {
-        kind: AppearanceKind::Orb,
+        kind: AppearanceKind::Companion,
         accent: [12, 34, 56],
         reduced_motion: true,
         ..Default::default()
     };
     panel.save(&mut storage);
     let restored = AppearancePanel::load(Some(&storage));
-    assert_eq!(restored.kind, AppearanceKind::Orb);
+    assert_eq!(restored.kind, AppearanceKind::Companion);
     assert_eq!(restored.accent, [12, 34, 56]);
     assert!(restored.reduced_motion);
     storage
@@ -58,8 +59,8 @@ fn appearance_preferences_round_trip_and_invalid_color_falls_back() {
 }
 
 #[test]
-fn both_renderers_tessellate_all_expressions_at_compact_and_large_sizes() {
-    for kind in [AppearanceKind::Companion, AppearanceKind::Orb] {
+fn portrait_and_image_fallback_tessellate_all_expressions_at_compact_and_large_sizes() {
+    for kind in [AppearanceKind::Companion, AppearanceKind::Images] {
         for emotion in [
             Emotion::Neutral,
             Emotion::Happy,
@@ -106,6 +107,28 @@ fn both_renderers_tessellate_all_expressions_at_compact_and_large_sizes() {
             }
         }
     }
+}
+
+#[test]
+fn legacy_body_preferences_migrate_without_losing_customization() {
+    let mut storage = Storage::default();
+    storage.set_string("appearance.kind", "orb".to_owned());
+    storage.set_string("appearance.accent", "12,34,56".to_owned());
+    storage.set_string("appearance.reduced_motion", "true".to_owned());
+    let panel = AppearancePanel::load(Some(&storage));
+    assert_eq!(panel.kind, AppearanceKind::Companion);
+    assert_eq!(panel.accent, [12, 34, 56]);
+    assert!(panel.reduced_motion);
+    panel.save(&mut storage);
+    assert_eq!(
+        storage.get_string("appearance.kind").as_deref(),
+        Some("companion")
+    );
+    let (scene, source) = panel.scene_snapshot().unwrap();
+    assert_eq!(scene.body, ai_ex_config::scene::SceneBody::Companion);
+    assert_eq!(scene.accent, [12, 34, 56]);
+    assert!(scene.reduced_motion);
+    assert!(source.is_none());
 }
 
 #[test]

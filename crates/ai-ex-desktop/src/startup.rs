@@ -10,7 +10,16 @@ pub fn read_config(path: &Path) -> Result<AppConfig, AppError> {
     let content = std::fs::read_to_string(path).map_err(|error| {
         AppError::configuration(format!("cannot read {}: {error}", path.display()))
     })?;
-    AppConfig::parse(&content)
+    parse_config(path, &content)
+}
+
+pub fn parse_config(path: &Path, content: &str) -> Result<AppConfig, AppError> {
+    AppConfig::parse(content).map_err(|error| {
+        AppError::configuration(format!(
+            "配置文件 {} 无法解析，原文件未修改。请先修复此文件，或在新目录完整解压程序包后重新设置连接。\n{error}",
+            path.display()
+        ))
+    })
 }
 
 pub fn read_token(config: &AppConfig) -> Result<String, AppError> {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::appearance::AppearanceKind;
 use crate::scene_resume::{ResumeLaunch, ResumePhase, ResumeSnapshot, SceneResume};
+use std::path::Path;
 
 #[derive(Default)]
 struct Storage(std::collections::HashMap<String, String>);
@@ -128,7 +129,7 @@ fn startup_restore_waits_for_connection_profile_sync_and_its_command_ack() {
         .unwrap();
     rig.app.drain_events();
     assert_eq!(rig.app.active_persona, profile);
-    assert_eq!(rig.app.appearance.kind, AppearanceKind::Orb);
+    assert_eq!(rig.app.appearance.kind, AppearanceKind::Companion);
     assert!(!rig.app.scene_busy());
     assert!(rig.app.resume.phase == ResumePhase::Idle);
     rig.app.submit();
@@ -146,7 +147,7 @@ fn startup_restore_waits_for_connection_profile_sync_and_its_command_ack() {
     );
     assert_eq!(
         restored.snapshot.unwrap().scene.appearance.body,
-        ai_ex_config::scene::SceneBody::Orb
+        ai_ex_config::scene::SceneBody::Companion
     );
 }
 

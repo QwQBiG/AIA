@@ -14,8 +14,8 @@ mod tests;
 #[serde(rename_all = "snake_case")]
 pub enum SceneBody {
     #[default]
+    #[serde(alias = "orb")]
     Companion,
-    Orb,
     Images,
     Hidden,
 }

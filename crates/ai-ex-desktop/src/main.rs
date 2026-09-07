@@ -7,11 +7,13 @@ mod appearance_import;
 mod character_files;
 mod character_library;
 mod image_appearance;
+mod navigation;
 mod portable;
 mod preview;
 mod scene_files;
 mod scene_resume;
 mod service_process;
+mod session;
 mod setup;
 mod setup_storage;
 mod speech_panel;
@@ -22,9 +24,7 @@ mod worker;
 use std::path::PathBuf;
 
 use ai_ex_domain::AppError;
-use app::DesktopApp;
-use service_process::ManagedService;
-use worker::{WorkerSettings, spawn_worker};
+use navigation::Destination;
 
 fn main() {
     if let Err(error) = run() {
@@ -60,82 +60,44 @@ fn run() -> Result<(), AppError> {
         })?;
         options.config_path = PathBuf::from(portable::CONFIG);
     }
-    if show_welcome {
-        match welcome::run(portable::configured(&options.config_path))? {
-            Some(welcome::Choice::Preview) => options.preview = true,
-            Some(welcome::Choice::Setup) => options.setup = true,
-            Some(welcome::Choice::Connect) => {}
+    let mut destination = if show_welcome {
+        Destination::Home
+    } else if options.preview {
+        Destination::Preview
+    } else if options.setup {
+        Destination::Setup
+    } else {
+        Destination::Connect
+    };
+    let mut session = session::Session::default();
+    loop {
+        let next = match destination {
+            Destination::Home => welcome::run(session.configured(&options.config_path))
+                .map(|choice| choice.map(destination_for)),
+            Destination::Preview => preview::run(options.appearance_pack.take()),
+            Destination::Connect | Destination::Setup => session.connect(
+                &options,
+                portable_root.as_deref(),
+                destination == Destination::Setup,
+            ),
+        };
+        let next = match next {
+            Ok(next) => next,
+            Err(error) => welcome::recover(error.to_string())?.map(destination_for),
+        };
+        match next {
+            Some(next) => destination = next,
             None => return Ok(()),
         }
     }
-    if options.preview {
-        return preview::run(options.appearance_pack);
+}
+
+fn destination_for(choice: welcome::Choice) -> Destination {
+    match choice {
+        welcome::Choice::Preview => Destination::Preview,
+        welcome::Choice::Connect => Destination::Connect,
+        welcome::Choice::Setup => Destination::Setup,
     }
-    if let Some(directory) = &portable_root {
-        portable::check(directory)?;
-    }
-    let setup_result = if options.setup
-        || !options.config_path.exists()
-        || (portable_root.is_some() && !portable::configured(&options.config_path))
-    {
-        let Some(result) = setup::run(options.config_path.clone())? else {
-            return Ok(());
-        };
-        Some(result)
-    } else {
-        None
-    };
-    let config_path = setup_result
-        .as_ref()
-        .map(|result| result.config_path.clone())
-        .unwrap_or(options.config_path);
-    let config = startup::read_config(&config_path)?;
-    if !config.control.enabled {
-        return Err(AppError::configuration(
-            "desktop requires control.enabled = true",
-        ));
-    }
-    let token = startup::read_token(&config)?;
-    let auto_start =
-        !options.connect_only && (options.start_service || config.desktop.auto_start_service);
-    let managed_service = if auto_start && !startup::service_is_running(&config, &token)? {
-        Some(ManagedService::spawn(
-            &config_path,
-            setup_result
-                .as_ref()
-                .and_then(|result| result.api_key.as_deref()),
-            &config.deepseek.api_key_env,
-        )?)
-    } else {
-        None
-    };
-    let resume = scene_resume::ResumeLaunch::new(
-        &config_path,
-        &config.control.bind,
-        managed_service.is_some(),
-    )?;
-    let worker = spawn_worker(WorkerSettings {
-        address: config.control.bind,
-        token: token.trim().to_owned(),
-        max_message_bytes: config.control.max_message_bytes,
-    })?;
-    let developer = options.developer;
-    let native_options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1_000.0, 720.0])
-            .with_min_inner_size([720.0, 520.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "AIex",
-        native_options,
-        Box::new(move |context| {
-            Ok(Box::new(DesktopApp::new(
-                context, worker, developer, resume,
-            )))
-        }),
-    )
-    .map_err(|error| AppError::unavailable(error.to_string()))
 }
 
 struct LaunchOptions {

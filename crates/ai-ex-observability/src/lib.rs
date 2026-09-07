@@ -26,6 +26,8 @@ pub struct RuntimeSnapshot {
     pub faults: u64,
     pub last_fault: Option<String>,
     pub last_sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<uuid::Uuid>,
     #[serde(default)]
     pub playback: ai_ex_domain::SpeechPlaybackSnapshot,
     #[serde(default)]
@@ -47,6 +49,7 @@ impl Default for RuntimeSnapshot {
             faults: 0,
             last_fault: None,
             last_sequence: 0,
+            instance_id: None,
             playback: ai_ex_domain::SpeechPlaybackSnapshot::default(),
             speech_turn: None,
             speech_cancelled: false,
@@ -77,7 +80,10 @@ impl EventHub {
             ));
         }
         let (events, _receiver) = broadcast::channel(capacity);
-        let (snapshot, _receiver) = watch::channel(RuntimeSnapshot::default());
+        let (snapshot, _receiver) = watch::channel(RuntimeSnapshot {
+            instance_id: Some(uuid::Uuid::new_v4()),
+            ..Default::default()
+        });
         Ok(Self {
             events,
             snapshot,
@@ -203,6 +209,49 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instance_identity_survives_cloning_and_events_but_changes_for_a_new_hub() {
+        let first = EventHub::new(8).unwrap();
+        let clone = first.clone();
+        let identity = first.current().instance_id.expect("hub has an identity");
+        let second = EventHub::new(8).unwrap();
+        assert_ne!(second.current().instance_id, Some(identity));
+        clone.publish_now(SystemEvent::Fault {
+            message: "test fault".to_owned(),
+        });
+        assert_eq!(first.current().last_sequence, 1);
+        assert_eq!(first.current().instance_id, Some(identity));
+        assert_eq!(clone.current().instance_id, Some(identity));
+        assert_eq!(first.watch().borrow().instance_id, Some(identity));
+    }
+
+    #[test]
+    fn snapshots_read_legacy_payloads_without_an_instance_identity() {
+        let current = EventHub::new(8).unwrap().current();
+        let mut payload = serde_json::to_value(&current).unwrap();
+        assert_eq!(
+            serde_json::from_value::<RuntimeSnapshot>(payload.clone()).unwrap(),
+            current
+        );
+        assert!(
+            payload
+                .as_object_mut()
+                .unwrap()
+                .remove("instance_id")
+                .is_some()
+        );
+        let legacy: RuntimeSnapshot = serde_json::from_value(payload).unwrap();
+        assert_eq!(legacy.instance_id, None);
+        assert_eq!(legacy.last_sequence, current.last_sequence);
+        assert_eq!(legacy, RuntimeSnapshot::default());
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("instance_id")
+                .is_none()
+        );
+    }
 
     #[tokio::test]
     async fn broadcasts_events_and_updates_snapshot() {

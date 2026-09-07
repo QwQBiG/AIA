@@ -1,102 +1,101 @@
-use ai_ex_domain::Emotion;
 use ai_ex_ui_model::{AnimationFrame, PresentationState};
-use eframe::egui::{self, Color32, Painter, Rect, Stroke, pos2, vec2};
+use eframe::egui::{self, Color32, Painter, Pos2, Rect, Shape, Stroke, vec2};
 
-use super::AppearanceKind;
+#[path = "portrait_body.rs"]
+mod body;
+#[path = "portrait_face.rs"]
+mod face;
 
 pub fn draw(
     painter: &Painter,
     rect: Rect,
-    kind: AppearanceKind,
     state: PresentationState,
     frame: AnimationFrame,
     accent: Color32,
 ) {
-    let painter = painter.with_clip_rect(rect);
-    let scale = (rect.height() / 210.0).min(rect.width() / 240.0).max(0.0);
-    let center = rect.center() + vec2(0.0, frame.breath * 2.0 * scale);
-    let accent = if state.connected && state.synchronized {
-        accent
-    } else {
-        Color32::GRAY
-    };
-    if kind == AppearanceKind::Orb {
-        for ring in (1..=4).rev() {
-            let radius = (37.0 + ring as f32 * 8.0 + frame.breath * 2.0) * scale;
-            painter.circle_filled(
-                center,
-                radius,
-                accent.gamma_multiply(0.04 * (5 - ring) as f32),
-            );
-        }
-        painter.circle_filled(center, (34.0 + frame.mouth_open * 8.0) * scale, accent);
-        painter.circle_stroke(center, 52.0 * scale, Stroke::new(scale, accent));
+    let scale = (rect.height() / 300.0).min(rect.width() / 260.0);
+    if !scale.is_finite() || scale <= 0.0 {
         return;
     }
-    let point = |x: f32, y: f32| center + vec2(x, y) * scale;
-    painter.circle_filled(point(0.0, 65.0), 34.0 * scale, accent.gamma_multiply(0.25));
-    painter.circle_filled(point(-48.0, -34.0), 19.0 * scale, accent);
-    painter.circle_filled(point(48.0, -34.0), 19.0 * scale, accent);
-    painter.circle_filled(point(0.0, 0.0), 60.0 * scale, accent);
-    painter.circle_filled(
-        point(0.0, 5.0),
-        49.0 * scale,
-        Color32::from_rgb(241, 237, 230),
-    );
-    let ink = Color32::from_rgb(40, 48, 65);
-    let eye_height = (7.0 * frame.eyes_open).max(0.8);
-    for x in [-19.0, 19.0] {
-        let eye = point(x + frame.gaze_x * 5.0, -4.0);
-        painter.line_segment(
-            [
-                eye - vec2(0.0, eye_height * scale),
-                eye + vec2(0.0, eye_height * scale),
-            ],
-            Stroke::new(5.0 * scale, ink),
-        );
-        let slope = match state.emotion {
-            Emotion::Angry => x.signum() * 4.0,
-            Emotion::Sad => -x.signum() * 4.0,
-            _ => 0.0,
-        };
-        painter.line_segment(
-            [point(x - 7.0, -20.0 - slope), point(x + 7.0, -20.0 + slope)],
-            Stroke::new(2.0 * scale, ink),
-        );
+    let painter = painter.with_clip_rect(rect);
+    let portrait = Portrait {
+        painter: &painter,
+        origin: rect.center() - vec2(0.0, 147.0 * scale) + vec2(0.0, frame.breath * 1.4 * scale),
+        scale,
+        accent,
+    };
+    body::draw(&portrait);
+    face::draw(&portrait, state.emotion, frame);
+}
+
+struct Portrait<'a> {
+    painter: &'a Painter,
+    origin: Pos2,
+    scale: f32,
+    accent: Color32,
+}
+
+impl Portrait<'_> {
+    fn point(&self, x: f32, y: f32) -> Pos2 {
+        self.origin + vec2(x, y) * self.scale
     }
-    if frame.mouth_open > 0.0 || state.emotion == Emotion::Surprised {
-        painter.circle_filled(
-            point(0.0, 24.0),
-            (3.0 + frame.mouth_open * 8.0) * scale,
-            ink,
-        );
-    } else {
-        let bend = match state.emotion {
-            Emotion::Happy => 7.0,
-            Emotion::Sad | Emotion::Angry => -4.0,
-            _ => 2.0,
-        };
-        painter.add(egui::Shape::line(
-            vec![
-                point(-11.0, 23.0),
-                point(0.0, 23.0 + bend),
-                point(11.0, 23.0),
-            ],
-            Stroke::new(2.2 * scale, ink),
+
+    fn polygon(&self, points: &[(f32, f32)], color: Color32) {
+        debug_assert!(convex(points), "portrait fills must be convex");
+        self.painter.add(Shape::convex_polygon(
+            points.iter().map(|&(x, y)| self.point(x, y)).collect(),
+            color,
+            Stroke::NONE,
         ));
     }
-    if state.emotion == Emotion::Happy {
-        for x in [-32.0, 32.0] {
-            painter.circle_filled(
-                point(x, 16.0),
-                6.0 * scale,
-                Color32::from_rgb(235, 159, 168),
-            );
-        }
+
+    fn line(&self, points: &[(f32, f32)], width: f32, color: Color32) {
+        self.painter.add(Shape::line(
+            points.iter().map(|&(x, y)| self.point(x, y)).collect(),
+            Stroke::new(width * self.scale, color),
+        ));
     }
-    let shadow = Rect::from_center_size(
-        pos2(rect.center().x, rect.bottom() - 8.0 * scale),
-        vec2(64.0, 3.0) * scale,
-    );
-    painter.rect_filled(shadow, 2.0, accent.gamma_multiply(0.25));
+
+    fn ellipse(&self, x: f32, y: f32, rx: f32, ry: f32, color: Color32) {
+        let points: Vec<_> = (0..40)
+            .map(|step| {
+                let angle = step as f32 * std::f32::consts::TAU / 40.0;
+                (x + rx * angle.cos(), y + ry * angle.sin())
+            })
+            .collect();
+        self.polygon(&points, color);
+    }
+
+    fn rounded_rect(&self, min: (f32, f32), max: (f32, f32), radius: f32, color: Color32) {
+        self.painter.rect_filled(
+            Rect::from_min_max(self.point(min.0, min.1), self.point(max.0, max.1)),
+            egui::CornerRadius::same((radius * self.scale).round().clamp(0.0, 255.0) as u8),
+            color,
+        );
+    }
+
+    fn tint(&self, base: Color32, amount: f32) -> Color32 {
+        let mix = |a, b| (a as f32 * (1.0 - amount) + b as f32 * amount).round() as u8;
+        Color32::from_rgb(
+            mix(base.r(), self.accent.r()),
+            mix(base.g(), self.accent.g()),
+            mix(base.b(), self.accent.b()),
+        )
+    }
+}
+
+fn convex(points: &[(f32, f32)]) -> bool {
+    let mut positive = false;
+    let mut negative = false;
+    for index in 0..points.len() {
+        let (a, b, c) = (
+            points[index],
+            points[(index + 1) % points.len()],
+            points[(index + 2) % points.len()],
+        );
+        let cross = (b.0 - a.0) * (c.1 - b.1) - (b.1 - a.1) * (c.0 - b.0);
+        positive |= cross > 0.001;
+        negative |= cross < -0.001;
+    }
+    points.len() >= 3 && !(positive && negative)
 }

@@ -10,7 +10,7 @@ mod runtime;
 mod runtime_tests;
 mod stage_ports;
 
-pub use actor::{RuntimeHandle, spawn_runtime};
+pub use actor::{PendingTurn, RuntimeHandle, spawn_runtime};
 pub use engine::ConversationEngine;
 pub use policy::ConversationPolicy;
 pub use ports::{AvatarPort, EventSink, LanguageModelPort, MemoryPort, ModelRequest, SpeechPort};

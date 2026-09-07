@@ -22,12 +22,15 @@ pub struct SetupResult {
     pub api_key: Option<String>,
 }
 
-pub fn run(default_path: PathBuf) -> Result<Option<SetupResult>, AppError> {
+pub fn run(
+    default_path: PathBuf,
+    navigation: crate::navigation::Navigation,
+) -> Result<Option<SetupResult>, AppError> {
     let original = if default_path.exists() {
         let text = std::fs::read_to_string(&default_path).map_err(|error| {
             AppError::configuration(format!("cannot read existing configuration: {error}"))
         })?;
-        AppConfig::parse(&text)?;
+        crate::startup::parse_config(&default_path, &text)?;
         Some(text)
     } else {
         None
@@ -41,11 +44,13 @@ pub fn run(default_path: PathBuf) -> Result<Option<SetupResult>, AppError> {
         ..Default::default()
     };
     eframe::run_native(
-        "AIex 首次设置",
+        "AIex 连接设置",
         options,
         Box::new(move |context| {
             crate::app::configure_appearance(&context.egui_ctx);
-            Ok(Box::new(SetupApp::new(default_path, shared, original)))
+            let mut app = SetupApp::new(default_path, shared, original);
+            app.navigation = navigation;
+            Ok(Box::new(app))
         }),
     )
     .map_err(|error| AppError::unavailable(error.to_string()))?;
@@ -57,6 +62,7 @@ pub fn run(default_path: PathBuf) -> Result<Option<SetupResult>, AppError> {
 }
 
 struct SetupApp {
+    navigation: crate::navigation::Navigation,
     original: Option<String>,
     config_path: PathBuf,
     provider: ProviderChoice,
@@ -115,6 +121,7 @@ impl SetupApp {
         original: Option<String>,
     ) -> Self {
         let mut app = Self {
+            navigation: Default::default(),
             original,
             config_path,
             provider: ProviderChoice::DeepSeek,
@@ -441,8 +448,16 @@ fn default_port(scheme: &str) -> u16 {
 impl eframe::App for SetupApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_probe();
+        egui::Panel::bottom("setup_navigation")
+            .resizable(false)
+            .show(ui, |ui| {
+                if ui.button("返回首页（不保存修改）").clicked() {
+                    self.navigation
+                        .request(ui.ctx(), crate::navigation::Destination::Home);
+                }
+            });
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("AIex 首次设置");
+            ui.heading("连接设置");
             ui.label(
                 "不需要命令行知识，按下面几步即可开始。密钥只在本次进程中使用，不会写入配置文件。",
             );

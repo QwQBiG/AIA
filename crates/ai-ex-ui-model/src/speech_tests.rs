@@ -8,6 +8,7 @@ fn sentence_timeline_replays_resynchronizes_and_rejects_cancelled_or_previous_sp
     let turn_id = TurnId::new();
     let sentence_id = TurnId::new().0;
     let mut ui = UiState::new(8).unwrap();
+    ui.apply_snapshot(hub.current());
     ui.connection = ConnectionState::Connected;
     let mut apply = |event| {
         hub.publish_now(event);

@@ -45,6 +45,7 @@ pub struct UiState {
     pub turns: Vec<UiTurn>,
     pub needs_resync: bool,
     max_turns: usize,
+    untracked_turn: Option<TurnId>,
 }
 
 impl UiState {
@@ -58,12 +59,27 @@ impl UiState {
             turns: Vec::new(),
             needs_resync: false,
             max_turns,
+            untracked_turn: None,
         })
     }
 
     pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+        self.untracked_turn = snapshot
+            .active_turn
+            .filter(|turn_id| !self.turns.iter().any(|turn| turn.turn_id == *turn_id));
         self.runtime = snapshot;
         self.needs_resync = false;
+    }
+
+    /// Re-establish runtime state after unavailable history or service restart.
+    /// Retain text already visible, but never leave an old partial reply running.
+    pub fn recover_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+        for turn in &mut self.turns {
+            if turn.status == TurnStatus::Streaming {
+                turn.status = TurnStatus::Interrupted;
+            }
+        }
+        self.apply_snapshot(snapshot);
     }
 
     pub fn apply_event(&mut self, item: SequencedEvent) -> ApplyOutcome {
@@ -100,7 +116,7 @@ impl UiState {
             SystemEvent::ModelChunk { turn_id, text } => {
                 if let Some(turn) = self.find_turn(turn_id) {
                     turn.assistant_text.push_str(&text);
-                } else {
+                } else if self.untracked_turn != Some(turn_id) {
                     self.needs_resync = true;
                 }
             }
@@ -150,7 +166,7 @@ impl UiState {
         if let Some(turn) = self.find_turn(turn_id) {
             turn.assistant_text = text;
             turn.status = status;
-        } else {
+        } else if self.untracked_turn != Some(turn_id) {
             self.needs_resync = true;
         }
     }
@@ -158,7 +174,7 @@ impl UiState {
     fn set_status(&mut self, turn_id: TurnId, status: TurnStatus) {
         if let Some(turn) = self.find_turn(turn_id) {
             turn.status = status;
-        } else {
+        } else if self.untracked_turn != Some(turn_id) {
             self.needs_resync = true;
         }
     }
@@ -229,6 +245,56 @@ mod tests {
         assert!(state.needs_resync);
         assert_eq!(state.runtime.last_sequence, 1);
         assert_eq!(state.runtime.state, ConversationState::Thinking);
+    }
+
+    #[test]
+    fn joining_an_existing_turn_does_not_require_missing_history_to_continue() {
+        let turn_id = TurnId::new();
+        let mut state = UiState::new(10).unwrap();
+        state.recover_snapshot(RuntimeSnapshot {
+            last_sequence: 10,
+            active_turn: Some(turn_id),
+            ..Default::default()
+        });
+        assert_eq!(
+            state.apply_event(item(
+                11,
+                SystemEvent::ModelChunk {
+                    turn_id,
+                    text: "old turn".to_owned(),
+                }
+            )),
+            ApplyOutcome::Applied
+        );
+        assert!(!state.needs_resync);
+        assert_eq!(
+            state.apply_event(item(
+                12,
+                SystemEvent::TurnFinished {
+                    turn_id,
+                    full_text: "old turn completed".to_owned(),
+                }
+            )),
+            ApplyOutcome::Applied
+        );
+        assert!(!state.needs_resync);
+        assert!(state.turns.is_empty());
+        let next = TurnId::new();
+        state.apply_event(item(
+            13,
+            SystemEvent::TurnStarted {
+                turn_id: next,
+                user_text: "a new conversation".to_owned(),
+            },
+        ));
+        state.apply_event(item(
+            14,
+            SystemEvent::ModelChunk {
+                turn_id: next,
+                text: "new reply".to_owned(),
+            },
+        ));
+        assert_eq!(state.turns[0].assistant_text, "new reply");
     }
 
     #[test]

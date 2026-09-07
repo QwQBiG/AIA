@@ -1,0 +1,359 @@
+use super::*;
+
+#[path = "headless_snapshot.rs"]
+mod headless_snapshot;
+
+fn app() -> (
+    DesktopApp,
+    std::sync::mpsc::Sender<WorkerEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<WorkerCommand>,
+) {
+    let (events, receiver) = std::sync::mpsc::channel();
+    let (commands, sent) = tokio::sync::mpsc::unbounded_channel();
+    let mut app = DesktopApp::with_storage(
+        WorkerHandle {
+            commands,
+            events: receiver,
+        },
+        false,
+        None,
+    );
+    app.state.connection = ConnectionState::Connected;
+    app.persona_synced = true;
+    (app, events, sent)
+}
+
+fn render(
+    app: &mut DesktopApp,
+    context: &egui::Context,
+    size: [f32; 2],
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(size[0], size[1]),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| app.show_contents(ui),
+    )
+}
+
+fn label_position(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("label is visible: {label}"))
+}
+
+fn click(app: &mut DesktopApp, context: &egui::Context, position: egui::Pos2) {
+    for pressed in [true, false] {
+        render(
+            app,
+            context,
+            [1000.0, 720.0],
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+}
+
+#[test]
+fn sending_requires_synchronization_and_keeps_drafts_when_the_worker_has_stopped() {
+    let (mut app, _events, mut sent) = app();
+    app.input = "  先保留这段草稿  ".to_owned();
+    app.state.needs_resync = true;
+    app.submit();
+    assert_eq!(app.input, "  先保留这段草稿  ");
+    assert!(sent.try_recv().is_err());
+    app.state.needs_resync = false;
+    app.persona_synced = false;
+    app.submit();
+    assert!(sent.try_recv().is_err());
+    app.persona_synced = true;
+    app.submit();
+    assert!(app.input.is_empty());
+    assert!(
+        matches!(sent.try_recv().unwrap(), WorkerCommand::Submit(text) if text == "先保留这段草稿")
+    );
+    drop(sent);
+    app.input = "线程关闭时也保留".to_owned();
+    app.submit();
+    assert_eq!(app.input, "线程关闭时也保留");
+    assert!(app.last_error.is_some());
+}
+
+#[test]
+fn long_messages_leave_send_visible_in_wide_and_small_windows() {
+    for size in [[720.0, 520.0], [1100.0, 720.0]] {
+        let (mut app, _events, _sent) = app();
+        app.input = "很长的多行草稿\n".repeat(240);
+        app.state.turns.push(ai_ex_ui_model::UiTurn {
+            turn_id: ai_ex_domain::TurnId::new(),
+            user_text: "一条很长的消息\n".repeat(60),
+            assistant_text: "这是一段回复。\n".repeat(100),
+            status: ai_ex_ui_model::TurnStatus::Completed,
+        });
+        let context = egui::Context::default();
+        configure_appearance(&context);
+        render(&mut app, &context, size, vec![]);
+        let output = render(&mut app, &context, size, vec![]);
+        let send = label_position(&output, "发送");
+        assert!(
+            send.y > size[1] - 170.0 && send.y < size[1] - 8.0,
+            "send y={}",
+            send.y
+        );
+        assert!(send.x >= 0.0 && send.x < size[0]);
+        assert!(output.shapes.iter().all(|shape| !matches!(&shape.shape,
+            egui::epaint::Shape::Text(text) if text.galley.job.text == "新手控制台")));
+        for primitive in context.tessellate(output.shapes, output.pixels_per_point) {
+            if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
+                assert!(mesh.is_valid());
+            }
+        }
+    }
+}
+
+#[test]
+fn navigation_keeps_drafts_and_requires_confirmation_before_leaving_the_window() {
+    let (mut app, _events, _sent) = app();
+    app.input = "尚未发送的内容".to_owned();
+    let context = egui::Context::default();
+    render(&mut app, &context, [1000.0, 720.0], vec![]);
+    let output = render(&mut app, &context, [1000.0, 720.0], vec![]);
+    click(&mut app, &context, label_position(&output, "设置与诊断"));
+    assert_eq!(app.page, layout::Page::Settings);
+    assert_eq!(app.input, "尚未发送的内容");
+    let output = render(&mut app, &context, [1000.0, 720.0], vec![]);
+    click(&mut app, &context, label_position(&output, "连接设置"));
+    assert_eq!(
+        app.pending_navigation,
+        Some(crate::navigation::Destination::Setup)
+    );
+    assert_eq!(app.navigation.take(), None);
+    let output = render(&mut app, &context, [1000.0, 720.0], vec![]);
+    click(&mut app, &context, label_position(&output, "继续编辑"));
+    assert_eq!(app.pending_navigation, None);
+    assert_eq!(app.input, "尚未发送的内容");
+}
+
+#[test]
+fn rejected_messages_restore_empty_drafts_and_preserve_newer_typing() {
+    let (mut app, events, _sent) = app();
+    events
+        .send(WorkerEvent::SubmitRejected {
+            text: "第一条".to_owned(),
+            error: "queue full".to_owned(),
+        })
+        .unwrap();
+    app.drain_events();
+    assert_eq!(app.input, "第一条");
+    app.input = "刚刚写的新文字".to_owned();
+    events
+        .send(WorkerEvent::SubmitRejected {
+            text: "第二条".to_owned(),
+            error: "interrupted before send".to_owned(),
+        })
+        .unwrap();
+    app.drain_events();
+    assert_eq!(app.input, "刚刚写的新文字");
+    assert_eq!(
+        app.retained_messages
+            .front()
+            .map(|message| message.text.as_str()),
+        Some("第二条")
+    );
+}
+
+#[test]
+fn uncertain_delivery_keeps_original_text_without_automatically_retrying() {
+    let (mut app, events, mut sent) = app();
+    let text = "请先核对是否已经收到";
+    events
+        .send(WorkerEvent::SubmitUncertain {
+            text: text.to_owned(),
+            error: "request timed out after sending".to_owned(),
+        })
+        .unwrap();
+    app.drain_events();
+    assert!(app.input.is_empty());
+    let retained = app.retained_messages.front().unwrap();
+    assert_eq!(retained.text, text);
+    assert!(retained.state == navigation::DeliveryState::Uncertain);
+    assert!(sent.try_recv().is_err());
+    app.show_retained = true;
+    let context = egui::Context::default();
+    render(&mut app, &context, [1000.0, 720.0], vec![]);
+    let output = render(&mut app, &context, [1000.0, 720.0], vec![]);
+    click(
+        &mut app,
+        &context,
+        label_position(&output, "确认未收到，恢复草稿"),
+    );
+    assert_eq!(app.input, text);
+    assert!(app.retained_messages.is_empty());
+    assert!(
+        sent.try_recv().is_err(),
+        "restoring a draft must not send it"
+    );
+}
+
+fn enter(modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+#[test]
+fn plain_enter_and_ime_confirmation_do_not_submit_but_ctrl_enter_does() {
+    let (mut app, _events, mut sent) = app();
+    let context = egui::Context::default();
+    render(&mut app, &context, [1000.0, 720.0], vec![]);
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new(chat::COMPOSER_ID)));
+    app.input = "first line".to_owned();
+    render(
+        &mut app,
+        &context,
+        [1000.0, 720.0],
+        vec![enter(egui::Modifiers::NONE)],
+    );
+    assert!(sent.try_recv().is_err());
+    assert!(app.input.contains('\n'));
+    render(
+        &mut app,
+        &context,
+        [1000.0, 720.0],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "ni".to_owned(),
+            active_range_chars: None,
+        })],
+    );
+    render(
+        &mut app,
+        &context,
+        [1000.0, 720.0],
+        vec![
+            egui::Event::Ime(egui::ImeEvent::Commit("你".to_owned())),
+            enter(egui::Modifiers::CTRL),
+        ],
+    );
+    assert!(
+        sent.try_recv().is_err(),
+        "confirming composition must not submit"
+    );
+    assert!(!app.input.is_empty());
+    render(
+        &mut app,
+        &context,
+        [1000.0, 720.0],
+        vec![enter(egui::Modifiers::CTRL)],
+    );
+    assert!(
+        matches!(sent.try_recv().unwrap(), WorkerCommand::Submit(text) if text.contains("first line"))
+    );
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn character_import_finishes_while_the_chat_page_stays_selected() {
+    let (mut app, _events, _sent) = app();
+    let context = egui::Context::default();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../config/characters/companion.toml");
+    app.character_files
+        .begin(&context, crate::character_files::FileAction::Import(path));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while app.character_files.is_loading() {
+        render(&mut app, &context, [1000.0, 720.0], vec![]);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(app.page, layout::Page::Conversation);
+    assert_eq!(app.persona.profile_id, "aiex.companion");
+    assert!(app.persona_dirty);
+    assert_eq!(app.active_persona.profile_id, "default");
+}
+
+#[test]
+fn changing_character_identity_clears_previous_chat_but_revisions_keep_it() {
+    let (mut app, events, _sent) = app();
+    app.state.turns.push(ai_ex_ui_model::UiTurn {
+        turn_id: ai_ex_domain::TurnId::new(),
+        user_text: "old conversation".to_owned(),
+        assistant_text: "old reply".to_owned(),
+        status: ai_ex_ui_model::TurnStatus::Completed,
+    });
+    let revised = PersonaSnapshot {
+        revision: 2,
+        ..app.active_persona.clone()
+    };
+    events
+        .send(WorkerEvent::PersonaApplied(revised.clone()))
+        .unwrap();
+    app.drain_events();
+    assert_eq!(app.state.turns.len(), 1);
+    app.input = "draft survives".to_owned();
+    events
+        .send(WorkerEvent::PersonaApplied(PersonaSnapshot {
+            profile_id: "a-different-character".to_owned(),
+            ..revised
+        }))
+        .unwrap();
+    app.drain_events();
+    assert!(app.state.turns.is_empty());
+    assert_eq!(app.input, "draft survives");
+}
+
+#[test]
+#[ignore = "writes optional UI review images into target without opening windows"]
+fn write_chat_layout_snapshots() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../../target/desktop-ui-review-{stamp}"));
+    std::fs::create_dir(&directory).unwrap();
+    for (name, size) in [
+        ("chat-wide.png", [1120, 720]),
+        ("chat-narrow.png", [720, 600]),
+    ] {
+        let (mut app, _events, _sent) = app();
+        app.active_persona.name = "澄".to_owned();
+        app.input = "那我们先把今天的安排理一下吧。".to_owned();
+        app.state.turns.push(ai_ex_ui_model::UiTurn {
+            turn_id: ai_ex_domain::TurnId::new(), user_text: "今天学习了很久，想休息一下再继续。".to_owned(),
+            assistant_text: "好啊，我陪你。先让肩膀放松一下，喝口水也好。\n等你想继续了，我们再一起看看剩下的安排。".to_owned(),
+            status: ai_ex_ui_model::TurnStatus::Completed,
+        });
+        let context = egui::Context::default();
+        configure_appearance(&context);
+        let points = [size[0] as f32, size[1] as f32];
+        render(&mut app, &context, points, vec![]);
+        let output = render(&mut app, &context, points, vec![]);
+        let path = directory.join(name);
+        headless_snapshot::save(&context, output, size, &path).unwrap();
+        println!("{}", path.display());
+    }
+}

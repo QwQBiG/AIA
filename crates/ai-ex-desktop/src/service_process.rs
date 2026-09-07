@@ -6,6 +6,7 @@ use ai_ex_domain::AppError;
 
 pub struct ManagedService {
     child: Child,
+    exit_reported: bool,
 }
 
 impl ManagedService {
@@ -40,7 +41,34 @@ impl ManagedService {
         let child = command.stdin(Stdio::piped()).spawn().map_err(|error| {
             AppError::unavailable(format!("cannot start ai-ex-service: {error}"))
         })?;
-        Ok(Self { child })
+        Ok(Self {
+            child,
+            exit_reported: false,
+        })
+    }
+
+    /// Observe only our own child, without blocking the window or restarting it.
+    pub fn take_failure(&mut self) -> Option<String> {
+        if self.exit_reported {
+            return None;
+        }
+        let detail = match self.child.try_wait() {
+            Ok(None) => return None,
+            Ok(Some(status)) => format!("后台服务已退出（{status}）。"),
+            Err(error) => format!("无法检查后台服务状态：{error}。"),
+        };
+        self.exit_reported = true;
+        let mut message = format!("{detail} 请打开“连接设置”检查后重试。");
+        if let Some(root) = std::env::current_exe()
+            .ok()
+            .and_then(|path| crate::portable::root(&path))
+        {
+            message.push_str(&format!(
+                " 日志：{}",
+                root.join("data/logs/service.log").display()
+            ));
+        }
+        Some(message)
     }
 
     fn shutdown(&mut self) -> Result<(), AppError> {

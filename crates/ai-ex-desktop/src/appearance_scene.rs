@@ -18,7 +18,6 @@ impl AppearancePanel {
         }
         let body = match self.kind {
             AppearanceKind::Companion => SceneBody::Companion,
-            AppearanceKind::Orb => SceneBody::Orb,
             AppearanceKind::Images => SceneBody::Images,
             AppearanceKind::Hidden => SceneBody::Hidden,
         };
@@ -62,7 +61,6 @@ impl AppearancePanel {
         }
         let kind = match preset.body {
             SceneBody::Companion => AppearanceKind::Companion,
-            SceneBody::Orb => AppearanceKind::Orb,
             SceneBody::Images => AppearanceKind::Images,
             SceneBody::Hidden => AppearanceKind::Hidden,
         };

@@ -141,6 +141,87 @@ async fn closed_control_channel_does_not_spin_or_cancel_generation() {
     assert_eq!(state.remembered.load(Ordering::Acquire), 1);
 }
 
+#[tokio::test]
+async fn admission_acknowledges_queue_space_before_generation_and_rejects_overflow() {
+    let state = Arc::new(TestState::default());
+    let entered = Arc::new(Notify::new());
+    let runtime = Runtime::new(
+        SlowModel {
+            entered: entered.clone(),
+            state: state.clone(),
+            slow_cancel: false,
+        },
+        TestSpeech(state.clone()),
+        TestAvatar(state.clone()),
+        TestMemory(state),
+        TestEvents,
+    );
+    let handle = spawn_runtime(runtime, 1).unwrap();
+    let active = tokio::time::timeout(Duration::from_secs(2), handle.enqueue("active"))
+        .await
+        .unwrap()
+        .expect("admission must not wait for model completion");
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .unwrap();
+    let queued = tokio::time::timeout(Duration::from_secs(2), handle.enqueue("queued"))
+        .await
+        .unwrap()
+        .expect("the single pending position is available");
+    let rejected = tokio::time::timeout(Duration::from_secs(2), handle.enqueue("overflow"))
+        .await
+        .unwrap()
+        .err()
+        .expect("full queue must not acknowledge admission");
+    assert!(rejected.message.contains("conversation queue is full"));
+    handle.interrupt("continue queued turn").await.unwrap();
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(2), active.wait())
+            .await
+            .unwrap()
+            .unwrap(),
+        TurnOutcome::Interrupted(_)
+    ));
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(2), queued.wait())
+            .await
+            .unwrap()
+            .unwrap(),
+        TurnOutcome::Completed(_)
+    ));
+    handle.shutdown().await.unwrap();
+    assert!(handle.enqueue("after shutdown").await.is_err());
+}
+
+#[tokio::test]
+async fn enqueue_cancelled_before_admission_does_not_start_a_turn() {
+    use std::future::Future;
+    use std::task::{Context, Waker};
+
+    let state = Arc::new(TestState::default());
+    let runtime = Runtime::new(
+        CaptureModel(Arc::new(Mutex::new(None))),
+        TestSpeech(state.clone()),
+        TestAvatar(state.clone()),
+        TestMemory(state.clone()),
+        TestEvents,
+    );
+    let handle = spawn_runtime(runtime, 2).unwrap();
+    // Current-thread execution keeps the actor idle until this test yields.
+    // Queue the request, then cancel it while it is still waiting for admission.
+    let mut cancelled = Box::pin(handle.enqueue("cancelled before admission"));
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    drop(cancelled);
+    handle.submit("the only admitted turn").await.unwrap();
+    assert_eq!(state.remembered.load(Ordering::Acquire), 1);
+    handle.shutdown().await.unwrap();
+}
+
 struct SlowModel {
     entered: Arc<Notify>,
     state: Arc<TestState>,
