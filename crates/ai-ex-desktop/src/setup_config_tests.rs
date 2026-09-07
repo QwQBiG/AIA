@@ -1,5 +1,23 @@
 use super::*;
 
+#[test]
+fn portable_setup_keeps_relative_data_paths_and_does_not_store_credentials() {
+    let files = Files::new();
+    let mut app = files.app(Some(
+        include_str!("../../../config/ai-ex.portable.example.toml").to_owned(),
+    ));
+    app.api_key = "test-secret-never-persist".to_owned();
+    let document = app.config_text(0).unwrap();
+    let config = AppConfig::parse(&document).unwrap();
+    assert_eq!(config.control.token_path, "data/control.token");
+    assert_eq!(config.memory.path, "data/memory.jsonl");
+    assert!(config.memory.enabled);
+    assert!(config.desktop.auto_start_service);
+    assert!(!config.tts.enabled);
+    assert!(!config.duplex.enabled);
+    assert!(!document.contains("test-secret-never-persist"));
+}
+
 struct Files(PathBuf);
 
 impl Files {

@@ -37,6 +37,7 @@ $allowed = @{
     'ai-ex-control' = @('ai-ex-domain', 'ai-ex-observability')
     'ai-ex-ui-model' = @('ai-ex-domain', 'ai-ex-observability')
     'ai-ex-migrate' = @('ai-ex-config', 'ai-ex-domain')
+    'ai-ex-desktop' = @('ai-ex-config', 'ai-ex-control', 'ai-ex-domain', 'ai-ex-observability', 'ai-ex-ui-model')
     'ai-ex-service' = @(
         'ai-ex-asr', 'ai-ex-audit', 'ai-ex-audio', 'ai-ex-automation', 'ai-ex-bilibili', 'ai-ex-capture',
         'ai-ex-config', 'ai-ex-control', 'ai-ex-core', 'ai-ex-domain', 'ai-ex-event-bus',
@@ -48,17 +49,25 @@ $allowed = @{
     )
 }
 
-$metadata = cargo metadata --no-deps --locked --offline --format-version 1
+$workspaceRoot = Split-Path -Parent $PSScriptRoot
+$metadata = cargo metadata --manifest-path (Join-Path $workspaceRoot 'Cargo.toml') --no-deps --locked --offline --format-version 1
 if ($LASTEXITCODE -ne 0)
 {
     throw 'cargo metadata failed'
 }
 $metadata = $metadata | ConvertFrom-Json
+$desktopMetadata = cargo metadata --manifest-path (Join-Path $workspaceRoot 'crates/ai-ex-desktop/Cargo.toml') --no-deps --locked --offline --format-version 1
+if ($LASTEXITCODE -ne 0)
+{
+    throw 'desktop cargo metadata failed'
+}
+$desktopMetadata = $desktopMetadata | ConvertFrom-Json
+$packages = @($metadata.packages) + @($desktopMetadata.packages)
 $workspaceIds = [Collections.Generic.HashSet[string]]::new(
-    [string[]]$metadata.workspace_members
+    [string[]](@($metadata.workspace_members) + @($desktopMetadata.workspace_members))
 )
 $workspaceNames = [Collections.Generic.HashSet[string]]::new()
-foreach ($package in $metadata.packages)
+foreach ($package in $packages)
 {
     if ($workspaceIds.Contains([string]$package.id))
     {
@@ -69,12 +78,15 @@ foreach ($package in $metadata.packages)
 $violations = [Collections.Generic.List[object]]::new()
 if ($ProbeViolation)
 {
-    $violations.Add([pscustomobject]@{
-        package = 'ai-ex-domain'
-        dependency = 'ai-ex-service'
-    })
+    foreach ($package in $packages)
+    {
+        if ($package.name -in @('ai-ex-domain', 'ai-ex-desktop'))
+        {
+            $package.dependencies = @($package.dependencies) + @([pscustomobject]@{ name = 'ai-ex-service' })
+        }
+    }
 }
-foreach ($package in $metadata.packages)
+foreach ($package in $packages)
 {
     if (!$workspaceIds.Contains([string]$package.id))
     {
@@ -113,4 +125,6 @@ if ($violations.Count -gt 0)
 [pscustomobject]@{
     status = 'passed'
     checked_packages = $workspaceIds.Count
+    workspace_packages = @($metadata.workspace_members).Count
+    desktop_packages = @($desktopMetadata.workspace_members).Count
 } | ConvertTo-Json -Compress

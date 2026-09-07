@@ -1,5 +1,7 @@
 # AIex 桌面端快速使用
 
+普通使用请先看[Windows 便携版](PORTABLE_WINDOWS.md)：完整解压后双击 `AIex.exe`。整体测试从[界面体验清单](MANUAL_TEST_PLAN.md)开始；分层与状态归属见[架构说明](ARCHITECTURE.md)。下文同时保留源码开发入口。
+
 AIex 提供两种入口：普通用户使用可视化首次设置向导；开发者可以继续使用命令行、配置文件和终端日志。桌面端只通过本地 control 协议连接 `ai-ex-service`，不会直接持有模型、VTS 或音频对象。
 
 | 使用方式 | 入口 | 能看到什么 |
@@ -9,7 +11,9 @@ AIex 提供两种入口：普通用户使用可视化首次设置向导；开发
 
 ## 小白模式：双击完成初始化
 
-Windows 用户可以直接双击仓库根目录的 `AIex-Desktop.cmd`。它优先启动 `crates/ai-ex-desktop/target/release` 或 `crates/ai-ex-desktop/target/debug` 中已构建的桌面端；开发环境没有二进制时才调用 Cargo。首次打开会进入可视化设置向导。
+便携版双击 `AIex.exe`，欢迎页可直接进入离线外形体验，也可连接模型。配置在包内 `data`，后台服务已包含，无需构建。
+
+源码用户可双击仓库根目录的 `AIex-Desktop.cmd`。它优先启动 `crates/ai-ex-desktop/target/release` 或 `crates/ai-ex-desktop/target/debug` 中已构建的桌面端；没有二进制时才调用 Cargo。无参数启动同样显示欢迎页。
 
 开发者可以双击 `AIex-Desktop-Developer.cmd`，让诊断面板默认展开；桌面端日志和服务原始 stdout/stderr 可以同时查看。
 
@@ -27,8 +31,8 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
 5. 填写角色名称，点击“保存并进入 AIex”。
 6. 点击“检查连接”可提前检查地址和本地服务端口；HTTP 本地服务会读取状态码，HTTPS 云服务先检查网络端口，完整 API 鉴权由服务启动时再次验证。
 
-向导会自动创建 `config/ai-ex.local.toml` 和 `config/control.token`。
-连通性检查不会保存 API Key；向导生成的配置只保存环境变量名，密钥仍通过当前进程或环境变量传递。勾选“打开 AIex 时自动启动服务”后，该选择会保存在配置中。桌面优先复用通过令牌验证的已有服务；需要启动时，优先使用旁边的 `ai-ex-service.exe`，源码环境缺少该文件时先构建再直接启动。源码构建启用音频输入/输出 feature，设备是否启用仍由配置决定。服务日志保留在原始终端中。
+源码默认向导创建 `config/ai-ex.local.toml` 和 `config/control.token`；便携版更新 `data/ai-ex.local.toml` 并创建 `data/control.token`，已有有效令牌保持不变。
+连通性检查不会保存 API Key；向导生成的配置只保存环境变量名，密钥仍通过当前进程或环境变量传递。勾选“打开 AIex 时自动启动服务”后，该选择会保存在配置中。桌面优先复用通过令牌验证的已有服务；需要启动时，优先使用旁边的 `ai-ex-service.exe`，源码环境缺少该文件时先构建再直接启动。源码构建启用音频输入/输出 feature，设备是否启用仍由配置决定。便携版服务日志保存在 `data/logs/service.log`；源码模式保留原始终端输出。
 
 ### 服务随桌面运行
 
@@ -56,7 +60,7 @@ cargo run -p ai-ex-service -- --config "config/ai-ex.local.toml" --serve
 
 同一控制地址只运行一个服务。旁置发布程序需要同步升级桌面与服务，旧服务不认识新增运行参数。源码回退构建可能耗时，进度显示在原始终端；发布环境应将服务程序放在桌面程序旁边。
 
-本轮验证：workspace 全 feature 共 175 项测试通过（另有 1 项默认忽略的真实音频设备测试），独立桌面 20 项测试通过。桌面测试覆盖启动偏好重载、自定义令牌、已有服务认证、配置扩展字段与记忆保留、Windows 文件占用、旧内容冲突检测，以及图片外形解码、状态回退和偏好恢复。真实窗口验证使用自定义令牌路径进入已连接状态，复用外部服务且关闭后该服务仍在；停掉测试服务后再次打开同一配置，保存的自动启动偏好会启动新服务并随桌面结束退出。首次设置完整点击流程、独立服务 Ctrl+C 和真实模型语音连续对话仍需分别实机验收。
+自动验收覆盖启动偏好、自定义令牌、已有服务认证、配置保留与冲突检测、图片解码、状态回退和启动组合。具体测试数量以[版本说明](releases/0.3.0-alpha.1.md)为准；首次设置完整点击、真实模型与音频设备、独立服务关闭和整机重连请按[整体验收流程](MANUAL_TEST_PLAN.md)记录实际结果。
 
 外形面板支持内置伙伴、光球和自定义图片角色。文件夹包导入、示例生成与离线预览见 [图片外形包](APPEARANCE_PACKS.md)。
 
@@ -118,7 +122,7 @@ cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --config config/a
 
 ## 启动前检查
 
-服务可先执行离线配置和组件检查：
+服务可先执行配置加载与组件健康检查（会访问已配置的外部服务）：
 
 ```powershell
 cargo run -p ai-ex-service -- --config config/ai-ex.desktop.example.toml --check

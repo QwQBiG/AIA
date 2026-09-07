@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
 mod appearance;
@@ -6,6 +7,7 @@ mod appearance_import;
 mod character_files;
 mod character_library;
 mod image_appearance;
+mod portable;
 mod preview;
 mod scene_files;
 mod scene_resume;
@@ -14,6 +16,7 @@ mod setup;
 mod setup_storage;
 mod speech_panel;
 mod startup;
+mod welcome;
 mod worker;
 
 use std::path::PathBuf;
@@ -26,17 +29,59 @@ use worker::{WorkerSettings, spawn_worker};
 fn main() {
     if let Err(error) = run() {
         eprintln!("AIex desktop failed: {error}");
+        if !std::env::args().any(|argument| argument == "--check-install") {
+            let _ignored = welcome::show_error(error.to_string());
+        }
         std::process::exit(1);
     }
 }
 
 fn run() -> Result<(), AppError> {
-    let options = parse_options(std::env::args().skip(1))?;
+    let arguments: Vec<_> = std::env::args().skip(1).collect();
+    let executable =
+        std::env::current_exe().map_err(|error| AppError::unavailable(error.to_string()))?;
+    if arguments == ["--check-install"] {
+        let directory = executable
+            .parent()
+            .ok_or_else(|| AppError::configuration("executable has no directory"))?;
+        portable::check(directory)?;
+        println!(
+            "{}",
+            serde_json::json!({"ready": true, "version": env!("CARGO_PKG_VERSION")})
+        );
+        return Ok(());
+    }
+    let show_welcome = arguments.is_empty();
+    let mut options = parse_options(arguments.into_iter())?;
+    let portable_root = portable::root(&executable).filter(|_| !options.config_explicit);
+    if let Some(directory) = &portable_root {
+        std::env::set_current_dir(directory).map_err(|error| {
+            AppError::configuration(format!("cannot enter portable directory: {error}"))
+        })?;
+        options.config_path = PathBuf::from(portable::CONFIG);
+    }
+    if show_welcome {
+        match welcome::run(portable::configured(&options.config_path))? {
+            Some(welcome::Choice::Preview) => options.preview = true,
+            Some(welcome::Choice::Setup) => options.setup = true,
+            Some(welcome::Choice::Connect) => {}
+            None => return Ok(()),
+        }
+    }
     if options.preview {
         return preview::run(options.appearance_pack);
     }
-    let setup_result = if options.setup || !options.config_path.exists() {
-        Some(setup::run(options.config_path.clone())?)
+    if let Some(directory) = &portable_root {
+        portable::check(directory)?;
+    }
+    let setup_result = if options.setup
+        || !options.config_path.exists()
+        || (portable_root.is_some() && !portable::configured(&options.config_path))
+    {
+        let Some(result) = setup::run(options.config_path.clone())? else {
+            return Ok(());
+        };
+        Some(result)
     } else {
         None
     };
@@ -95,6 +140,7 @@ fn run() -> Result<(), AppError> {
 
 struct LaunchOptions {
     config_path: PathBuf,
+    config_explicit: bool,
     setup: bool,
     developer: bool,
     preview: bool,
@@ -105,6 +151,7 @@ struct LaunchOptions {
 
 fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOptions, AppError> {
     let mut config_path = PathBuf::from("config/ai-ex.local.toml");
+    let mut config_explicit = false;
     let mut setup = false;
     let mut developer = false;
     let mut preview = false;
@@ -115,6 +162,7 @@ fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOption
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--config" => {
+                config_explicit = true;
                 config_path = PathBuf::from(
                     arguments
                         .next()
@@ -160,6 +208,7 @@ fn parse_options(arguments: impl Iterator<Item = String>) -> Result<LaunchOption
     }
     Ok(LaunchOptions {
         config_path,
+        config_explicit,
         setup,
         developer,
         preview,

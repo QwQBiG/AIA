@@ -117,7 +117,12 @@ async fn main() {
 }
 
 async fn run() -> Result<(), AppError> {
-    let args = Args::parse(std::env::args().skip(1))?;
+    let arguments: Vec<_> = std::env::args().skip(1).collect();
+    if arguments == ["--version"] {
+        println!("ai-ex-service {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    let args = Args::parse(arguments)?;
     let config = AppConfig::load(&args.config).await?;
     if (args.serve || args.managed) && !config.control.enabled {
         return Err(AppError::configuration(

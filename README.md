@@ -1,207 +1,139 @@
 # AIex
 
-AIex 是一个 Windows 优先、Rust-first 的本地数字人项目。当前主线提供流式对话、持久记忆、语音调度、内置 2D 外形与 VTube Studio 适配；长期目标是让人格、声音、外形、行为与场景可以自由组合。
+一个 Windows 优先、以 Rust 为核心的本地数字伙伴工作室。人格、记忆和表现相互独立：同一个角色可以使用原生 2D 伙伴、光球、图片立绘，也可以隐藏外形或连接 VTube Studio。
 
-当前阶段版本为 **0.3.0-alpha.1：对话与恢复 Alpha**。在角色收藏、多种外形、独立记忆和场景组合基础上，完善慢模型与语音拥堵时的打断、外形故障降级，以及停止期间的记忆保存。开始使用和验收边界见 [版本说明](docs/releases/0.3.0-alpha.1.md)。
+当前版本：**0.3.1-alpha.1 · Windows 便携体验版**。[版本说明](docs/releases/0.3.1-alpha.1.md)记录交付能力及限制；[演进路线](docs/DIGITAL_HUMAN_ROADMAP.md)记录后续设计。
 
-后续实施以 [数字人演进计划](docs/DIGITAL_HUMAN_ROADMAP.md) 为主线：先完善稳定运行与角色工作室，再推进跨载体表达、连续记忆、主动行为及可分享的组合包。网页、悬浮伙伴和 VRM 3D 均纳入计划，具体实现状态与验收条件见文档。
+**首次体验只需完整解压程序包，双击 `AIex.exe`。** 无需安装 Rust、Python 或 VTube Studio。[整体验收流程](docs/MANUAL_TEST_PLAN.md)从界面操作开始。
 
-旧 Python 实现位于 `main.py` 与 `src/`，当前仅作为行为参考；不再向旧实现增加新功能。新功能、修复和性能优化全部进入 Cargo workspace。
+[下载 Windows 便携包](https://github.com/QwQBiG/AIA/releases/download/v0.3.1-alpha.1/AIex-Windows-x64-0.3.1-alpha.1.zip) · [查看发布与校验文件](https://github.com/QwQBiG/AIA/releases/tag/v0.3.1-alpha.1)
 
-## 当前状态
+## 可以做什么
 
-| 能力 | Rust 状态 | 说明 |
-| --- | --- | --- |
-| 配置 | 可用 | TOML、默认值、校验、异步读取 |
-| 对话核心 | 可用 | 显式状态机、运行时 actor、排队、流式打断、结构化事件 |
-| 模型后端 | 可用 | DeepSeek V4 SSE、KoboldCpp SSE、Ollama NDJSON，均支持超时和取消 |
-| VTube Studio | 可用 | WebSocket 认证、嘴型参数、响应情绪到显式热键 ID 的映射 |
-| 文本处理 | 可用 | UTF-8 分句、Markdown/TTS 清理 |
-| 持久记忆 | 可用 | JSONL 持久化、相关性检索、上下文注入 |
-| 语音调度 | 可用 | 有界队列、背压、代际取消、当前播放停止令牌 |
-| 音频合成/播放 | 条件可用 | GPT-SoVITS 与 Rodio 实现完成；本机播放由 feature 控制 |
-| 全双工 ASR/VAD | 条件可用 | Rust VAD、HTTP Whisper、抢话和采集实现完成；原生采集由 feature 控制 |
-| 桌面 UI | 条件可用 | 独立 eframe 包已通过编译和单元测试；真实窗口交互仍需验收 |
-| 视觉自动化 | 安全核心可用 | 视觉观察、能力许可和持久审计已完成；Windows 动作适配器尚未启用 |
+| 能力 | 当前实现 |
+| --- | --- |
+| 自定义角色 | 新建、独立复制、收藏多个版本、导入导出、预览确认后应用 |
+| 记忆连续性 | 按角色 ID 隔离本地 JSONL 记忆；换外形不换身份 |
+| 多种外形 | 内置伙伴、光球、PNG/JPEG 表情组、隐藏外形；VTS 可选 |
+| 组合场景 | 保存角色与外形，图片随包携带；支持启动时恢复已选组合 |
+| 对话与打断 | 三种模型适配器、流式回答、有界排队、慢模型和语音拥堵时取消 |
+| 声音与表达 | 配置 GPT-SoVITS 后朗读；原生字幕、情绪与能量口型跟随实际播放 |
+| 故障恢复 | 断线重同步、外形输出降级、停止期间保护已开始的记忆写入 |
+| 可选输入与扩展 | Whisper 兼容转写、原生采集、Bilibili、OBS、插件与只读视觉分析 |
+
+网页、桌面悬浮窗口、VRM 3D、图形化声音/行为包编辑器尚未实现。场景包目前组合角色与外形，模型凭据、声音配置和私人记忆不随包导出。Windows 自动化动作适配器尚未启用。
 
 ## 快速开始
 
-### 数字人外形工作室
+1. 将 `AIex-Windows-x64-0.3.1-alpha.1.zip` 完整解压到可写入的文件夹。
+2. 双击其中的 **`AIex.exe`**，点击 **“先体验外形”**。无需账号或模型即可切换伙伴、光球、表情和图片外形。
+3. 准备好模型服务后，重新打开程序，点击 **“连接模型并开始对话”**，按界面填写连接信息并保存。后台服务已随包提供，会自动启动。
 
-无需模型、令牌或 VTube Studio，可直接预览内置 2D 伙伴和光球，调整配色、表情与动态效果：
+真实对话需要自己的云端密钥，或已经运行的 Ollama / KoboldCpp。模型和声音资源没有内置；语音、麦克风、VTS、OBS 默认关闭。云端密钥只在本次进程中使用；未设置对应环境变量时，下次打开会再次进入连接设置。
 
-```powershell
-cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --preview
-```
+便携包中 `AIex.exe`、`ai-ex-service.exe`、`AIex.portable` 和 `data` 必须一起保留。配置与记忆保存在 `data`，后台日志在 `data/logs/service.log`。外形偏好和角色收藏仍有本机设置，跨电脑请先导出场景或角色包。详见[便携版使用说明](docs/PORTABLE_WINDOWS.md)。
 
-正常连接服务后，桌面的“数字人外形”面板会跟随实际运行状态；启用原生语音播放时，内置外形口型由音频能量驱动，离线工作室保留示意动画。详见 [声音与表达](docs/SPEECH_PRESENTATION.md)；后续网页/3D 载体、记忆连续性与表达协调见 [数字人演进路线](docs/DIGITAL_HUMAN_ROADMAP.md)。
+### 从源码运行或制作程序包
 
-现在也可选择“图片角色”，导入自己的 PNG/JPEG 立绘与表情包，跟随倾听、思考、声音口型和情绪切换。示例生成器、清单格式与操作说明见 [图片外形包](docs/APPEARANCE_PACKS.md)。
+<details>
+<summary>开发者构建步骤（使用便携包可跳过）</summary>
 
-人格设定也可独立保存为 [角色包](docs/CHARACTER_PACKS.md)。桌面角色设置支持导入草稿、预览应用和导出新文件；仓库提供陪伴与主持两个示例角色。外形选择与角色身份分别管理，相同角色 ID 复用其记忆。
+以下命令在仓库根目录的 PowerShell 中执行。源码需要 **Rust 1.96 或更新的兼容版本**及对应工具链的 Windows 链接器；首次构建需要下载依赖。
 
-通过[角色收藏](docs/CHARACTER_LIBRARY.md)，可以直接选择、新建或复制独立角色，保存多个版本并查看当前设定与草稿的来源。收藏保存设定副本；原文件移动后仍可使用，移出收藏不删除角色记忆。
-
-通过 [场景组合](docs/SCENE_PACKS.md) 可将已应用的角色、外形与显示偏好一起保存和重载，图片素材随包携带。桌面提供预览确认、失败保留与保存新目录；可从“安静陪伴”和“轻快主持”两套示例开始修改。
-
-也可以将当前组合设为启动组合，让下次打开继续使用同一份角色与外形。启动选择按服务配置分别保存；桌面新启动服务时自动恢复，连接已有服务时先预览确认。
-
-### 小白用户：双击打开可视化向导
-
-在 Windows 资源管理器中双击仓库根目录的 `AIex-Desktop.cmd` 即可打开桌面端；如果已经构建了 `crates/ai-ex-desktop/target/release`/`debug` 二进制，它会直接启动，否则才回退到 Cargo 开发启动。首次打开会进入可视化设置向导，不需要先手写 TOML 或控制令牌。
-
-开发者需要同时查看结构化诊断时，双击 `AIex-Desktop-Developer.cmd`；服务原始 stdout/stderr 仍保留在启动终端。
-
-向导会选择 DeepSeek、KoboldCpp 或 Ollama，生成本地配置和控制令牌，也可以配置 Bilibili 房间号。勾选自动启动后，服务会在后台运行；普通界面显示连接、对话和急停状态。
-
-桌面记住“打开 AIex 时自动启动服务”的设置，复用已认证的服务或启动自己的托管服务；后者随窗口关闭而退出。旧配置默认不自动启动，可用 `--start-service` 为本次启用，或用 `--connect-only` 临时仅连接。需要服务独立持续运行时使用 `ai-ex-service --config "config/ai-ex.local.toml" --serve`（要求启用控制端）。详见 [服务运行方式](docs/DESKTOP_USER_GUIDE.md)。
-
-### 开发者：同时看可视化状态和原始日志
-
-~~~powershell
-cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml" -- --developer
-~~~
-
-桌面默认显示新手控制台；点击右上角“开发者诊断”可展开结构化事件，启动它的终端仍保留服务 stdout/stderr，适合定位连接、模型和事件问题。
-
-本版本开发与 CI 基线为 Rust 1.96，两个 Cargo 清单采用相同要求。
+### 1. 构建两个程序
 
 ```powershell
-cargo test --workspace
-cargo run -p ai-ex-service -- --check
-cargo run -p ai-ex-service -- --prompt "你好"
+cargo build -p ai-ex-service --all-features --locked
+cargo build --manifest-path crates/ai-ex-desktop/Cargo.toml --locked
 ```
 
-Developer stage replay:
+核心 workspace 和独立桌面包分别构建。构建只准备程序，语音输出与麦克风是否启用仍由配置控制。
+
+### 2. 先预览外形
 
 ```powershell
-cargo run -p ai-ex-service -- --replay-stage path/to/stage.jsonl
-cargo run -p ai-ex-service -- --replay-automation config_examples/automation-replay.jsonl
+& .\crates\ai-ex-desktop\target\debug\ai-ex-desktop.exe --preview
 ```
 
-使用只读视觉分析（需在配置中启用 `[vision]`）：
+此模式无需模型、语音服务或 VTube Studio，可以切换内置外形和手动预览表现。自定义立绘见[图片外形包](docs/APPEARANCE_PACKS.md)。
+
+### 3. 设置并开始对话
 
 ```powershell
-cargo run -p ai-ex-service -- --config "config/ai-ex.local.toml" --vision-image "screen.png" --vision-prompt "描述当前界面"
+& .\crates\ai-ex-desktop\target\debug\ai-ex-desktop.exe
 ```
 
-启用 GPT-SoVITS 本机播放时使用：
+无参数运行先显示欢迎页；选择连接模型后进入设置向导。选择一个已准备好的模型服务，填写模型名称或凭据，勾选“打开 AIex 时自动启动服务”，保存后连接。已有配置可用 `--setup` 重新编辑。
+
+日常也可双击 `AIex-Desktop.cmd`；它优先选择 release 程序，其次 debug。**源码验收使用上面的明确路径，避免旧 release 程序遮住刚构建的 debug 版本。** 若程序旁边放有服务二进制，也应同步更新。
+
+- 日常配置：`config/ai-ex.local.toml`；首次设置生成控制令牌，不需要手工填写令牌内容。
+- DeepSeek 密钥只在当前设置进程中使用，或从配置指定的环境变量读取，不写入 TOML。重开程序时需重新提供环境变量或通过设置填写。
+- 桌面新启动的服务随桌面退出；复用已运行且认证成功的服务时，关闭桌面保留该服务。
+- 修改配置后需重启对应服务。相对资源路径按启动工作目录解释，因此从仓库根目录运行。
+
+详细入口、服务模式与诊断见[桌面指南](docs/DESKTOP_USER_GUIDE.md)。独立测试配置与测试端口见[验收流程](docs/MANUAL_TEST_PLAN.md)。
+
+制作同样的便携包（PowerShell 7）：
 
 ```powershell
-cargo run -p ai-ex-service --features native-playback -- --config "config/ai-ex.local.toml"
+./tools/package_windows.ps1
 ```
 
-启用 Windows 原生麦克风与全双工输入时，在本机配置中设置
-`duplex.enabled = true`，并使用：
+脚本构建 release、检查程序包并在 `dist/` 生成 ZIP 与 SHA256。已有目标会拒绝覆盖；`-Offline` 使用已缓存依赖。仅在已完成对应 release 构建时使用 `-SkipBuild`。
 
-```powershell
-cargo run -p ai-ex-service --features native-capture -- --config "config/ai-ex.local.toml"
+</details>
+
+## 按需连接外部能力
+
+| 目标 | 需要准备什么 | 说明 |
+| --- | --- | --- |
+| 文字对话 | DeepSeek、Ollama 或 KoboldCpp 中任意一种 | 按服务实际支持的模型填写；见[模型后端](docs/MODEL_BACKENDS.md) |
+| 语音朗读 | GPT-SoVITS、可访问的参考音频及匹配提示文本 | 启用 `[tts]`；见[声音与表达](docs/SPEECH_PRESENTATION.md) |
+| 麦克风对话 | Whisper 兼容 HTTP 转写服务和输入设备 | 启用 `[duplex]`；先验收文字与播放，再测试采集 |
+| VTS / OBS | 对应应用及其接口配置 | 原生外形无需它们；VTS/OBS 仍按生成动作调度 |
+| 直播输入 | Bilibili 房间及连接配置 | 默认关闭；见[直播连接](docs/BILIBILI_CONNECTOR.md) |
+
+外部模型、语音服务与资源不随项目内置。健康检查会访问配置的外部服务，不是纯离线检查；返回退出码 1 时应查看具体不可用组件。模型不可用时不能完成对话；可选外形不可用时可以降级。
+
+## 整体架构
+
+```mermaid
+flowchart LR
+    Desktop[桌面工作室] <-->|本地认证控制协议| Service[Rust 服务 / 组合根]
+    Inputs[文字 / 语音 / 直播事件] --> Service
+    Service --> Core[会话运行时 / 角色与取消]
+    Core <--> Model[模型适配器]
+    Core <--> Memory[身份记忆]
+    Core --> Speech[语音队列 / 合成 / 播放]
+    Core --> Stage[可选舞台动作 / VTS / OBS]
+    Core --> Events[有序事件与快照]
+    Speech --> Events
+    Events --> Desktop
 ```
 
-交互模式：
+服务持有会话状态；桌面通过协议提交意图、读取快照并绘制外形。生成进度和实际播放进度分别管理。角色、外形和场景清单共用配置校验，不绑定某个模型或渲染引擎。
 
-```powershell
-cargo run -p ai-ex-service
-```
+完整模块职责、依赖方向、数据流、取消边界及扩展方式见 **[架构说明](docs/ARCHITECTURE.md)**。架构检查同时覆盖 30 个 workspace 包与独立桌面包。
 
-默认读取 `config/ai-ex.example.toml`。本机私有配置应复制为 `config/ai-ex.local.toml` 并通过参数指定：
+## 数据与配置
 
-```powershell
-cargo run -p ai-ex-service -- --config "config/ai-ex.local.toml" --check
-```
+| 数据 | 归属与保存方式 |
+| --- | --- |
+| 服务初始配置 | TOML；保存模型引用、初始角色、功能开关和本机路径 |
+| 角色包 / 外形包 / 场景包 | 可分享的 schema v1 清单；详细格式见对应文档 |
+| 私人记忆 | 服务配置的 JSONL 文件，按 `profile_id` 逻辑隔离 |
+| 收藏 / 外形偏好 / 启动组合 | 本机桌面设置；收藏可跨服务复用，启动组合按配置路径和控制地址区分 |
+| 密钥 / 控制令牌 | 环境变量或本机令牌文件，不随组合包导出 |
 
-`config/ai-ex.local.toml`、`token.json`、运行日志和构建产物已被 `.gitignore` 排除。
+记忆保存在本机，但召回片段会随对话上下文交给所选模型；使用云模型时，这部分请求会发送到对应服务。角色身份隔离不是文件加密。默认目录中新生成的 Rust JSONL 记忆已排除提交；自定义数据路径需自行确认忽略规则。测试资料请使用验收流程指定的独立目录。
 
-`[conversation]` 可设置系统提示、保留的历史轮数和每轮记忆召回上限；默认历史窗口为 12 轮，避免长期运行时上下文无限增长。
+## 验证与文档
 
-模型可在响应开头返回 `[neutral]`、`[happy]`、`[angry]`、`[sad]` 或 `[surprised]`。标签会转为事件而不会进入语音、字幕或记忆；只有 `[vts.expression_hotkeys]` 中明确配置的映射才会触发 VTS。
+[整体验收流程](docs/MANUAL_TEST_PLAN.md)提供简短体验清单，以及可展开的深度检查和故障记录方法。自动验证范围见[本版说明](docs/releases/0.3.1-alpha.1.md)；真实窗口操作和音频设备仍需整机验收。
 
-从旧 `config.json` 生成新的本机配置（目标已存在时拒绝覆盖）：
+- [角色收藏](docs/CHARACTER_LIBRARY.md) · [角色包](docs/CHARACTER_PACKS.md) · [图片外形](docs/APPEARANCE_PACKS.md) · [场景组合](docs/SCENE_PACKS.md)
+- [人格与记忆](docs/PERSONA_MEMORY.md) · [控制协议](docs/CONTROL_PROTOCOL.md) · [插件协议](docs/PLUGIN_PROTOCOL.md)
+- [开发约定](CONTRIBUTING.md) · [文档索引](docs/README.md) · [后续路线](docs/DIGITAL_HUMAN_ROADMAP.md)
 
-```powershell
-cargo run -p ai-ex-migrate -- --input "config.json" --output "config/ai-ex.local.toml"
-```
-
-迁移器不会自动启用旧 Agent、视觉、全双工或控制端口；这些高风险能力必须在新配置中显式复核后开启。
-
-## 外部服务
-
-- DeepSeek V4：官方 API 默认 `https://api.deepseek.com`；密钥从 `DEEPSEEK_API_KEY` 读取，示例见 `docs/MODEL_BACKENDS.md`。`deepseek-v4-flash` 适合先测，`deepseek-v4-pro` 可按需切换。
-- Ollama：默认 `http://127.0.0.1:11434`，适配仍保留。
-- KoboldCpp：可选后端，默认 `http://127.0.0.1:5001`；设置 `model.backend = "koboldcpp"` 启用。
-- VTube Studio：默认 `ws://127.0.0.1:8001`，令牌文件结构为 `{ "token": "..." }`。
-- GPT-SoVITS：默认 `http://127.0.0.1:9880`，默认关闭。
-- Whisper 兼容 ASR：默认 `http://127.0.0.1:8000/v1/audio/transcriptions`，默认关闭全双工。
-- VTS 不可用时，服务降级为无头像输出；`--check` 会将其报告为 unavailable。
-- Ollama 不可用时无法完成对话，服务会返回结构化连接错误。
-
-## Rust 工作空间
-
-```text
-crates/
-  ai-ex-domain/   领域类型、错误和事件
-  ai-ex-config/   TOML 配置与校验
-  ai-ex-text/     分句和 TTS 文本清理
-  ai-ex-core/     对话状态机、端口和异步编排
-  ai-ex-deepseek/ DeepSeek V4 SSE 流式 HTTP 适配器
-  ai-ex-ollama/   Ollama 流式 HTTP 适配器
-  ai-ex-koboldcpp/ KoboldCpp 流式 SSE 适配器
-  ai-ex-vts/      VTube Studio WebSocket actor
-  ai-ex-stage/     舞台动作协议、能力声明和 dry-run 执行器
-  ai-ex-stage-obs/ OBS 字幕/场景/热键 dry-run 适配器与 JSONL 录制
-  ai-ex-audio/    有界语音队列与取消
-  ai-ex-tts/      GPT-SoVITS HTTP 适配器
-  ai-ex-memory/   Rust 原生持久记忆
-  ai-ex-duplex/   VAD、音频/ASR 端口与全双工指令
-  ai-ex-asr/      Whisper 兼容 HTTP 转写与 WAV 编码
-  ai-ex-capture/  Windows 原生麦克风输入（feature）
-  ai-ex-observability/ 事件广播与运行快照
-  ai-ex-safety/   能力白名单、目标范围和急停许可
-  ai-ex-control/  令牌认证的本地 JSONL 控制协议
-  ai-ex-ui-model/ 框架无关的 UI reducer 与断线补偿
-  ai-ex-vision/   只读视觉观察与 Ollama 多模态适配器
-  ai-ex-automation/ 动作验证、许可、执行阶段与重试语义
-  ai-ex-audit/    启动校验、同步落盘的 JSONL 审计日志
-  ai-ex-migrate/  旧 JSON 到新 TOML 的安全迁移器
-  ai-ex-service/  CLI、组合根和健康检查
-```
-
-`crates/ai-ex-desktop/` 是独立的 eframe 原生桌面包。它保持在默认 workspace 之外，保证核心可以离线验证；桌面端有自己的锁文件和独立构建命令。
-
-依赖方向固定为：`domain/text/duplex contracts → core → adapters → service`。网络、设备、数据库和 UI 不得反向进入领域层。
-
-## 验证
-
-```powershell
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo fmt --manifest-path crates/ai-ex-desktop/Cargo.toml -- --check
-pwsh -NoProfile -File "tools/check_architecture.ps1"
-```
-
-健康检查在外部服务未启动时返回退出码 1，这是预期行为，不代表配置或 Rust 二进制构建失败。
-
-## 迁移原则
-
-1. 不翻译旧类结构，按领域、端口和 actor 重建。
-2. 每个外部能力都有超时、健康状态、取消和降级路径。
-3. 自动化默认关闭，急停与授权优先于功能数量。
-4. 迁移完成并通过行为验收后，才删除对应 Python 模块。
-
-详细评估和阶段计划见 `docs/CORE_TECHNICAL_BASELINE.md`。
-Python 退役批次和删除门禁见 `docs/LEGACY_RETIREMENT.md`。
-
-交互模式支持 `/status`、`/interrupt`、`/emergency-stop` 和 `/quit`。
-急停一旦触发，只能通过重启服务清除。
-
-桌面客户端通过本地控制端口接入。首次设置向导会自动创建至少 32 字节的 `config/control.token` 并启用控制端；高级手动配置时仍需自行确认 `control.enabled = true`。协议定义见
-`docs/CONTROL_PROTOCOL.md`；服务拒绝任何非回环监听地址。
-
-桌面端首次启动会自动打开可视化向导，适合不熟悉命令行的用户：
-
-```powershell
-cargo run --manifest-path "crates/ai-ex-desktop/Cargo.toml"
-```
-
-向导可选择 DeepSeek、KoboldCpp 或 Ollama，自动生成本地配置和控制令牌，并可自动启动服务。开发者使用 `--developer` 查看桌面控制日志；服务原始 stdout/stderr 仍保留在终端。完整说明见 [`docs/DESKTOP_USER_GUIDE.md`](docs/DESKTOP_USER_GUIDE.md)。
+旧 `main.py`、`src/` 和 Python 文档保留为历史行为参考，不属于当前 Rust 启动路径；迁移记录见[技术基线](docs/CORE_TECHNICAL_BASELINE.md)与[退役计划](docs/LEGACY_RETIREMENT.md)。

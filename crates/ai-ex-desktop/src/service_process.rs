@@ -17,6 +17,16 @@ impl ManagedService {
         let executable = service_executable()?;
         let mut command = Command::new(executable);
         command.args(["--managed", "--config"]).arg(config_path);
+        if let Some(directory) = std::env::current_exe()
+            .ok()
+            .and_then(|path| crate::portable::root(&path))
+        {
+            let log = crate::portable::service_log(&directory)?;
+            let errors = log
+                .try_clone()
+                .map_err(|error| AppError::unavailable(error.to_string()))?;
+            command.stdout(Stdio::from(log)).stderr(Stdio::from(errors));
+        }
         if let Some(api_key) = api_key {
             command.env(api_key_env, api_key);
         }
@@ -27,14 +37,9 @@ impl ManagedService {
 
     fn start_command(command: &mut Command) -> Result<Self, AppError> {
         hide_console(command);
-        let child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|error| {
-                AppError::unavailable(format!("cannot start ai-ex-service: {error}"))
-            })?;
+        let child = command.stdin(Stdio::piped()).spawn().map_err(|error| {
+            AppError::unavailable(format!("cannot start ai-ex-service: {error}"))
+        })?;
         Ok(Self { child })
     }
 

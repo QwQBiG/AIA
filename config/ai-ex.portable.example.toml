@@ -1,0 +1,31 @@
+# Distributed defaults only. Personal data is created after launching the app.
+[model]
+backend = "deepseek"
+
+[desktop]
+auto_start_service = true
+
+[control]
+enabled = true
+bind = "127.0.0.1:17878"
+token_path = "data/control.token"
+
+[memory]
+enabled = true
+path = "data/memory.jsonl"
+
+[vts]
+enabled = false
+
+[obs]
+enabled = false
+
+[tts]
+enabled = false
+
+[duplex]
+enabled = false
+
+[safety]
+automation_enabled = false
+audit_path = "data/logs/automation-audit.jsonl"

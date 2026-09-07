@@ -134,6 +134,7 @@ target/
 config/ai-ex.local.toml
 config/ai-ex.migration-test.toml
 config/control.token
+memory_db/*.jsonl
 
 # Keep cache directory structure but ignore audio files
 !assets/cache/README.md

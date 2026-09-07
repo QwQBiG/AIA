@@ -1,0 +1,41 @@
+# Copy to target/manual-test/ai-ex.local.toml, then open the desktop with --setup.
+[model]
+backend = "ollama"
+
+[ollama]
+base_url = "http://127.0.0.1:11434"
+model = "llama3.2:latest"
+timeout_seconds = 120
+
+[persona]
+profile_id = "acceptance.a"
+revision = 1
+name = "测试伙伴 A"
+tone = "温暖、自然、简洁"
+
+[desktop]
+auto_start_service = true
+
+[control]
+enabled = true
+bind = "127.0.0.1:7879"
+token_path = "target/manual-test/control.token"
+
+[memory]
+enabled = true
+path = "target/manual-test/memory.jsonl"
+
+[vts]
+enabled = false
+
+[obs]
+enabled = false
+
+[tts]
+enabled = false
+
+[duplex]
+enabled = false
+
+[safety]
+automation_enabled = false

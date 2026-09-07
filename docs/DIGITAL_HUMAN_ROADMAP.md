@@ -210,4 +210,4 @@ cargo test --manifest-path crates/ai-ex-desktop/Cargo.toml --locked
 
 状态、偏好保存和两种外形的绘制测试均在 Rust 中实现。绘制测试覆盖不同表情与窗口宽度，检查生成的网格有效性；真实窗口截图用于人工检查布局，不能替代完整交互验收。
 
-本机 GNU 工具链若报 `cannot find -lshlwapi`，应安装完整的 MinGW 系统导入库。此次本机验证通过在当前 PowerShell 进程设置 `$env:LIBRARY_PATH = "$env:SystemRoot/System32"` 使用现有系统 DLL 完成链接；未修改全局工具链或项目依赖。
+本机 GNU 工具链若报 `cannot find -lshlwapi`，应准备兼容的 MinGW-w64 导入库。早期使用系统 DLL 目录绕过链接错误的做法只验证过开发构建，不能作为分发方案：便携版验收发现了启动阶段的导入错误。发布需使用完整导入库，并检查实际 EXE 的启动与退出。

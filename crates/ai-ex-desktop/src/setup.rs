@@ -22,7 +22,7 @@ pub struct SetupResult {
     pub api_key: Option<String>,
 }
 
-pub fn run(default_path: PathBuf) -> Result<SetupResult, AppError> {
+pub fn run(default_path: PathBuf) -> Result<Option<SetupResult>, AppError> {
     let original = if default_path.exists() {
         let text = std::fs::read_to_string(&default_path).map_err(|error| {
             AppError::configuration(format!("cannot read existing configuration: {error}"))
@@ -43,14 +43,17 @@ pub fn run(default_path: PathBuf) -> Result<SetupResult, AppError> {
     eframe::run_native(
         "AIex 首次设置",
         options,
-        Box::new(move |_context| Ok(Box::new(SetupApp::new(default_path, shared, original)))),
+        Box::new(move |context| {
+            crate::app::configure_appearance(&context.egui_ctx);
+            Ok(Box::new(SetupApp::new(default_path, shared, original)))
+        }),
     )
     .map_err(|error| AppError::unavailable(error.to_string()))?;
-    result
+    let selected = result
         .lock()
         .map_err(|_| AppError::unavailable("setup result lock poisoned"))?
-        .clone()
-        .ok_or_else(|| AppError::configuration("setup canceled; run AIex again to retry"))
+        .clone();
+    Ok(selected)
 }
 
 struct SetupApp {
@@ -438,12 +441,12 @@ fn default_port(scheme: &str) -> u16 {
 impl eframe::App for SetupApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_probe();
-        egui::CentralPanel::default().show(ui, |ui|
-        {
+        egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("AIex 首次设置");
-            ui.label("不需要命令行知识，按下面几步即可开始。密钥只在本次进程中使用，不会写入配置文件。");
-            ui.horizontal_wrapped(|ui|
-            {
+            ui.label(
+                "不需要命令行知识，按下面几步即可开始。密钥只在本次进程中使用，不会写入配置文件。",
+            );
+            ui.horizontal_wrapped(|ui| {
                 ui.strong("1 选择模型");
                 ui.label("→");
                 ui.strong("2 检查连接");
@@ -451,71 +454,75 @@ impl eframe::App for SetupApp {
                 ui.strong("3 保存并开始对话");
             });
             ui.add_space(12.0);
-            ui.horizontal(|ui|
-            {
+            ui.horizontal(|ui| {
                 ui.label("模型来源");
                 let before = self.provider;
                 egui::ComboBox::from_id_salt("provider")
                     .selected_text(self.provider.label())
-                    .show_ui(ui, |ui|
-                    {
-                        ui.selectable_value(&mut self.provider, ProviderChoice::DeepSeek, ProviderChoice::DeepSeek.label());
-                        ui.selectable_value(&mut self.provider, ProviderChoice::KoboldCpp, ProviderChoice::KoboldCpp.label());
-                        ui.selectable_value(&mut self.provider, ProviderChoice::Ollama, ProviderChoice::Ollama.label());
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.provider,
+                            ProviderChoice::DeepSeek,
+                            ProviderChoice::DeepSeek.label(),
+                        );
+                        ui.selectable_value(
+                            &mut self.provider,
+                            ProviderChoice::KoboldCpp,
+                            ProviderChoice::KoboldCpp.label(),
+                        );
+                        ui.selectable_value(
+                            &mut self.provider,
+                            ProviderChoice::Ollama,
+                            ProviderChoice::Ollama.label(),
+                        );
                     });
-                if before != self.provider
-                {
+                if before != self.provider {
                     self.provider_changed();
                 }
             });
-            ui.group(|ui|
-            {
+            ui.group(|ui| {
                 ui.strong(format!("当前 Provider：{}", self.provider.label()));
                 ui.label(self.provider.description());
                 ui.small(self.provider.model_hint());
             });
-            let check_clicked = ui.horizontal(|ui|
-            {
-                ui.label("模型地址");
-                ui.text_edit_singleline(&mut self.endpoint);
-                ui.add_enabled(!self.checking, egui::Button::new("检查连接")).clicked()
-            }).inner;
-            if check_clicked
-            {
+            let check_clicked = ui
+                .horizontal(|ui| {
+                    ui.label("模型地址");
+                    ui.text_edit_singleline(&mut self.endpoint);
+                    ui.add_enabled(!self.checking, egui::Button::new("检查连接"))
+                        .clicked()
+                })
+                .inner;
+            if check_clicked {
                 self.check_connection();
             }
-            if self.checking
-            {
+            if self.checking {
                 ui.weak("正在检查；不会保存 API Key。");
             }
-            ui.horizontal(|ui|
-            {
+            ui.horizontal(|ui| {
                 ui.label("模型名称");
                 ui.text_edit_singleline(&mut self.model);
             });
-            ui.horizontal(|ui|
-            {
+            ui.horizontal(|ui| {
                 ui.label("角色名称");
                 ui.text_edit_singleline(&mut self.persona_name);
             });
-            if self.provider == ProviderChoice::DeepSeek
-            {
-                ui.horizontal(|ui|
-                {
+            if self.provider == ProviderChoice::DeepSeek {
+                ui.horizontal(|ui| {
                     ui.label("DeepSeek API Key");
                     ui.add(egui::TextEdit::singleline(&mut self.api_key).password(true));
                 });
             }
-            ui.checkbox(&mut self.bilibili_enabled, "接收 Bilibili 直播事件（可稍后开启）");
-            if self.bilibili_enabled
-            {
-                ui.horizontal(|ui|
-                {
+            ui.checkbox(
+                &mut self.bilibili_enabled,
+                "接收 Bilibili 直播事件（可稍后开启）",
+            );
+            if self.bilibili_enabled {
+                ui.horizontal(|ui| {
                     ui.label("直播间号");
                     ui.text_edit_singleline(&mut self.bilibili_room_id);
                 });
-                ui.horizontal(|ui|
-                {
+                ui.horizontal(|ui| {
                     ui.label("Cookie 环境变量名");
                     ui.text_edit_singleline(&mut self.bilibili_cookie_env);
                 });
@@ -524,15 +531,17 @@ impl eframe::App for SetupApp {
             ui.checkbox(&mut self.start_service, "打开 AIex 时自动启动服务（推荐）");
             ui.add_space(8.0);
             ui.label(format!("配置文件：{}", self.config_path.display()));
-            ui.label("首次启动会自动生成本地控制令牌；开发者可以在 config/control.token 和日志文件中检查状态。");
-            if !self.status.is_empty()
-            {
-                let color = if self.status_error { egui::Color32::LIGHT_RED } else { egui::Color32::LIGHT_GREEN };
+            ui.label("首次启动会自动准备本地连接，无需手工填写控制令牌。");
+            if !self.status.is_empty() {
+                let color = if self.status_error {
+                    egui::Color32::LIGHT_RED
+                } else {
+                    egui::Color32::LIGHT_GREEN
+                };
                 ui.colored_label(color, &self.status);
             }
             ui.add_space(12.0);
-            if ui.button("保存并进入 AIex").clicked()
-            {
+            if ui.button("保存并进入 AIex").clicked() {
                 self.save(ui.ctx());
             }
         });
