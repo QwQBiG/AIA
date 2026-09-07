@@ -10,8 +10,7 @@ pub const STAGE_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum StageAction
-{
+pub enum StageAction {
     Speak {
         turn_id: TurnId,
         text: String,
@@ -38,12 +37,9 @@ pub enum StageAction
     Stop,
 }
 
-impl StageAction
-{
-    pub fn kind(&self) -> &'static str
-    {
-        match self
-        {
+impl StageAction {
+    pub fn kind(&self) -> &'static str {
+        match self {
             Self::Speak { .. } => "speak",
             Self::Expression { .. } => "expression",
             Self::Mouth { .. } => "mouth",
@@ -54,10 +50,8 @@ impl StageAction
         }
     }
 
-    pub fn required_capability(&self) -> Option<StageCapability>
-    {
-        match self
-        {
+    pub fn required_capability(&self) -> Option<StageCapability> {
+        match self {
             Self::Speak { .. } => Some(StageCapability::Speech),
             Self::Expression { .. } => Some(StageCapability::Expression),
             Self::Mouth { .. } => Some(StageCapability::Mouth),
@@ -67,41 +61,29 @@ impl StageAction
             Self::Stop => None,
         }
     }
-    pub fn validate(&self) -> Result<(), AppError>
-    {
-        match self
-        {
-            Self::Speak { text, .. } if text.trim().is_empty() =>
-            {
-                Err(AppError::configuration("stage speak text must not be empty"))
-            }
-            Self::Speak { text, .. } if text.chars().count() > 4_096 =>
-            {
+    pub fn validate(&self) -> Result<(), AppError> {
+        match self {
+            Self::Speak { text, .. } if text.trim().is_empty() => Err(AppError::configuration(
+                "stage speak text must not be empty",
+            )),
+            Self::Speak { text, .. } if text.chars().count() > 4_096 => {
                 Err(AppError::configuration("stage speak text is too long"))
             }
-            Self::Mouth { value } if !value.is_finite() || !(0.0..=1.0).contains(value) =>
-            {
-                Err(AppError::configuration("stage mouth value must be between 0 and 1"))
-            }
-            Self::Subtitle {
-                text,
-                duration_ms,
-            } if text.trim().is_empty() || *duration_ms == 0 =>
-            {
+            Self::Mouth { value } if !value.is_finite() || !(0.0..=1.0).contains(value) => Err(
+                AppError::configuration("stage mouth value must be between 0 and 1"),
+            ),
+            Self::Subtitle { text, duration_ms } if text.trim().is_empty() || *duration_ms == 0 => {
                 Err(AppError::configuration(
                     "stage subtitle requires text and positive duration",
                 ))
             }
-            Self::Subtitle { text, .. } if text.chars().count() > 8_192 =>
-            {
+            Self::Subtitle { text, .. } if text.chars().count() > 8_192 => {
                 Err(AppError::configuration("stage subtitle text is too long"))
             }
-            Self::Scene { scene } if scene.trim().is_empty() =>
-            {
+            Self::Scene { scene } if scene.trim().is_empty() => {
                 Err(AppError::configuration("stage scene must not be empty"))
             }
-            Self::Hotkey { id } if id.trim().is_empty() =>
-            {
+            Self::Hotkey { id } if id.trim().is_empty() => {
                 Err(AppError::configuration("stage hotkey id must not be empty"))
             }
             _ => Ok(()),
@@ -111,8 +93,7 @@ impl StageAction
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum StageCapability
-{
+pub enum StageCapability {
     Speech,
     Expression,
     Mouth,
@@ -123,8 +104,7 @@ pub enum StageCapability
 }
 
 #[async_trait]
-pub trait StageExecutor: Send + Sync
-{
+pub trait StageExecutor: Send + Sync {
     fn capabilities(&self) -> BTreeSet<StageCapability>;
 
     async fn health(&self) -> ComponentHealth;
@@ -134,15 +114,12 @@ pub trait StageExecutor: Send + Sync
     async fn interrupt(&mut self) -> Result<(), AppError>;
 }
 
-pub struct StageRouter
-{
+pub struct StageRouter {
     executors: Vec<Box<dyn StageExecutor>>,
 }
 
-impl StageRouter
-{
-    pub fn new() -> Self
-    {
+impl StageRouter {
+    pub fn new() -> Self {
         Self {
             executors: Vec::new(),
         }
@@ -155,66 +132,77 @@ impl StageRouter
         self.executors.push(Box::new(executor));
     }
 
-    pub fn push_box(&mut self, executor: Box<dyn StageExecutor>)
-    {
+    pub fn push_box(&mut self, executor: Box<dyn StageExecutor>) {
         self.executors.push(executor);
     }
-    pub fn len(&self) -> usize
-    {
+    pub fn len(&self) -> usize {
         self.executors.len()
     }
 
-    pub fn is_empty(&self) -> bool
-    {
+    pub fn is_empty(&self) -> bool {
         self.executors.is_empty()
+    }
+
+    pub async fn interrupt_speech(&mut self) -> Result<(), AppError> {
+        self.interrupt_group(Some(true)).await
+    }
+
+    pub async fn interrupt_presentation(&mut self) -> Result<(), AppError> {
+        self.interrupt_group(Some(false)).await
+    }
+
+    async fn interrupt_group(&mut self, speech: Option<bool>) -> Result<(), AppError> {
+        let operations = self
+            .executors
+            .iter_mut()
+            .filter(|executor| {
+                speech.is_none_or(|selected| {
+                    executor.capabilities().contains(&StageCapability::Speech) == selected
+                })
+            })
+            .map(|executor| executor.interrupt());
+        futures_util::future::join_all(operations)
+            .await
+            .into_iter()
+            .try_for_each(|result| result)
     }
 }
 
-impl Default for StageRouter
-{
-    fn default() -> Self
-    {
+impl Default for StageRouter {
+    fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl StageExecutor for StageRouter
-{
-    fn capabilities(&self) -> BTreeSet<StageCapability>
-    {
+impl StageExecutor for StageRouter {
+    fn capabilities(&self) -> BTreeSet<StageCapability> {
         self.executors
             .iter()
             .flat_map(|executor| executor.capabilities())
             .collect()
     }
 
-    async fn health(&self) -> ComponentHealth
-    {
+    async fn health(&self) -> ComponentHealth {
         ComponentHealth {
             component: "stage-router".to_owned(),
             ready: !self.executors.is_empty(),
             detail: format!("{} executor(s) configured", self.executors.len()),
         }
     }
-    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
-    {
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError> {
         action.validate()?;
-        let Some(capability) = action.required_capability() else
-        {
+        let Some(capability) = action.required_capability() else {
             return self.interrupt().await;
         };
         let mut matched = false;
-        for executor in &mut self.executors
-        {
-            if executor.capabilities().contains(&capability)
-            {
+        for executor in &mut self.executors {
+            if executor.capabilities().contains(&capability) {
                 matched = true;
                 executor.execute(action.clone()).await?;
             }
         }
-        if !matched
-        {
+        if !matched {
             return Err(AppError::unavailable(format!(
                 "no stage executor supports {}",
                 action.kind(),
@@ -223,28 +211,21 @@ impl StageExecutor for StageRouter
         Ok(())
     }
 
-    async fn interrupt(&mut self) -> Result<(), AppError>
-    {
-        for executor in &mut self.executors
-        {
-            executor.interrupt().await?;
-        }
-        Ok(())
+    async fn interrupt(&mut self) -> Result<(), AppError> {
+        self.interrupt_group(None).await
     }
 }
-pub struct DryRunStage
-{
+pub struct DryRunStage {
     actions: VecDeque<StageAction>,
     capacity: usize,
 }
 
-impl DryRunStage
-{
-    pub fn new(capacity: usize) -> Result<Self, AppError>
-    {
-        if capacity == 0
-        {
-            return Err(AppError::configuration("stage dry-run capacity must be positive"));
+impl DryRunStage {
+    pub fn new(capacity: usize) -> Result<Self, AppError> {
+        if capacity == 0 {
+            return Err(AppError::configuration(
+                "stage dry-run capacity must be positive",
+            ));
         }
         Ok(Self {
             actions: VecDeque::with_capacity(capacity),
@@ -252,27 +233,22 @@ impl DryRunStage
         })
     }
 
-    pub fn actions(&self) -> impl Iterator<Item = &StageAction>
-    {
+    pub fn actions(&self) -> impl Iterator<Item = &StageAction> {
         self.actions.iter()
     }
 
-    pub fn len(&self) -> usize
-    {
+    pub fn len(&self) -> usize {
         self.actions.len()
     }
 
-    pub fn is_empty(&self) -> bool
-    {
+    pub fn is_empty(&self) -> bool {
         self.actions.is_empty()
     }
 }
 
 #[async_trait]
-impl StageExecutor for DryRunStage
-{
-    fn capabilities(&self) -> BTreeSet<StageCapability>
-    {
+impl StageExecutor for DryRunStage {
+    fn capabilities(&self) -> BTreeSet<StageCapability> {
         BTreeSet::from([
             StageCapability::Expression,
             StageCapability::Hotkey,
@@ -284,8 +260,7 @@ impl StageExecutor for DryRunStage
         ])
     }
 
-    async fn health(&self) -> ComponentHealth
-    {
+    async fn health(&self) -> ComponentHealth {
         ComponentHealth {
             component: "stage-dry-run".to_owned(),
             ready: true,
@@ -293,32 +268,27 @@ impl StageExecutor for DryRunStage
         }
     }
 
-    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
-    {
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError> {
         action.validate()?;
-        if self.actions.len() >= self.capacity
-        {
+        if self.actions.len() >= self.capacity {
             return Err(AppError::unavailable("stage dry-run queue is full"));
         }
         self.actions.push_back(action);
         Ok(())
     }
 
-    async fn interrupt(&mut self) -> Result<(), AppError>
-    {
+    async fn interrupt(&mut self) -> Result<(), AppError> {
         self.actions.clear();
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn dry_run_records_valid_actions_and_capabilities()
-    {
+    async fn dry_run_records_valid_actions_and_capabilities() {
         let mut stage = DryRunStage::new(4).expect("stage creates");
         stage
             .execute(StageAction::Expression {
@@ -327,13 +297,15 @@ mod tests
             .await
             .expect("expression executes");
         assert!(stage.capabilities().contains(&StageCapability::Expression));
-        assert_eq!(stage.actions().next().map(StageAction::kind), Some("expression"));
+        assert_eq!(
+            stage.actions().next().map(StageAction::kind),
+            Some("expression")
+        );
         assert!(stage.health().await.ready);
     }
 
     #[tokio::test]
-    async fn dry_run_rejects_invalid_actions()
-    {
+    async fn dry_run_rejects_invalid_actions() {
         let mut stage = DryRunStage::new(2).expect("stage creates");
         let error = stage
             .execute(StageAction::Mouth { value: 2.0 })
@@ -353,8 +325,7 @@ mod tests
     }
 
     #[tokio::test]
-    async fn dry_run_queue_is_bounded_and_interruptible()
-    {
+    async fn dry_run_queue_is_bounded_and_interruptible() {
         let mut stage = DryRunStage::new(1).expect("stage creates");
         stage
             .execute(StageAction::Stop)
@@ -366,8 +337,7 @@ mod tests
     }
 
     #[test]
-    fn actions_round_trip_with_versioned_kind()
-    {
+    fn actions_round_trip_with_versioned_kind() {
         let action = StageAction::Subtitle {
             text: "hello".to_owned(),
             duration_ms: 1_000,
@@ -381,8 +351,7 @@ mod tests
         assert_eq!(decoded, action);
     }
     #[tokio::test]
-    async fn router_routes_by_capability_and_broadcasts_interrupt()
-    {
+    async fn router_routes_by_capability_and_broadcasts_interrupt() {
         let mut router = StageRouter::new();
         router.push(DryRunStage::new(4).expect("stage creates"));
         assert!(router.capabilities().contains(&StageCapability::Subtitle));

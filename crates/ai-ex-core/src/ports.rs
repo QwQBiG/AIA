@@ -3,15 +3,13 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
-pub struct ModelRequest
-{
+pub struct ModelRequest {
     pub turn_id: TurnId,
     pub messages: Vec<Message>,
 }
 
 #[async_trait]
-pub trait LanguageModelPort: Send
-{
+pub trait LanguageModelPort: Send {
     async fn stream(
         &mut self,
         request: ModelRequest,
@@ -21,41 +19,49 @@ pub trait LanguageModelPort: Send
 }
 
 #[async_trait]
-pub trait SpeechPort: Send
-{
+pub trait SpeechPort: Send {
     async fn enqueue(&mut self, turn_id: TurnId, sentence: String) -> Result<(), AppError>;
-    async fn enqueue_expressive(&mut self, turn_id: TurnId, sentence: String, _emotion: Emotion) -> Result<(), AppError>
-    {
+    async fn enqueue_expressive(
+        &mut self,
+        turn_id: TurnId,
+        sentence: String,
+        _emotion: Emotion,
+    ) -> Result<(), AppError> {
         self.enqueue(turn_id, sentence).await
     }
     async fn interrupt(&mut self) -> Result<(), AppError>;
 }
 
 #[async_trait]
-pub trait AvatarPort: Send
-{
+pub trait AvatarPort: Send {
     async fn set_speaking(&mut self, speaking: bool) -> Result<(), AppError>;
     async fn set_neutral(&mut self) -> Result<(), AppError>;
 
-    async fn set_emotion(&mut self, _emotion: Emotion) -> Result<(), AppError>
-    {
+    async fn set_subtitle(&mut self, _text: String) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn interrupt_presentation(&mut self) -> Result<(), AppError> {
+        self.set_neutral().await
+    }
+
+    async fn set_emotion(&mut self, _emotion: Emotion) -> Result<(), AppError> {
         Ok(())
     }
 }
 
 #[async_trait]
-pub trait EventSink: Send
-{
+pub trait EventSink: Send {
     async fn publish(&mut self, event: SystemEvent);
 }
 
 #[async_trait]
-pub trait MemoryPort: Send + Sync
-{
+pub trait MemoryPort: Send + Sync {
     /// Switch all subsequent operations atomically, or leave the old scope unchanged.
-    async fn select_profile(&mut self, _profile_id: &str) -> Result<(), AppError>
-    {
-        Err(AppError::unavailable("memory adapter does not support isolated profiles"))
+    async fn select_profile(&mut self, _profile_id: &str) -> Result<(), AppError> {
+        Err(AppError::unavailable(
+            "memory adapter does not support isolated profiles",
+        ))
     }
 
     async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError>;
@@ -64,8 +70,7 @@ pub trait MemoryPort: Send + Sync
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<Message>, AppError>
-    {
+    ) -> Result<Vec<Message>, AppError> {
         self.recall(query, limit).await
     }
 

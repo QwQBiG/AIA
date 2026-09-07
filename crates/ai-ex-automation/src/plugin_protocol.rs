@@ -10,8 +10,7 @@ use crate::AutomationAction;
 pub const AUTOMATION_PLUGIN_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AutomationPluginRequest
-{
+pub struct AutomationPluginRequest {
     pub schema_version: u16,
     pub request_id: Uuid,
     #[serde(flatten)]
@@ -20,9 +19,10 @@ pub struct AutomationPluginRequest
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AutomationPluginRequestKind
-{
-    Observe { prompt: String },
+pub enum AutomationPluginRequestKind {
+    Observe {
+        prompt: String,
+    },
     Execute {
         target: String,
         rationale: String,
@@ -31,10 +31,8 @@ pub enum AutomationPluginRequestKind
     Interrupt,
 }
 
-impl AutomationPluginRequest
-{
-    pub fn new(payload: AutomationPluginRequestKind) -> Self
-    {
+impl AutomationPluginRequest {
+    pub fn new(payload: AutomationPluginRequestKind) -> Self {
         Self {
             schema_version: AUTOMATION_PLUGIN_SCHEMA_VERSION,
             request_id: Uuid::new_v4(),
@@ -42,20 +40,15 @@ impl AutomationPluginRequest
         }
     }
 
-    pub fn validate(&self) -> Result<(), AppError>
-    {
-        if self.schema_version != AUTOMATION_PLUGIN_SCHEMA_VERSION
-        {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if self.schema_version != AUTOMATION_PLUGIN_SCHEMA_VERSION {
             return Err(AppError::protocol(format!(
                 "unsupported automation plugin schema version {}",
                 self.schema_version,
             )));
         }
-        match &self.payload
-        {
-            AutomationPluginRequestKind::Observe { prompt }
-                if prompt.chars().count() > 4_096 =>
-            {
+        match &self.payload {
+            AutomationPluginRequestKind::Observe { prompt } if prompt.chars().count() > 4_096 => {
                 Err(AppError::configuration(
                     "automation observe prompt is too long",
                 ))
@@ -64,16 +57,13 @@ impl AutomationPluginRequest
                 target,
                 rationale,
                 action,
-            } =>
-            {
-                if target.trim().is_empty() || target.chars().count() > 256
-                {
+            } => {
+                if target.trim().is_empty() || target.chars().count() > 256 {
                     return Err(AppError::configuration(
                         "automation plugin target is invalid",
                     ));
                 }
-                if rationale.trim().is_empty() || rationale.chars().count() > 4_096
-                {
+                if rationale.trim().is_empty() || rationale.chars().count() > 4_096 {
                     return Err(AppError::configuration(
                         "automation plugin rationale is invalid",
                     ));
@@ -87,8 +77,7 @@ impl AutomationPluginRequest
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AutomationPluginResponse
-{
+pub struct AutomationPluginResponse {
     pub schema_version: u16,
     pub request_id: Uuid,
     #[serde(flatten)]
@@ -97,28 +86,27 @@ pub struct AutomationPluginResponse
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AutomationPluginResponseKind
-{
+pub enum AutomationPluginResponseKind {
     Observation {
         source: String,
         summary: String,
         frame_ref: Option<String>,
         confidence: Option<f32>,
     },
-    ActionAccepted { action_id: Uuid },
+    ActionAccepted {
+        action_id: Uuid,
+    },
     Interrupted,
 }
 
-impl AutomationPluginResponse
-{
+impl AutomationPluginResponse {
     pub fn observation(
         request_id: Uuid,
         source: impl Into<String>,
         summary: impl Into<String>,
         frame_ref: Option<String>,
         confidence: Option<f32>,
-    ) -> Self
-    {
+    ) -> Self {
         Self {
             schema_version: AUTOMATION_PLUGIN_SCHEMA_VERSION,
             request_id,
@@ -131,31 +119,26 @@ impl AutomationPluginResponse
         }
     }
 
-    pub fn validate(&self) -> Result<(), AppError>
-    {
-        if self.schema_version != AUTOMATION_PLUGIN_SCHEMA_VERSION
-        {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if self.schema_version != AUTOMATION_PLUGIN_SCHEMA_VERSION {
             return Err(AppError::protocol(format!(
                 "unsupported automation plugin schema version {}",
                 self.schema_version,
             )));
         }
-        if let AutomationPluginResponseKind::Observation
-        {
+        if let AutomationPluginResponseKind::Observation {
             source,
             summary,
             frame_ref,
             confidence,
         } = &self.payload
         {
-            if source.trim().is_empty() || source.chars().count() > 256
-            {
+            if source.trim().is_empty() || source.chars().count() > 256 {
                 return Err(AppError::protocol(
                     "automation observation source is invalid",
                 ));
             }
-            if summary.trim().is_empty() || summary.chars().count() > 8_192
-            {
+            if summary.trim().is_empty() || summary.chars().count() > 8_192 {
                 return Err(AppError::protocol(
                     "automation observation summary is invalid",
                 ));
@@ -168,8 +151,7 @@ impl AutomationPluginResponse
                     "automation observation frame reference is invalid",
                 ));
             }
-            if confidence.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
-            {
+            if confidence.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
                 return Err(AppError::protocol(
                     "automation observation confidence must be between 0 and 1",
                 ));
@@ -180,13 +162,11 @@ impl AutomationPluginResponse
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn request_round_trips_an_execute_action()
-    {
+    fn request_round_trips_an_execute_action() {
         let request = AutomationPluginRequest::new(AutomationPluginRequestKind::Execute {
             target: "game".to_owned(),
             rationale: "demo".to_owned(),
@@ -200,8 +180,7 @@ mod tests
     }
 
     #[test]
-    fn response_rejects_invalid_confidence()
-    {
+    fn response_rejects_invalid_confidence() {
         let response = AutomationPluginResponse::observation(
             Uuid::new_v4(),
             "vision",
@@ -213,8 +192,7 @@ mod tests
     }
 
     #[test]
-    fn observe_prompt_has_a_bound()
-    {
+    fn observe_prompt_has_a_bound() {
         let request = AutomationPluginRequest::new(AutomationPluginRequestKind::Observe {
             prompt: "x".repeat(4_097),
         });

@@ -6,25 +6,22 @@ use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
-pub struct CaptureSettings
-{
+pub struct CaptureSettings {
     pub device_name: Option<String>,
     pub queue_capacity: usize,
 }
 
-pub struct NativeAudioSource
-{
+pub struct NativeAudioSource {
     _stream: Stream,
     receiver: mpsc::Receiver<Result<AudioFrame, AppError>>,
 }
 
-impl NativeAudioSource
-{
-    pub fn open(settings: CaptureSettings) -> Result<Self, AppError>
-    {
-        if settings.queue_capacity == 0
-        {
-            return Err(AppError::configuration("capture queue capacity must be positive"));
+impl NativeAudioSource {
+    pub fn open(settings: CaptureSettings) -> Result<Self, AppError> {
+        if settings.queue_capacity == 0 {
+            return Err(AppError::configuration(
+                "capture queue capacity must be positive",
+            ));
         }
         let host = cpal::default_host();
         let device = select_device(&host, settings.device_name.as_deref())?;
@@ -36,8 +33,7 @@ impl NativeAudioSource
         let sample_rate = config.sample_rate.0;
         let channels = config.channels;
         let (sender, receiver) = mpsc::channel(settings.queue_capacity);
-        let stream = match sample_format
-        {
+        let stream = match sample_format {
             SampleFormat::F32 => build_stream(
                 &device,
                 &config,
@@ -77,12 +73,9 @@ impl NativeAudioSource
 }
 
 #[async_trait]
-impl AudioSourcePort for NativeAudioSource
-{
-    async fn next_frame(&mut self) -> Result<Option<AudioFrame>, AppError>
-    {
-        match self.receiver.recv().await
-        {
+impl AudioSourcePort for NativeAudioSource {
+    async fn next_frame(&mut self) -> Result<Option<AudioFrame>, AppError> {
+        match self.receiver.recv().await {
             Some(Ok(frame)) => Ok(Some(frame)),
             Some(Err(error)) => Err(error),
             None => Ok(None),
@@ -90,18 +83,14 @@ impl AudioSourcePort for NativeAudioSource
     }
 }
 
-fn select_device(host: &cpal::Host, requested: Option<&str>) -> Result<Device, AppError>
-{
-    if let Some(requested) = requested.filter(|name| !name.trim().is_empty())
-    {
-        let devices = host
-            .input_devices()
-            .map_err(|error| AppError::unavailable(format!("cannot list input devices: {error}")))?;
-        for device in devices
-        {
+fn select_device(host: &cpal::Host, requested: Option<&str>) -> Result<Device, AppError> {
+    if let Some(requested) = requested.filter(|name| !name.trim().is_empty()) {
+        let devices = host.input_devices().map_err(|error| {
+            AppError::unavailable(format!("cannot list input devices: {error}"))
+        })?;
+        for device in devices {
             let name = device.name().unwrap_or_default();
-            if name.eq_ignore_ascii_case(requested)
-            {
+            if name.eq_ignore_ascii_case(requested) {
                 return Ok(device);
             }
         }
@@ -129,14 +118,12 @@ where
     device
         .build_input_stream(
             config,
-            move |data: &[T], _info|
-            {
+            move |data: &[T], _info| {
                 let samples = data.iter().copied().map(convert).collect();
                 let frame = AudioFrame::new(samples, sample_rate, channels);
                 let _ignored = sender.try_send(frame);
             },
-            move |error|
-            {
+            move |error| {
                 let error = AppError::unavailable(format!("audio capture failed: {error}"));
                 let _ignored = error_sender.try_send(Err(error));
             },

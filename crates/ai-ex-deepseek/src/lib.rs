@@ -13,8 +13,7 @@ use serde_json::Value;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::AbortHandle;
 
-pub struct DeepSeekSettings
-{
+pub struct DeepSeekSettings {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
@@ -23,21 +22,16 @@ pub struct DeepSeekSettings
     pub reasoning_effort: String,
 }
 
-pub struct DeepSeekClient
-{
+pub struct DeepSeekClient {
     client: reqwest::Client,
     settings: DeepSeekSettings,
     active_turn: Arc<Mutex<Option<TurnId>>>,
     abort_handle: Option<AbortHandle>,
 }
 
-impl DeepSeekClient
-{
-    pub fn new(mut settings: DeepSeekSettings) -> Result<Self, AppError>
-    {
-        if !settings.base_url.starts_with("http://")
-            && !settings.base_url.starts_with("https://")
-        {
+impl DeepSeekClient {
+    pub fn new(mut settings: DeepSeekSettings) -> Result<Self, AppError> {
+        if !settings.base_url.starts_with("http://") && !settings.base_url.starts_with("https://") {
             return Err(AppError::configuration(
                 "DeepSeek base_url must be HTTP or HTTPS",
             ));
@@ -50,8 +44,7 @@ impl DeepSeekClient
                 "DeepSeek model, API key, and timeout are required",
             ));
         }
-        if !matches!(settings.reasoning_effort.as_str(), "high" | "max")
-        {
+        if !matches!(settings.reasoning_effort.as_str(), "high" | "max") {
             return Err(AppError::configuration(
                 "DeepSeek reasoning_effort must be high or max",
             ));
@@ -69,8 +62,7 @@ impl DeepSeekClient
         })
     }
 
-    pub async fn health(&self) -> ComponentHealth
-    {
+    pub async fn health(&self) -> ComponentHealth {
         let url = format!("{}/models", self.settings.base_url);
         let response = match self
             .client
@@ -80,35 +72,24 @@ impl DeepSeekClient
             .await
         {
             Ok(response) => response,
-            Err(error) =>
-            {
-                return ComponentHealth::unavailable(
-                    "deepseek",
-                    request_failure_detail(&error),
-                );
+            Err(error) => {
+                return ComponentHealth::unavailable("deepseek", request_failure_detail(&error));
             }
         };
         let status = response.status();
-        if !status.is_success()
-        {
-            return ComponentHealth::unavailable(
-                "deepseek",
-                http_failure_detail(status.as_u16()),
-            );
+        if !status.is_success() {
+            return ComponentHealth::unavailable("deepseek", http_failure_detail(status.as_u16()));
         }
-        let body = match response.json::<Value>().await
-        {
+        let body = match response.json::<Value>().await {
             Ok(body) => body,
-            Err(error) =>
-            {
+            Err(error) => {
                 return ComponentHealth::unavailable(
                     "deepseek",
                     format!("/models 响应无法解析；检查兼容 API：{error}"),
                 );
             }
         };
-        match listed_model(&body, &self.settings.model)
-        {
+        match listed_model(&body, &self.settings.model) {
             Some(true) => ComponentHealth {
                 component: "deepseek".to_owned(),
                 ready: true,
@@ -116,28 +97,33 @@ impl DeepSeekClient
             },
             Some(false) => ComponentHealth::unavailable(
                 "deepseek",
-                format!("API 可用但 model={} 未列出；检查模型名称或账户权限", self.settings.model),
+                format!(
+                    "API 可用但 model={} 未列出；检查模型名称或账户权限",
+                    self.settings.model
+                ),
             ),
             None => ComponentHealth {
                 component: "deepseek".to_owned(),
                 ready: true,
-                detail: format!("API 可用；model={} 未能通过 /models 验证", self.settings.model),
+                detail: format!(
+                    "API 可用；model={} 未能通过 /models 验证",
+                    self.settings.model
+                ),
             },
         }
     }
 }
 
-fn listed_model(body: &Value, model: &str) -> Option<bool>
-{
+fn listed_model(body: &Value, model: &str) -> Option<bool> {
     let entries = body.get("data")?.as_array()?;
-    Some(entries.iter().any(|entry| {
-        entry.get("id").and_then(Value::as_str) == Some(model)
-    }))
+    Some(
+        entries
+            .iter()
+            .any(|entry| entry.get("id").and_then(Value::as_str) == Some(model)),
+    )
 }
-fn http_failure_detail(status: u16) -> String
-{
-    match status
-    {
+fn http_failure_detail(status: u16) -> String {
+    match status {
         401 | 403 => format!("鉴权失败（HTTP {status}）；检查 DeepSeek API Key"),
         404 => "接口地址不存在（HTTP 404）；检查 base_url 是否为 DeepSeek API 地址".to_owned(),
         408 | 429 => format!("请求受限（HTTP {status}）；检查限流、余额或稍后重试"),
@@ -146,32 +132,23 @@ fn http_failure_detail(status: u16) -> String
     }
 }
 
-fn request_failure_detail(error: &reqwest::Error) -> String
-{
-    if error.is_timeout()
-    {
+fn request_failure_detail(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
         "请求超时；检查网络、代理和 timeout_seconds".to_owned()
-    }
-    else if error.is_connect()
-    {
+    } else if error.is_connect() {
         "无法连接 DeepSeek；检查网络、代理和 base_url".to_owned()
-    }
-    else
-    {
+    } else {
         format!("DeepSeek 请求失败：{error}")
     }
 }
 #[async_trait]
-impl LanguageModelPort for DeepSeekClient
-{
+impl LanguageModelPort for DeepSeekClient {
     async fn stream(
         &mut self,
         request: ModelRequest,
-    ) -> Result<mpsc::Receiver<Result<String, AppError>>, AppError>
-    {
+    ) -> Result<mpsc::Receiver<Result<String, AppError>>, AppError> {
         let mut active_turn = self.active_turn.lock().await;
-        if active_turn.is_some()
-        {
+        if active_turn.is_some() {
             return Err(AppError::invalid_transition(
                 "a DeepSeek turn is already active",
             ));
@@ -190,10 +167,8 @@ impl LanguageModelPort for DeepSeekClient
             &self.settings.reasoning_effort,
         );
         let active_turn = Arc::clone(&self.active_turn);
-        let task = tokio::spawn(async move
-        {
-            if let Err(error) = execute_stream(client, url, api_key, body, sender.clone()).await
-            {
+        let task = tokio::spawn(async move {
+            if let Err(error) = execute_stream(client, url, api_key, body, sender.clone()).await {
                 let _ignored = sender.send(Err(error)).await;
             }
             *active_turn.lock().await = None;
@@ -202,17 +177,14 @@ impl LanguageModelPort for DeepSeekClient
         Ok(receiver)
     }
 
-    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError>
-    {
+    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError> {
         let mut active_turn = self.active_turn.lock().await;
-        if *active_turn != Some(turn_id)
-        {
+        if *active_turn != Some(turn_id) {
             return Err(AppError::invalid_transition(
                 "cannot cancel an inactive DeepSeek turn",
             ));
         }
-        if let Some(handle) = self.abort_handle.take()
-        {
+        if let Some(handle) = self.abort_handle.take() {
             handle.abort();
         }
         *active_turn = None;
@@ -225,8 +197,7 @@ async fn execute_stream(
     api_key: String,
     body: serde_json::Value,
     sender: mpsc::Sender<Result<String, AppError>>,
-) -> Result<(), AppError>
-{
+) -> Result<(), AppError> {
     let response = client
         .post(url)
         .bearer_auth(api_key)
@@ -238,20 +209,16 @@ async fn execute_stream(
         .map_err(|error| AppError::connectivity(error.to_string()))?;
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
-    while let Some(next) = stream.next().await
-    {
+    while let Some(next) = stream.next().await {
         let bytes = next.map_err(|error| AppError::connectivity(error.to_string()))?;
         buffer.extend_from_slice(&bytes);
-        for line in drain_lines(&mut buffer)
-        {
-            if process_event(&line, &sender).await?
-            {
+        for line in drain_lines(&mut buffer) {
+            if process_event(&line, &sender).await? {
                 return Ok(());
             }
         }
     }
-    if !buffer.iter().all(u8::is_ascii_whitespace)
-    {
+    if !buffer.iter().all(u8::is_ascii_whitespace) {
         process_event(&buffer, &sender).await?;
     }
     Ok(())
@@ -260,12 +227,9 @@ async fn execute_stream(
 async fn process_event(
     line: &[u8],
     sender: &mpsc::Sender<Result<String, AppError>>,
-) -> Result<bool, AppError>
-{
-    match parse_event(line)?
-    {
-        StreamEvent::Text(text) =>
-        {
+) -> Result<bool, AppError> {
+    match parse_event(line)? {
+        StreamEvent::Text(text) => {
             sender
                 .send(Ok(text))
                 .await
@@ -277,20 +241,17 @@ async fn process_event(
     }
 }
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn classifies_auth_and_server_failures()
-    {
+    fn classifies_auth_and_server_failures() {
         assert!(http_failure_detail(401).contains("鉴权失败"));
         assert!(http_failure_detail(503).contains("服务端故障"));
     }
 
     #[test]
-    fn detects_configured_model_in_openai_listing()
-    {
+    fn detects_configured_model_in_openai_listing() {
         let body = serde_json::json!({"data": [{"id": "deepseek-v4-flash"}]});
         assert_eq!(listed_model(&body, "deepseek-v4-flash"), Some(true));
         assert_eq!(listed_model(&body, "missing"), Some(false));
@@ -298,8 +259,7 @@ mod tests
     }
 
     #[test]
-    fn classifies_network_failures()
-    {
+    fn classifies_network_failures() {
         let error = reqwest::Client::new()
             .get("not a url")
             .build()

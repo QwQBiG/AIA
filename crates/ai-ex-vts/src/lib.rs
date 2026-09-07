@@ -6,20 +6,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use ai_ex_core::AvatarPort;
-use ai_ex_stage::{StageAction, StageCapability, StageExecutor};
 use ai_ex_domain::{AppError, ComponentHealth, Emotion};
+use ai_ex_stage::{StageAction, StageCapability, StageExecutor};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio::sync::mpsc;
 use tokio::net::TcpStream;
-use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message,
-};
+use tokio::sync::mpsc;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 #[derive(Debug, Clone)]
-pub struct VtsSettings
-{
+pub struct VtsSettings {
     pub host: String,
     pub port: u16,
     pub token_path: PathBuf,
@@ -29,23 +26,19 @@ pub struct VtsSettings
 }
 
 #[derive(Debug)]
-enum Command
-{
+enum Command {
     Mouth(f64),
     Hotkey(String),
 }
 
-pub struct VtsClient
-{
+pub struct VtsClient {
     sender: Option<mpsc::Sender<Command>>,
     health: ComponentHealth,
     expression_hotkeys: BTreeMap<String, String>,
 }
 
-impl VtsClient
-{
-    pub fn disabled() -> Self
-    {
+impl VtsClient {
+    pub fn disabled() -> Self {
         Self {
             sender: None,
             health: ComponentHealth::unavailable("vts", "disabled"),
@@ -53,8 +46,7 @@ impl VtsClient
         }
     }
 
-    pub fn unavailable(detail: impl Into<String>) -> Self
-    {
+    pub fn unavailable(detail: impl Into<String>) -> Self {
         Self {
             sender: None,
             health: ComponentHealth::unavailable("vts", detail),
@@ -62,19 +54,14 @@ impl VtsClient
         }
     }
 
-    pub async fn connect(settings: VtsSettings) -> Result<Self, AppError>
-    {
+    pub async fn connect(settings: VtsSettings) -> Result<Self, AppError> {
         let token = read_token(&settings.token_path).await?;
         let endpoint = format!("ws://{}:{}", settings.host, settings.port);
         let (mut socket, _response) = connect_async(&endpoint)
             .await
             .map_err(|error| AppError::connectivity(error.to_string()))?;
 
-        let request = protocol::authentication(
-            &token,
-            &settings.plugin_name,
-            &settings.developer,
-        );
+        let request = protocol::authentication(&token, &settings.plugin_name, &settings.developer);
         socket
             .send(Message::Text(request.to_string().into()))
             .await
@@ -90,20 +77,16 @@ impl VtsClient
         })
     }
 
-    pub fn health(&self) -> &ComponentHealth
-    {
+    pub fn health(&self) -> &ComponentHealth {
         &self.health
     }
 
-    pub async fn trigger_hotkey(&self, id: impl Into<String>) -> Result<(), AppError>
-    {
+    pub async fn trigger_hotkey(&self, id: impl Into<String>) -> Result<(), AppError> {
         self.send(Command::Hotkey(id.into())).await
     }
 
-    async fn send(&self, command: Command) -> Result<(), AppError>
-    {
-        let Some(sender) = &self.sender else
-        {
+    async fn send(&self, command: Command) -> Result<(), AppError> {
+        let Some(sender) = &self.sender else {
             return Ok(());
         };
         sender
@@ -114,31 +97,19 @@ impl VtsClient
 }
 
 #[async_trait]
-impl AvatarPort for VtsClient
-{
-    async fn set_speaking(&mut self, speaking: bool) -> Result<(), AppError>
-    {
-        let value = if speaking
-        {
-            0.65
-        }
-        else
-        {
-            0.0
-        };
+impl AvatarPort for VtsClient {
+    async fn set_speaking(&mut self, speaking: bool) -> Result<(), AppError> {
+        let value = if speaking { 0.65 } else { 0.0 };
         self.send(Command::Mouth(value)).await
     }
 
-    async fn set_neutral(&mut self) -> Result<(), AppError>
-    {
+    async fn set_neutral(&mut self) -> Result<(), AppError> {
         self.send(Command::Mouth(0.0)).await?;
         self.set_emotion(Emotion::Neutral).await
     }
 
-    async fn set_emotion(&mut self, emotion: Emotion) -> Result<(), AppError>
-    {
-        let Some(hotkey) = self.expression_hotkeys.get(emotion.as_str()).cloned() else
-        {
+    async fn set_emotion(&mut self, emotion: Emotion) -> Result<(), AppError> {
+        let Some(hotkey) = self.expression_hotkeys.get(emotion.as_str()).cloned() else {
             return Ok(());
         };
         self.send(Command::Hotkey(hotkey)).await
@@ -146,10 +117,8 @@ impl AvatarPort for VtsClient
 }
 
 #[async_trait]
-impl StageExecutor for VtsClient
-{
-    fn capabilities(&self) -> BTreeSet<StageCapability>
-    {
+impl StageExecutor for VtsClient {
+    fn capabilities(&self) -> BTreeSet<StageCapability> {
         BTreeSet::from([
             StageCapability::Expression,
             StageCapability::Hotkey,
@@ -158,20 +127,14 @@ impl StageExecutor for VtsClient
         ])
     }
 
-    async fn health(&self) -> ComponentHealth
-    {
+    async fn health(&self) -> ComponentHealth {
         self.health.clone()
     }
 
-    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
-    {
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError> {
         action.validate()?;
-        match action
-        {
-            StageAction::Expression { emotion } =>
-            {
-                AvatarPort::set_emotion(self, emotion).await
-            }
+        match action {
+            StageAction::Expression { emotion } => AvatarPort::set_emotion(self, emotion).await,
             StageAction::Mouth { value } => self.send(Command::Mouth(value.into())).await,
             StageAction::Hotkey { id } => self.trigger_hotkey(id).await,
             StageAction::Stop => AvatarPort::set_neutral(self).await,
@@ -183,22 +146,19 @@ impl StageExecutor for VtsClient
         }
     }
 
-    async fn interrupt(&mut self) -> Result<(), AppError>
-    {
+    async fn interrupt(&mut self) -> Result<(), AppError> {
         AvatarPort::set_neutral(self).await
     }
 }
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-async fn read_token(path: &PathBuf) -> Result<String, AppError>
-{
+async fn read_token(path: &PathBuf) -> Result<String, AppError> {
     let content = tokio::fs::read_to_string(path).await.map_err(|error| {
         AppError::configuration(format!("cannot read VTS token {}: {error}", path.display()))
     })?;
-    let document: Value = serde_json::from_str(&content).map_err(|error| {
-        AppError::configuration(format!("invalid VTS token JSON: {error}"))
-    })?;
+    let document: Value = serde_json::from_str(&content)
+        .map_err(|error| AppError::configuration(format!("invalid VTS token JSON: {error}")))?;
     document
         .get("token")
         .and_then(Value::as_str)
@@ -206,8 +166,7 @@ async fn read_token(path: &PathBuf) -> Result<String, AppError>
         .ok_or_else(|| AppError::configuration("VTS token file requires a string 'token'"))
 }
 
-async fn authenticate_response(socket: &mut Socket) -> Result<(), AppError>
-{
+async fn authenticate_response(socket: &mut Socket) -> Result<(), AppError> {
     let response = tokio::time::timeout(std::time::Duration::from_secs(10), socket.next())
         .await
         .map_err(|_| AppError::connectivity("VTS authentication timed out"))?
@@ -216,10 +175,9 @@ async fn authenticate_response(socket: &mut Socket) -> Result<(), AppError>
     let text = response
         .into_text()
         .map_err(|error| AppError::protocol(error.to_string()))?;
-    let document: Value = serde_json::from_str(&text)
-        .map_err(|error| AppError::protocol(error.to_string()))?;
-    if !protocol::authenticated(&document)
-    {
+    let document: Value =
+        serde_json::from_str(&text).map_err(|error| AppError::protocol(error.to_string()))?;
+    if !protocol::authenticated(&document) {
         return Err(AppError::protocol(format!(
             "VTS rejected authentication: {}",
             document.get("data").cloned().unwrap_or(Value::Null)
@@ -228,13 +186,10 @@ async fn authenticate_response(socket: &mut Socket) -> Result<(), AppError>
     Ok(())
 }
 
-async fn run_actor(socket: Socket, mut receiver: mpsc::Receiver<Command>)
-{
+async fn run_actor(socket: Socket, mut receiver: mpsc::Receiver<Command>) {
     let (mut writer, mut reader) = socket.split();
-    loop
-    {
-        tokio::select!
-        {
+    loop {
+        tokio::select! {
             command = receiver.recv() =>
             {
                 let Some(command) = command else
@@ -266,13 +221,11 @@ async fn run_actor(socket: Socket, mut receiver: mpsc::Receiver<Command>)
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn disabled_vts_exposes_only_supported_stage_actions()
-    {
+    async fn disabled_vts_exposes_only_supported_stage_actions() {
         let mut client = VtsClient::disabled();
         let capabilities = StageExecutor::capabilities(&client);
         assert!(capabilities.contains(&StageCapability::Expression));

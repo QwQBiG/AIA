@@ -15,8 +15,7 @@ pub const JSON_RPC_VERSION: &str = "2.0";
 pub const MAX_JSON_RPC_LINE_BYTES: usize = 1_048_576;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PluginManifest
-{
+pub struct PluginManifest {
     pub protocol_version: u16,
     pub id: String,
     pub version: String,
@@ -24,19 +23,18 @@ pub struct PluginManifest
     pub config_schema: Value,
 }
 
-impl PluginManifest
-{
-    pub fn validate(&self) -> Result<(), AppError>
-    {
-        if self.protocol_version == 0
-            || self.id.trim().is_empty()
-            || self.version.trim().is_empty()
+impl PluginManifest {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if self.protocol_version == 0 || self.id.trim().is_empty() || self.version.trim().is_empty()
         {
-            return Err(AppError::configuration("plugin manifest identity is invalid"));
+            return Err(AppError::configuration(
+                "plugin manifest identity is invalid",
+            ));
         }
-        if self.capabilities.iter().any(|item| item.trim().is_empty())
-        {
-            return Err(AppError::configuration("plugin capability must not be empty"));
+        if self.capabilities.iter().any(|item| item.trim().is_empty()) {
+            return Err(AppError::configuration(
+                "plugin capability must not be empty",
+            ));
         }
         Ok(())
     }
@@ -44,39 +42,31 @@ impl PluginManifest
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum RpcId
-{
+pub enum RpcId {
     Number(i64),
     String(String),
 }
 
-impl From<i64> for RpcId
-{
-    fn from(value: i64) -> Self
-    {
+impl From<i64> for RpcId {
+    fn from(value: i64) -> Self {
         Self::Number(value)
     }
 }
 
-impl From<String> for RpcId
-{
-    fn from(value: String) -> Self
-    {
+impl From<String> for RpcId {
+    fn from(value: String) -> Self {
         Self::String(value)
     }
 }
 
-impl From<&str> for RpcId
-{
-    fn from(value: &str) -> Self
-    {
+impl From<&str> for RpcId {
+    fn from(value: &str) -> Self {
         Self::String(value.to_owned())
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JsonRpcRequest
-{
+pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: RpcId,
     pub method: String,
@@ -84,10 +74,8 @@ pub struct JsonRpcRequest
     pub params: Value,
 }
 
-impl JsonRpcRequest
-{
-    pub fn new(id: impl Into<RpcId>, method: impl Into<String>, params: Value) -> Self
-    {
+impl JsonRpcRequest {
+    pub fn new(id: impl Into<RpcId>, method: impl Into<String>, params: Value) -> Self {
         Self {
             jsonrpc: JSON_RPC_VERSION.to_owned(),
             id: id.into(),
@@ -98,8 +86,7 @@ impl JsonRpcRequest
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JsonRpcError
-{
+pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
     #[serde(default)]
@@ -107,8 +94,7 @@ pub struct JsonRpcError
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JsonRpcResponse
-{
+pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: RpcId,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,10 +103,8 @@ pub struct JsonRpcResponse
     pub error: Option<JsonRpcError>,
 }
 
-impl JsonRpcResponse
-{
-    pub fn success(id: RpcId, result: Value) -> Self
-    {
+impl JsonRpcResponse {
+    pub fn success(id: RpcId, result: Value) -> Self {
         Self {
             jsonrpc: JSON_RPC_VERSION.to_owned(),
             id,
@@ -129,8 +113,7 @@ impl JsonRpcResponse
         }
     }
 
-    pub fn failure(id: RpcId, code: i64, message: impl Into<String>) -> Self
-    {
+    pub fn failure(id: RpcId, code: i64, message: impl Into<String>) -> Self {
         Self {
             jsonrpc: JSON_RPC_VERSION.to_owned(),
             id,
@@ -145,8 +128,7 @@ impl JsonRpcResponse
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PluginHealth
-{
+pub struct PluginHealth {
     pub ready: bool,
     pub detail: String,
 }
@@ -156,31 +138,27 @@ where
     R: AsyncBufRead + Unpin,
 {
     let mut line = Vec::new();
-    loop
-    {
-        let buffer = reader
-            .fill_buf()
-            .await
-            .map_err(|error| AppError::unavailable(format!("plugin stream read failed: {error}")))?;
-        if buffer.is_empty()
-        {
+    loop {
+        let buffer = reader.fill_buf().await.map_err(|error| {
+            AppError::unavailable(format!("plugin stream read failed: {error}"))
+        })?;
+        if buffer.is_empty() {
             break;
         }
         let newline = buffer.iter().position(|byte| *byte == b'\n');
         let take = newline.map_or(buffer.len(), |index| index + 1);
-        if line.len().saturating_add(take) > MAX_JSON_RPC_LINE_BYTES
-        {
-            return Err(AppError::protocol("plugin JSON-RPC line exceeds size limit"));
+        if line.len().saturating_add(take) > MAX_JSON_RPC_LINE_BYTES {
+            return Err(AppError::protocol(
+                "plugin JSON-RPC line exceeds size limit",
+            ));
         }
         line.extend_from_slice(&buffer[..take]);
         reader.consume(take);
-        if newline.is_some()
-        {
+        if newline.is_some() {
             break;
         }
     }
-    if line.is_empty()
-    {
+    if line.is_empty() {
         return Ok(None);
     }
     Ok(Some(line))
@@ -190,17 +168,14 @@ pub async fn read_request<R>(reader: &mut R) -> Result<Option<JsonRpcRequest>, A
 where
     R: AsyncBufRead + Unpin,
 {
-    let Some(line) = read_bounded_line(reader).await? else
-    {
+    let Some(line) = read_bounded_line(reader).await? else {
         return Ok(None);
     };
     let text = std::str::from_utf8(&line)
         .map_err(|error| AppError::protocol(format!("plugin request is not UTF-8: {error}")))?;
-    let request: JsonRpcRequest = serde_json::from_str(text.trim_end()).map_err(|error| {
-        AppError::protocol(format!("invalid plugin JSON-RPC request: {error}"))
-    })?;
-    if request.jsonrpc != JSON_RPC_VERSION
-    {
+    let request: JsonRpcRequest = serde_json::from_str(text.trim_end())
+        .map_err(|error| AppError::protocol(format!("invalid plugin JSON-RPC request: {error}")))?;
+    if request.jsonrpc != JSON_RPC_VERSION {
         return Err(AppError::protocol("plugin JSON-RPC version must be 2.0"));
     }
     Ok(Some(request))
@@ -211,8 +186,7 @@ where
 {
     let payload = serde_json::to_vec(response)
         .map_err(|error| AppError::protocol(format!("plugin response encode failed: {error}")))?;
-    if payload.len().saturating_add(1) > MAX_JSON_RPC_LINE_BYTES
-    {
+    if payload.len().saturating_add(1) > MAX_JSON_RPC_LINE_BYTES {
         return Err(AppError::protocol("plugin response exceeds size limit"));
     }
     writer
@@ -230,14 +204,12 @@ where
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use tokio::io::BufReader;
 
     #[tokio::test]
-    async fn stdio_request_response_round_trip()
-    {
+    async fn stdio_request_response_round_trip() {
         let request = JsonRpcRequest::new(1_i64, "health", serde_json::json!({}));
         let encoded = serde_json::to_string(&request).expect("request encodes") + "\n";
         let mut reader = BufReader::new(encoded.as_bytes());
@@ -252,12 +224,15 @@ mod tests
         write_response(&mut output, &response)
             .await
             .expect("response writes");
-        assert!(String::from_utf8(output).expect("response utf8").contains("ready"));
+        assert!(
+            String::from_utf8(output)
+                .expect("response utf8")
+                .contains("ready")
+        );
     }
 
     #[test]
-    fn manifest_rejects_empty_capabilities()
-    {
+    fn manifest_rejects_empty_capabilities() {
         let manifest = PluginManifest {
             protocol_version: 1,
             id: "vts".to_owned(),

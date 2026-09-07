@@ -2,7 +2,7 @@
 
 AIex 是一个 Windows 优先、Rust-first 的本地数字人项目。当前主线提供流式对话、持久记忆、语音调度、内置 2D 外形与 VTube Studio 适配；长期目标是让人格、声音、外形、行为与场景可以自由组合。
 
-当前阶段版本为 **0.2.0-alpha.1：数字伙伴工作室 Alpha**。角色收藏、独立记忆、原生多外形、可携带的场景组合和启动恢复已连成一条使用路径；原生语音提供逐句字幕、情绪与能量口型。开始使用和验收边界见 [版本说明](docs/releases/0.2.0-alpha.1.md)。
+当前阶段版本为 **0.3.0-alpha.1：对话与恢复 Alpha**。在角色收藏、多种外形、独立记忆和场景组合基础上，完善慢模型与语音拥堵时的打断、外形故障降级，以及停止期间的记忆保存。开始使用和验收边界见 [版本说明](docs/releases/0.3.0-alpha.1.md)。
 
 后续实施以 [数字人演进计划](docs/DIGITAL_HUMAN_ROADMAP.md) 为主线：先完善稳定运行与角色工作室，再推进跨载体表达、连续记忆、主动行为及可分享的组合包。网页、悬浮伙伴和 VRM 3D 均纳入计划，具体实现状态与验收条件见文档。
 
@@ -170,29 +170,13 @@ crates/
 
 依赖方向固定为：`domain/text/duplex contracts → core → adapters → service`。网络、设备、数据库和 UI 不得反向进入领域层。
 
-## 代码规范
-
-控制流使用 Allman 大括号风格：
-
-```rust
-if is_ready()
-{
-    run();
-}
-else
-{
-    recover();
-}
-```
-
-不要运行会把控制流左花括号移回同一行的自动格式化。详细规则见 `CONTRIBUTING.md`。
-
 ## 验证
 
 ```powershell
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-pwsh -NoProfile -File "tools/check_rust_style.ps1"
+cargo fmt --all -- --check
+cargo fmt --manifest-path crates/ai-ex-desktop/Cargo.toml -- --check
 pwsh -NoProfile -File "tools/check_architecture.ps1"
 ```
 

@@ -14,8 +14,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::task::AbortHandle;
 
 #[derive(Debug, Clone)]
-pub struct KoboldCppSettings
-{
+pub struct KoboldCppSettings {
     pub base_url: String,
     pub timeout: Duration,
     pub max_context_length: usize,
@@ -23,8 +22,7 @@ pub struct KoboldCppSettings
     pub temperature: f32,
 }
 
-pub struct KoboldCppClient
-{
+pub struct KoboldCppClient {
     client: reqwest::Client,
     base_url: String,
     settings: KoboldCppSettings,
@@ -32,25 +30,19 @@ pub struct KoboldCppClient
     abort_handle: Option<AbortHandle>,
 }
 
-impl KoboldCppClient
-{
-    pub fn new(mut settings: KoboldCppSettings) -> Result<Self, AppError>
-    {
-        if !settings.base_url.starts_with("http://")
-            && !settings.base_url.starts_with("https://")
-        {
+impl KoboldCppClient {
+    pub fn new(mut settings: KoboldCppSettings) -> Result<Self, AppError> {
+        if !settings.base_url.starts_with("http://") && !settings.base_url.starts_with("https://") {
             return Err(AppError::configuration(
                 "KoboldCpp base_url must be HTTP or HTTPS",
             ));
         }
-        if settings.max_context_length == 0 || settings.max_length == 0
-        {
+        if settings.max_context_length == 0 || settings.max_length == 0 {
             return Err(AppError::configuration(
                 "KoboldCpp token limits must be positive",
             ));
         }
-        if !settings.temperature.is_finite() || !(0.0..=2.0).contains(&settings.temperature)
-        {
+        if !settings.temperature.is_finite() || !(0.0..=2.0).contains(&settings.temperature) {
             return Err(AppError::configuration(
                 "KoboldCpp temperature must be between 0 and 2",
             ));
@@ -69,11 +61,9 @@ impl KoboldCppClient
         })
     }
 
-    pub async fn health(&self) -> ComponentHealth
-    {
+    pub async fn health(&self) -> ComponentHealth {
         let url = format!("{}/api/v1/model", self.base_url);
-        match self.client.get(url).send().await
-        {
+        match self.client.get(url).send().await {
             Ok(response) if response.status().is_success() => ComponentHealth {
                 component: "koboldcpp".to_owned(),
                 ready: true,
@@ -83,18 +73,13 @@ impl KoboldCppClient
                 "koboldcpp",
                 http_failure_detail(response.status().as_u16()),
             ),
-            Err(error) => ComponentHealth::unavailable(
-                "koboldcpp",
-                request_failure_detail(&error),
-            ),
+            Err(error) => ComponentHealth::unavailable("koboldcpp", request_failure_detail(&error)),
         }
     }
 }
 
-fn http_failure_detail(status: u16) -> String
-{
-    match status
-    {
+fn http_failure_detail(status: u16) -> String {
+    match status {
         404 => "KoboldCpp 接口不存在（HTTP 404）；检查是否启用了 API 服务或 base_url".to_owned(),
         408 | 429 => format!("KoboldCpp 请求受限（HTTP {status}）；稍后重试"),
         500..=599 => format!("KoboldCpp 服务端故障（HTTP {status}）；检查本地模型进程"),
@@ -102,32 +87,23 @@ fn http_failure_detail(status: u16) -> String
     }
 }
 
-fn request_failure_detail(error: &reqwest::Error) -> String
-{
-    if error.is_timeout()
-    {
+fn request_failure_detail(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
         "KoboldCpp 请求超时；检查本地模型是否仍在加载或调整 timeout_seconds".to_owned()
-    }
-    else if error.is_connect()
-    {
+    } else if error.is_connect() {
         "无法连接 KoboldCpp；确认 koboldcpp 已启动并检查 base_url".to_owned()
-    }
-    else
-    {
+    } else {
         format!("KoboldCpp 请求失败：{error}")
     }
 }
 #[async_trait]
-impl LanguageModelPort for KoboldCppClient
-{
+impl LanguageModelPort for KoboldCppClient {
     async fn stream(
         &mut self,
         request: ModelRequest,
-    ) -> Result<mpsc::Receiver<Result<String, AppError>>, AppError>
-    {
+    ) -> Result<mpsc::Receiver<Result<String, AppError>>, AppError> {
         let mut active_turn = self.active_turn.lock().await;
-        if active_turn.is_some()
-        {
+        if active_turn.is_some() {
             return Err(AppError::invalid_transition(
                 "a KoboldCpp turn is already active",
             ));
@@ -145,10 +121,8 @@ impl LanguageModelPort for KoboldCppClient
             self.settings.temperature,
         );
         let active_turn = Arc::clone(&self.active_turn);
-        let task = tokio::spawn(async move
-        {
-            if let Err(error) = execute_stream(client, url, body, sender.clone()).await
-            {
+        let task = tokio::spawn(async move {
+            if let Err(error) = execute_stream(client, url, body, sender.clone()).await {
                 let _ignored = sender.send(Err(error)).await;
             }
             *active_turn.lock().await = None;
@@ -157,17 +131,14 @@ impl LanguageModelPort for KoboldCppClient
         Ok(receiver)
     }
 
-    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError>
-    {
+    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError> {
         let mut active_turn = self.active_turn.lock().await;
-        if *active_turn != Some(turn_id)
-        {
+        if *active_turn != Some(turn_id) {
             return Err(AppError::invalid_transition(
                 "cannot cancel an inactive KoboldCpp turn",
             ));
         }
-        if let Some(handle) = self.abort_handle.take()
-        {
+        if let Some(handle) = self.abort_handle.take() {
             handle.abort();
         }
         *active_turn = None;
@@ -180,8 +151,7 @@ async fn execute_stream(
     url: String,
     body: serde_json::Value,
     sender: mpsc::Sender<Result<String, AppError>>,
-) -> Result<(), AppError>
-{
+) -> Result<(), AppError> {
     let response = client
         .post(url)
         .json(&body)
@@ -192,20 +162,16 @@ async fn execute_stream(
         .map_err(|error| AppError::connectivity(error.to_string()))?;
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
-    while let Some(next) = stream.next().await
-    {
+    while let Some(next) = stream.next().await {
         let bytes = next.map_err(|error| AppError::connectivity(error.to_string()))?;
         buffer.extend_from_slice(&bytes);
-        for line in drain_lines(&mut buffer)
-        {
-            if process_event(&line, &sender).await?
-            {
+        for line in drain_lines(&mut buffer) {
+            if process_event(&line, &sender).await? {
                 return Ok(());
             }
         }
     }
-    if !buffer.iter().all(u8::is_ascii_whitespace)
-    {
+    if !buffer.iter().all(u8::is_ascii_whitespace) {
         process_event(&buffer, &sender).await?;
     }
     Ok(())
@@ -214,12 +180,9 @@ async fn execute_stream(
 async fn process_event(
     line: &[u8],
     sender: &mpsc::Sender<Result<String, AppError>>,
-) -> Result<bool, AppError>
-{
-    match parse_event(line)?
-    {
-        StreamEvent::Text(text) =>
-        {
+) -> Result<bool, AppError> {
+    match parse_event(line)? {
+        StreamEvent::Text(text) => {
             sender
                 .send(Ok(text))
                 .await
@@ -232,12 +195,10 @@ async fn process_event(
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
-    fn settings() -> KoboldCppSettings
-    {
+    fn settings() -> KoboldCppSettings {
         KoboldCppSettings {
             base_url: "http://127.0.0.1:5001/".to_owned(),
             timeout: Duration::from_secs(1),
@@ -248,8 +209,7 @@ mod tests
     }
 
     #[test]
-    fn validates_settings_without_network_access()
-    {
+    fn validates_settings_without_network_access() {
         assert!(KoboldCppClient::new(settings()).is_ok());
         let mut invalid = settings();
         invalid.temperature = f32::NAN;

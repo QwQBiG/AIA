@@ -12,22 +12,18 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Capability
-{
+pub enum Capability {
     ScreenRead,
     MouseInput,
     KeyboardInput,
     ProcessLaunch,
 }
 
-impl std::str::FromStr for Capability
-{
+impl std::str::FromStr for Capability {
     type Err = AppError;
 
-    fn from_str(value: &str) -> Result<Self, Self::Err>
-    {
-        match value
-        {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
             "screen_read" => Ok(Self::ScreenRead),
             "mouse_input" => Ok(Self::MouseInput),
             "keyboard_input" => Ok(Self::KeyboardInput),
@@ -40,24 +36,21 @@ impl std::str::FromStr for Capability
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActionRequest
-{
+pub struct ActionRequest {
     pub capability: Capability,
     pub target: String,
     pub rationale: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct SafetyPolicy
-{
+pub struct SafetyPolicy {
     pub automation_enabled: bool,
     pub allowed_capabilities: BTreeSet<Capability>,
     pub allowed_targets: Vec<String>,
 }
 
 #[derive(Debug)]
-pub struct Permit
-{
+pub struct Permit {
     id: Uuid,
     capability: Capability,
     target: String,
@@ -65,76 +58,66 @@ pub struct Permit
     emergency_stop: Arc<AtomicBool>,
 }
 
-impl Permit
-{
-    pub fn id(&self) -> Uuid
-    {
+impl Permit {
+    pub fn id(&self) -> Uuid {
         self.id
     }
 
-    pub fn capability(&self) -> Capability
-    {
+    pub fn capability(&self) -> Capability {
         self.capability
     }
 
-    pub fn target(&self) -> &str
-    {
+    pub fn target(&self) -> &str {
         &self.target
     }
 
-    pub fn rationale(&self) -> &str
-    {
+    pub fn rationale(&self) -> &str {
         &self.rationale
     }
 
-    pub fn ensure_active(&self) -> Result<(), AppError>
-    {
-        if self.emergency_stop.load(Ordering::Acquire)
-        {
+    pub fn ensure_active(&self) -> Result<(), AppError> {
+        if self.emergency_stop.load(Ordering::Acquire) {
             return Err(AppError::safety("permit revoked by emergency stop"));
         }
         Ok(())
     }
 }
 
-pub struct SafetyGate
-{
+pub struct SafetyGate {
     policy: SafetyPolicy,
     emergency_stop: Arc<AtomicBool>,
 }
 
-impl SafetyGate
-{
-    pub fn new(policy: SafetyPolicy) -> Self
-    {
+impl SafetyGate {
+    pub fn new(policy: SafetyPolicy) -> Self {
         Self {
             policy,
             emergency_stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub fn authorize(&self, request: ActionRequest) -> Result<Permit, AppError>
-    {
-        if self.emergency_stop.load(Ordering::Acquire)
-        {
+    pub fn authorize(&self, request: ActionRequest) -> Result<Permit, AppError> {
+        if self.emergency_stop.load(Ordering::Acquire) {
             return Err(AppError::safety("automation emergency stop is active"));
         }
-        if !self.policy.automation_enabled
-        {
+        if !self.policy.automation_enabled {
             return Err(AppError::safety("automation is disabled"));
         }
-        if !self.policy.allowed_capabilities.contains(&request.capability)
+        if !self
+            .policy
+            .allowed_capabilities
+            .contains(&request.capability)
         {
             return Err(AppError::safety("automation capability is not allowed"));
         }
-        if request.rationale.trim().is_empty()
-        {
+        if request.rationale.trim().is_empty() {
             return Err(AppError::safety("automation action requires a rationale"));
         }
         let target = request.target.trim();
-        if target.is_empty() || !self.target_allowed(target)
-        {
-            return Err(AppError::safety("automation target is outside allowed scopes"));
+        if target.is_empty() || !self.target_allowed(target) {
+            return Err(AppError::safety(
+                "automation target is outside allowed scopes",
+            ));
         }
         Ok(Permit {
             id: Uuid::new_v4(),
@@ -145,33 +128,24 @@ impl SafetyGate
         })
     }
 
-    pub fn trigger_emergency_stop(&self)
-    {
+    pub fn trigger_emergency_stop(&self) {
         self.emergency_stop.store(true, Ordering::Release);
     }
 
-    pub fn clear_emergency_stop(&mut self)
-    {
+    pub fn clear_emergency_stop(&mut self) {
         self.emergency_stop.store(false, Ordering::Release);
     }
 
-    pub fn emergency_stop_active(&self) -> bool
-    {
+    pub fn emergency_stop_active(&self) -> bool {
         self.emergency_stop.load(Ordering::Acquire)
     }
 
-    pub fn health(&self) -> ComponentHealth
-    {
-        let detail = if self.emergency_stop_active()
-        {
+    pub fn health(&self) -> ComponentHealth {
+        let detail = if self.emergency_stop_active() {
             "emergency stop active"
-        }
-        else if self.policy.automation_enabled
-        {
+        } else if self.policy.automation_enabled {
             "automation policy active"
-        }
-        else
-        {
+        } else {
             "automation disabled"
         };
         ComponentHealth {
@@ -181,8 +155,7 @@ impl SafetyGate
         }
     }
 
-    fn target_allowed(&self, target: &str) -> bool
-    {
+    fn target_allowed(&self, target: &str) -> bool {
         self.policy
             .allowed_targets
             .iter()
@@ -191,14 +164,12 @@ impl SafetyGate
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use ai_ex_domain::ErrorKind;
 
     use super::*;
 
-    fn policy(enabled: bool) -> SafetyPolicy
-    {
+    fn policy(enabled: bool) -> SafetyPolicy {
         SafetyPolicy {
             automation_enabled: enabled,
             allowed_capabilities: BTreeSet::from([Capability::ScreenRead]),
@@ -207,8 +178,7 @@ mod tests
     }
 
     #[test]
-    fn disabled_automation_denies_every_request()
-    {
+    fn disabled_automation_denies_every_request() {
         let gate = SafetyGate::new(policy(false));
         let result = gate.authorize(ActionRequest {
             capability: Capability::ScreenRead,
@@ -220,8 +190,7 @@ mod tests
     }
 
     #[test]
-    fn capability_and_target_must_both_be_allowed()
-    {
+    fn capability_and_target_must_both_be_allowed() {
         let gate = SafetyGate::new(policy(true));
         let result = gate.authorize(ActionRequest {
             capability: Capability::MouseInput,
@@ -233,8 +202,7 @@ mod tests
     }
 
     #[test]
-    fn emergency_stop_revokes_existing_permits()
-    {
+    fn emergency_stop_revokes_existing_permits() {
         let gate = SafetyGate::new(policy(true));
         let permit = gate
             .authorize(ActionRequest {

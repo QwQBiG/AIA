@@ -2,8 +2,7 @@ use crate::{AudioFrame, EnergyVad, VadConfig, VadEvent};
 
 const FRAME_SAMPLES: usize = 160;
 
-fn config() -> VadConfig
-{
+fn config() -> VadConfig {
     VadConfig {
         start_threshold: 0.2,
         continue_threshold: 0.1,
@@ -13,14 +12,12 @@ fn config() -> VadConfig
     }
 }
 
-fn frame(level: f32) -> AudioFrame
-{
+fn frame(level: f32) -> AudioFrame {
     AudioFrame::new(vec![level; FRAME_SAMPLES], 16_000, 1).expect("valid audio frame")
 }
 
 #[test]
-fn noise_does_not_start_speech()
-{
+fn noise_does_not_start_speech() {
     let mut vad = EnergyVad::new(config()).expect("valid VAD configuration");
 
     assert!(vad.process(frame(0.05)).expect("process noise").is_none());
@@ -28,8 +25,7 @@ fn noise_does_not_start_speech()
 }
 
 #[test]
-fn hysteresis_emits_a_complete_utterance()
-{
+fn hysteresis_emits_a_complete_utterance() {
     let mut vad = EnergyVad::new(config()).expect("valid VAD configuration");
 
     assert!(vad.process(frame(0.3)).expect("first hot frame").is_none());
@@ -43,8 +39,7 @@ fn hysteresis_emits_a_complete_utterance()
     ));
     let Some(VadEvent::SpeechEnded(utterance)) =
         vad.process(frame(0.01)).expect("second silent frame")
-    else
-    {
+    else {
         panic!("expected completed utterance");
     };
 
@@ -54,12 +49,11 @@ fn hysteresis_emits_a_complete_utterance()
 }
 
 #[test]
-fn format_change_inside_candidate_is_rejected()
-{
+fn format_change_inside_candidate_is_rejected() {
     let mut vad = EnergyVad::new(config()).expect("valid VAD configuration");
     vad.process(frame(0.3)).expect("first hot frame");
-    let changed = AudioFrame::new(vec![0.3; FRAME_SAMPLES], 48_000, 1)
-        .expect("valid changed frame");
+    let changed =
+        AudioFrame::new(vec![0.3; FRAME_SAMPLES], 48_000, 1).expect("valid changed frame");
 
     assert!(vad.process(changed).is_err());
 }

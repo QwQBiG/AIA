@@ -1,30 +1,33 @@
 use ai_ex_domain::{AppError, ConversationState, Emotion, Message, Role, SystemEvent, TurnId};
 use ai_ex_text::ResponsePreamble;
 
+#[path = "runtime_control.rs"]
+mod control;
+#[path = "runtime_persistence.rs"]
+mod persistence;
+use control::AvatarAction;
+
 use crate::{
-    AvatarPort, ConversationEngine, ConversationPolicy, EventSink, LanguageModelPort,
-    MemoryPort, ModelRequest, SpeechPort,
+    AvatarPort, ConversationEngine, ConversationPolicy, EventSink, LanguageModelPort, MemoryPort,
+    ModelRequest, SpeechPort,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeControl
-{
+pub enum RuntimeControl {
     Interrupt { reason: String },
     Shutdown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurnOutcome
-{
+pub enum TurnOutcome {
     Completed(TurnId),
     Interrupted(TurnId),
     Shutdown(TurnId),
 }
 
-enum NextInput
-{
-    Model(Option<Result<String, AppError>>),
-    Control(Option<RuntimeControl>),
+enum GenerationResult {
+    Finished(Result<(), AppError>),
+    Control(RuntimeControl),
 }
 
 pub struct Runtime<M, S, A, N, E>
@@ -45,6 +48,7 @@ where
     profile_id: String,
     memory_recall_limit: usize,
     speech_emotion: Emotion,
+    avatar_healthy: bool,
 }
 
 impl<M, S, A, N, E> Runtime<M, S, A, N, E>
@@ -55,8 +59,7 @@ where
     N: MemoryPort,
     E: EventSink,
 {
-    pub fn new(model: M, speech: S, avatar: A, memory: N, events: E) -> Self
-    {
+    pub fn new(model: M, speech: S, avatar: A, memory: N, events: E) -> Self {
         Self::from_policy(
             model,
             speech,
@@ -74,10 +77,11 @@ where
         memory: N,
         events: E,
         policy: ConversationPolicy,
-    ) -> Result<Self, AppError>
-    {
+    ) -> Result<Self, AppError> {
         policy.validate()?;
-        Ok(Self::from_policy(model, speech, avatar, memory, events, policy))
+        Ok(Self::from_policy(
+            model, speech, avatar, memory, events, policy,
+        ))
     }
 
     fn from_policy(
@@ -87,8 +91,7 @@ where
         memory: N,
         events: E,
         policy: ConversationPolicy,
-    ) -> Self
-    {
+    ) -> Self {
         Self {
             engine: ConversationEngine::with_history_turn_limit(policy.history_turn_limit),
             model,
@@ -100,44 +103,50 @@ where
             profile_id: "default".to_owned(),
             memory_recall_limit: policy.memory_recall_limit,
             speech_emotion: Emotion::Neutral,
+            avatar_healthy: true,
         }
     }
 
-    pub fn set_system_prompt(&mut self, prompt: impl Into<String>) -> Result<(), AppError>
-    {
-        if self.engine.active_turn().is_some()
-        {
-            return Err(AppError::invalid_transition("cannot change persona during an active turn"));
+    pub fn set_system_prompt(&mut self, prompt: impl Into<String>) -> Result<(), AppError> {
+        if self.engine.active_turn().is_some() {
+            return Err(AppError::invalid_transition(
+                "cannot change persona during an active turn",
+            ));
         }
         let prompt = prompt.into();
-        if prompt.chars().count() > 16_384
-        {
+        if prompt.chars().count() > 16_384 {
             return Err(AppError::configuration("system prompt is too long"));
         }
         self.system_prompt = prompt;
         Ok(())
     }
 
-    pub fn state(&self) -> ConversationState
-    {
+    pub fn state(&self) -> ConversationState {
         self.engine.state()
     }
 
-    pub async fn set_persona(&mut self, profile_id: String, prompt: String) -> Result<(), AppError>
-    {
-        if self.engine.active_turn().is_some()
-        {
-            return Err(AppError::invalid_transition("cannot change persona during an active turn"));
+    pub async fn set_persona(
+        &mut self,
+        profile_id: String,
+        prompt: String,
+    ) -> Result<(), AppError> {
+        if self.engine.active_turn().is_some() {
+            return Err(AppError::invalid_transition(
+                "cannot change persona during an active turn",
+            ));
         }
-        if profile_id.trim().is_empty() || profile_id.chars().count() > 128 || prompt.chars().count() > 16_384
+        if profile_id.trim().is_empty()
+            || profile_id.chars().count() > 128
+            || prompt.chars().count() > 16_384
         {
-            return Err(AppError::configuration("persona identity or prompt is outside supported bounds"));
+            return Err(AppError::configuration(
+                "persona identity or prompt is outside supported bounds",
+            ));
         }
-        if profile_id != self.profile_id
-        {
+        if profile_id != self.profile_id {
             // Stop the previous body's remaining audio before changing its identity.
             self.cancel_speech().await?;
-            self.avatar.set_neutral().await?;
+            self.avatar_output(AvatarAction::Stop).await;
             self.memory.select_profile(&profile_id).await?;
             self.engine.clear_identity_context();
             self.profile_id = profile_id;
@@ -146,10 +155,8 @@ where
         Ok(())
     }
 
-    pub async fn run_turn(&mut self, input: impl Into<String>) -> Result<TurnId, AppError>
-    {
-        match self.run_turn_inner(input.into(), None).await?
-        {
+    pub async fn run_turn(&mut self, input: impl Into<String>) -> Result<TurnId, AppError> {
+        match self.run_turn_inner(input.into(), None).await? {
             TurnOutcome::Completed(turn_id) => Ok(turn_id),
             TurnOutcome::Interrupted(_) | TurnOutcome::Shutdown(_) => Err(
                 AppError::invalid_transition("uncontrolled turn ended by control input"),
@@ -161,8 +168,7 @@ where
         &mut self,
         input: impl Into<String>,
         control: &mut tokio::sync::mpsc::Receiver<RuntimeControl>,
-    ) -> Result<TurnOutcome, AppError>
-    {
+    ) -> Result<TurnOutcome, AppError> {
         self.run_turn_inner(input.into(), Some(control)).await
     }
 
@@ -170,176 +176,154 @@ where
         &mut self,
         input: String,
         mut control: Option<&mut tokio::sync::mpsc::Receiver<RuntimeControl>>,
-    ) -> Result<TurnOutcome, AppError>
-    {
-        let memories = self
-            .memory
-            .recall_for_context(&input, self.memory_recall_limit)
-            .await?;
+    ) -> Result<TurnOutcome, AppError> {
         let turn_id = self.engine.begin_turn(&input)?;
-        let mut messages = Vec::new();
-        if !self.system_prompt.trim().is_empty()
-        {
-            messages.push(Message::new(Role::System, self.system_prompt.clone()));
-        }
-        messages.extend(memories);
-        messages.extend_from_slice(self.engine.history());
-        let request = ModelRequest {
-            turn_id,
-            messages,
+        let generated = if let Some(receiver) = control.as_deref_mut() {
+            tokio::select! {
+                biased;
+                Some(command) = receiver.recv() => GenerationResult::Control(command),
+                result = self.generate_turn(turn_id, &input) => GenerationResult::Finished(result),
+            }
+        } else {
+            GenerationResult::Finished(self.generate_turn(turn_id, &input).await)
         };
-        self.dispatch_events().await?;
-
-        let mut stream = match self.model.stream(request).await
-        {
-            Ok(stream) => stream,
-            Err(error) =>
-            {
+        match generated {
+            GenerationResult::Control(RuntimeControl::Interrupt { reason }) => {
+                self.interrupt(reason).await?;
+                return Ok(TurnOutcome::Interrupted(turn_id));
+            }
+            GenerationResult::Control(RuntimeControl::Shutdown) => {
+                self.interrupt("runtime shutdown").await?;
+                return Ok(TurnOutcome::Shutdown(turn_id));
+            }
+            GenerationResult::Finished(Err(error)) => {
                 self.engine.fail(error.to_string());
                 self.dispatch_events().await?;
                 return Err(error);
             }
-        };
+            GenerationResult::Finished(Ok(())) => {}
+        }
+        let assistant = self.engine.finish_turn(turn_id)?;
+        // Never drop an in-flight durable write when a control command arrives.
+        let remembered = self.remember_turn(turn_id, input, assistant, control).await;
+        self.dispatch_events().await?;
+        Ok(if remembered? {
+            TurnOutcome::Shutdown(turn_id)
+        } else {
+            TurnOutcome::Completed(turn_id)
+        })
+    }
+
+    async fn generate_turn(&mut self, turn_id: TurnId, input: &str) -> Result<(), AppError> {
+        self.cancel_speech().await?;
+        self.speech_emotion = Emotion::Neutral;
+        self.dispatch_events().await?;
+        let memories = self
+            .memory
+            .recall_for_context(input, self.memory_recall_limit)
+            .await?;
+        let mut messages = Vec::new();
+        if !self.system_prompt.trim().is_empty() {
+            messages.push(Message::new(Role::System, self.system_prompt.clone()));
+        }
+        messages.extend(memories);
+        messages.extend_from_slice(self.engine.history());
+        let request = ModelRequest { turn_id, messages };
+        let mut stream = self.model.stream(request).await?;
         let mut preamble = ResponsePreamble::default();
 
-        loop
-        {
-            let next = if let Some(receiver) = control.as_deref_mut()
-            {
-                tokio::select!
-                {
-                    item = stream.recv() => NextInput::Model(item),
-                    command = receiver.recv() => NextInput::Control(command),
-                }
-            }
-            else
-            {
-                NextInput::Model(stream.recv().await)
-            };
-
-            match next
-            {
-                NextInput::Model(Some(Ok(chunk))) =>
-                {
+        loop {
+            match stream.recv().await {
+                Some(Ok(chunk)) => {
                     let output = preamble.push(&chunk);
-                    if let Some(emotion) = output.emotion
-                    {
+                    if let Some(emotion) = output.emotion {
                         self.engine.set_emotion(turn_id, emotion)?;
                     }
-                    if !output.text.is_empty()
-                    {
+                    if !output.text.is_empty() {
                         self.engine.accept_chunk(turn_id, &output.text)?;
                     }
                     self.dispatch_events().await?;
                 }
-                NextInput::Model(Some(Err(error))) =>
-                {
-                    self.engine.fail(error.to_string());
-                    self.dispatch_events().await?;
-                    return Err(error);
-                }
-                NextInput::Model(None) =>
-                {
+                Some(Err(error)) => return Err(error),
+                None => {
                     let trailing = preamble.finish();
-                    if !trailing.is_empty()
-                    {
+                    if !trailing.is_empty() {
                         self.engine.accept_chunk(turn_id, &trailing)?;
                         self.dispatch_events().await?;
                     }
                     break;
                 }
-                NextInput::Control(Some(RuntimeControl::Interrupt { reason })) =>
-                {
-                    self.interrupt(reason).await?;
-                    return Ok(TurnOutcome::Interrupted(turn_id));
-                }
-                NextInput::Control(Some(RuntimeControl::Shutdown)) =>
-                {
-                    self.interrupt("runtime shutdown").await?;
-                    return Ok(TurnOutcome::Shutdown(turn_id));
-                }
-                NextInput::Control(None) => control = None,
             }
         }
 
-        let assistant = self.engine.finish_turn(turn_id)?;
-        self.memory.remember(turn_id, input, assistant).await?;
+        self.engine.flush_sentence(turn_id)?;
         self.dispatch_events().await?;
-        Ok(TurnOutcome::Completed(turn_id))
+        Ok(())
     }
 
-    pub async fn interrupt(&mut self, reason: impl Into<String>) -> Result<(), AppError>
-    {
-        let Some(active) = self.engine.active_turn() else
-        {
-            // Generation can finish while queued audio is still playing.
-            self.cancel_speech().await?;
-            return self.avatar.set_neutral().await;
-        };
-        self.model.cancel(active).await?;
-        self.cancel_speech().await?;
-        self.avatar.set_neutral().await?;
-        self.engine.interrupt(reason)?;
-        self.dispatch_events().await
-    }
-
-    pub async fn stop(&mut self) -> Result<(), AppError>
-    {
-        if let Some(active) = self.engine.active_turn()
-        {
-            self.model.cancel(active).await?;
-            self.engine.interrupt("runtime stopped")?;
-        }
-        self.cancel_speech().await?;
-        self.avatar.set_neutral().await?;
-        self.engine.stop();
-        self.dispatch_events().await
-    }
-
-    async fn dispatch_events(&mut self) -> Result<(), AppError>
-    {
-        for event in self.engine.drain_events()
-        {
-            match &event
-            {
-                SystemEvent::TurnStarted { .. } =>
-                {
-                    self.cancel_speech().await?;
-                    self.speech_emotion = Emotion::Neutral;
-                    self.avatar.set_neutral().await?;
-                }
-                SystemEvent::SentenceReady { turn_id, text } =>
-                {
-                    self.speech.enqueue_expressive(*turn_id, text.clone(), self.speech_emotion).await?;
-                    self.avatar.set_speaking(true).await?;
-                }
-                SystemEvent::EmotionChanged { emotion, .. } =>
-                {
-                    self.speech_emotion = *emotion;
-                    self.avatar.set_emotion(*emotion).await?;
-                }
-                SystemEvent::TurnFinished { .. } | SystemEvent::TurnInterrupted { .. } =>
-                {
-                    self.avatar.set_neutral().await?;
-                }
-                SystemEvent::Fault { .. } =>
-                {
-                    self.cancel_speech().await?;
-                    self.avatar.set_neutral().await?;
-                }
-                _ =>
-                {
-                }
+    pub async fn interrupt(&mut self, reason: impl Into<String>) -> Result<(), AppError> {
+        // A control may win before generation has published its initial events.
+        // Preserve that identity, but never enqueue undelivered speech during cleanup.
+        for event in self.engine.drain_events() {
+            if !matches!(event, SystemEvent::SentenceReady { .. }) {
+                self.events.publish(event).await;
             }
-            self.events.publish(event).await;
+        }
+        let active = self.engine.active_turn();
+        if active.is_some() {
+            self.engine.interrupt(reason)?;
+        }
+        let speech = self.cancel_speech().await;
+        let model = if let Some(turn_id) = active {
+            control::bounded("model cancellation", self.model.cancel(turn_id)).await
+        } else {
+            Ok(())
+        };
+        self.avatar_output(AvatarAction::Stop).await;
+        self.dispatch_events().await?;
+        speech.and(model)
+    }
+
+    pub async fn stop(&mut self) -> Result<(), AppError> {
+        let stopped = self.interrupt("runtime stopped").await;
+        self.engine.stop();
+        let published = self.dispatch_events().await;
+        stopped.and(published)
+    }
+
+    async fn dispatch_events(&mut self) -> Result<(), AppError> {
+        for event in self.engine.drain_events() {
+            self.events.publish(event.clone()).await;
+            match &event {
+                SystemEvent::TurnStarted { .. } => {
+                    self.avatar_output(AvatarAction::Stop).await;
+                }
+                SystemEvent::SentenceReady { turn_id, text } => {
+                    self.speech
+                        .enqueue_expressive(*turn_id, text.clone(), self.speech_emotion)
+                        .await?;
+                    self.avatar_output(AvatarAction::Subtitle(text.clone()))
+                        .await;
+                    self.avatar_output(AvatarAction::Speaking).await;
+                }
+                SystemEvent::EmotionChanged { emotion, .. } => {
+                    self.speech_emotion = *emotion;
+                    self.avatar_output(AvatarAction::Emotion(*emotion)).await;
+                }
+                SystemEvent::TurnFinished { .. } => {
+                    self.avatar_output(AvatarAction::Neutral).await;
+                }
+                SystemEvent::Fault { .. } => {
+                    let _cancel_result = self.cancel_speech().await;
+                    self.avatar_output(AvatarAction::Stop).await;
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
 
-    async fn cancel_speech(&mut self) -> Result<(), AppError>
-    {
-        self.speech.interrupt().await?;
-        self.events.publish(SystemEvent::SpeechCancelled).await;
-        Ok(())
+    async fn cancel_speech(&mut self) -> Result<(), AppError> {
+        control::cancel_speech_port(&mut self.speech, &mut self.events).await
     }
 }

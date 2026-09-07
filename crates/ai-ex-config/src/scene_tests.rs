@@ -2,23 +2,33 @@ use super::*;
 use crate::appearance::{AppearanceManifest, LoadedAppearance};
 use std::collections::BTreeMap;
 
-fn example() -> SceneManifest
-{
+fn example() -> SceneManifest {
     SceneManifest {
-        schema_version: 1, id: "quiet.scene".to_owned(), name: "安静陪伴".to_owned(),
+        schema_version: 1,
+        id: "quiet.scene".to_owned(),
+        name: "安静陪伴".to_owned(),
         character: CharacterManifest::from_persona(Default::default()),
-        appearance: SceneAppearance { body: SceneBody::Orb, accent: [30, 90, 180], reduced_motion: true, scale: 0.8, package: None },
+        appearance: SceneAppearance {
+            body: SceneBody::Orb,
+            accent: [30, 90, 180],
+            reduced_motion: true,
+            scale: 0.8,
+            package: None,
+        },
     }
 }
 
 #[test]
-fn shipped_scenes_reuse_the_documented_character_identities()
-{
+fn shipped_scenes_reuse_the_documented_character_identities() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
-    for (scene, character, body) in [("quiet", "companion", SceneBody::Orb), ("host", "host", SceneBody::Companion)]
-    {
+    for (scene, character, body) in [
+        ("quiet", "companion", SceneBody::Orb),
+        ("host", "host", SceneBody::Companion),
+    ] {
         let bundle = SceneBundle::load(&root.join("scenes").join(scene)).unwrap();
-        let character = CharacterManifest::load(&root.join("characters").join(format!("{character}.toml"))).unwrap();
+        let character =
+            CharacterManifest::load(&root.join("characters").join(format!("{character}.toml")))
+                .unwrap();
         assert_eq!(bundle.manifest.character, character);
         assert_eq!(bundle.manifest.appearance.body, body);
         assert!(bundle.appearance.is_none());
@@ -26,19 +36,26 @@ fn shipped_scenes_reuse_the_documented_character_identities()
 }
 
 #[test]
-fn scene_round_trip_and_strict_nested_validation()
-{
+fn scene_round_trip_and_strict_nested_validation() {
     let mut scene = example();
     let text = scene.to_toml().unwrap();
     assert_eq!(SceneManifest::parse(&text).unwrap(), scene);
-    let unknown = text.replace("[character.persona]", "[character.persona]\nscript = 'run-me'");
+    let unknown = text.replace(
+        "[character.persona]",
+        "[character.persona]\nscript = 'run-me'",
+    );
     assert!(SceneManifest::parse(&unknown).is_err());
     scene.appearance.scale = f32::NAN;
     assert!(scene.validate().is_err());
     scene.appearance.scale = 0.8;
     scene.appearance.body = SceneBody::Images;
-    for path in ["../outside.toml", "D:/private.toml", "https://host/file.toml", "images\\appearance.toml", "/appearance.toml"]
-    {
+    for path in [
+        "../outside.toml",
+        "D:/private.toml",
+        "https://host/file.toml",
+        "images\\appearance.toml",
+        "/appearance.toml",
+    ] {
         scene.appearance.package = Some(path.to_owned());
         assert!(scene.validate().is_err());
     }
@@ -49,16 +66,25 @@ fn scene_round_trip_and_strict_nested_validation()
 }
 
 #[test]
-fn scene_bundle_contains_its_images_and_relocates_without_original_paths()
-{
-    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+fn scene_bundle_contains_its_images_and_relocates_without_original_paths() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let root = std::env::temp_dir().join(format!("aiex-scene-{}-{nonce}", std::process::id()));
     std::fs::create_dir(&root).unwrap();
     let first = root.join("first");
     let relocated = root.join("relocated");
     let loaded = LoadedAppearance {
         source: root.join("original/appearance.toml"),
-        manifest: AppearanceManifest { schema_version: 1, id: "art".to_owned(), name: "Art".to_owned(), author: "Artist".to_owned(), license: "MIT".to_owned(), images: BTreeMap::from([("default".to_owned(), "nested/original.png".to_owned())]) },
+        manifest: AppearanceManifest {
+            schema_version: 1,
+            id: "art".to_owned(),
+            name: "Art".to_owned(),
+            author: "Artist".to_owned(),
+            license: "MIT".to_owned(),
+            images: BTreeMap::from([("default".to_owned(), "nested/original.png".to_owned())]),
+        },
         images: BTreeMap::from([("default".to_owned(), b"encoded image bytes".to_vec())]),
     };
     let mut scene = example();

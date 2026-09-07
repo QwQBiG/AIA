@@ -6,8 +6,7 @@ use ai_ex_domain::{AppError, ComponentHealth};
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
-pub struct GptSovitsSettings
-{
+pub struct GptSovitsSettings {
     pub base_url: String,
     pub timeout: Duration,
     pub text_lang: String,
@@ -17,24 +16,19 @@ pub struct GptSovitsSettings
 }
 
 #[derive(Debug)]
-pub struct SynthesizedAudio
-{
+pub struct SynthesizedAudio {
     pub bytes: Vec<u8>,
     pub content_type: String,
 }
 
-pub struct GptSovitsClient
-{
+pub struct GptSovitsClient {
     client: reqwest::Client,
     settings: GptSovitsSettings,
 }
 
-impl GptSovitsClient
-{
-    pub fn new(settings: GptSovitsSettings) -> Result<Self, AppError>
-    {
-        if settings.base_url.trim().is_empty() || settings.ref_audio_path.trim().is_empty()
-        {
+impl GptSovitsClient {
+    pub fn new(settings: GptSovitsSettings) -> Result<Self, AppError> {
+        if settings.base_url.trim().is_empty() || settings.ref_audio_path.trim().is_empty() {
             return Err(AppError::configuration(
                 "GPT-SoVITS requires base_url and ref_audio_path",
             ));
@@ -46,11 +40,9 @@ impl GptSovitsClient
         Ok(Self { client, settings })
     }
 
-    pub async fn synthesize(&self, text: &str) -> Result<SynthesizedAudio, AppError>
-    {
+    pub async fn synthesize(&self, text: &str) -> Result<SynthesizedAudio, AppError> {
         let text = text.trim();
-        if text.is_empty()
-        {
+        if text.is_empty() {
             return Err(AppError::configuration("TTS text must not be empty"));
         }
         let payload = SynthesisRequest {
@@ -82,16 +74,14 @@ impl GptSovitsClient
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
             .to_owned();
-        if !status.is_success()
-        {
+        if !status.is_success() {
             let detail = response.text().await.unwrap_or_default();
             return Err(AppError::protocol(format!(
                 "GPT-SoVITS HTTP {status}: {}",
                 detail.chars().take(300).collect::<String>()
             )));
         }
-        if !content_type.starts_with("audio/")
-        {
+        if !content_type.starts_with("audio/") {
             return Err(AppError::protocol(format!(
                 "GPT-SoVITS returned non-audio content: {content_type}"
             )));
@@ -101,8 +91,7 @@ impl GptSovitsClient
             .await
             .map_err(|error| AppError::connectivity(error.to_string()))?
             .to_vec();
-        if bytes.is_empty()
-        {
+        if bytes.is_empty() {
             return Err(AppError::protocol("GPT-SoVITS returned empty audio"));
         }
         Ok(SynthesizedAudio {
@@ -111,14 +100,11 @@ impl GptSovitsClient
         })
     }
 
-    pub async fn health(&self) -> ComponentHealth
-    {
-        match self.client.get(&self.settings.base_url).send().await
-        {
-            Ok(response) if response.status().is_server_error() => ComponentHealth::unavailable(
-                "gpt-sovits",
-                format!("HTTP {}", response.status()),
-            ),
+    pub async fn health(&self) -> ComponentHealth {
+        match self.client.get(&self.settings.base_url).send().await {
+            Ok(response) if response.status().is_server_error() => {
+                ComponentHealth::unavailable("gpt-sovits", format!("HTTP {}", response.status()))
+            }
             Ok(_) => ComponentHealth::ready("gpt-sovits"),
             Err(error) => ComponentHealth::unavailable("gpt-sovits", error.to_string()),
         }
@@ -126,8 +112,7 @@ impl GptSovitsClient
 }
 
 #[derive(Debug, Serialize)]
-struct SynthesisRequest<'a>
-{
+struct SynthesisRequest<'a> {
     text: &'a str,
     text_lang: &'a str,
     ref_audio_path: &'a str,

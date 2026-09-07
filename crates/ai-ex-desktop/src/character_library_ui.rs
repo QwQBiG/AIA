@@ -2,31 +2,46 @@ use super::*;
 use ai_ex_domain::PersonaSnapshot;
 use eframe::egui;
 
-pub struct LibraryDraft
-{
+pub struct LibraryDraft {
     pub character: CharacterManifest,
     pub source: String,
 }
 
-impl LibraryEntry
-{
-    pub fn draft(&self, independent: bool) -> LibraryDraft
-    {
+impl LibraryEntry {
+    pub fn draft(&self, independent: bool) -> LibraryDraft {
         let mut character = self.character.clone();
-        if independent
-        {
+        if independent {
             character.persona.profile_id = format!("character.{}", Uuid::new_v4());
             character.persona.revision = 1;
-            character.persona.name = format!("{} 的副本", character.persona.name.chars().take(100).collect::<String>());
+            character.persona.name = format!(
+                "{} 的副本",
+                character.persona.name.chars().take(100).collect::<String>()
+            );
         }
-        LibraryDraft { source: format!("{}角色收藏：{} · v{}", if independent { "独立副本，基于" } else { "" }, self.character.persona.name, self.character.persona.revision), character }
+        LibraryDraft {
+            source: format!(
+                "{}角色收藏：{} · v{}",
+                if independent {
+                    "独立副本，基于"
+                } else {
+                    ""
+                },
+                self.character.persona.name,
+                self.character.persona.revision
+            ),
+            character,
+        }
     }
 }
 
-impl CharacterLibrary
-{
-    pub fn show(&mut self, ui: &mut egui::Ui, active: &PersonaSnapshot, draft: &CharacterManifest, source: &str) -> Option<LibraryDraft>
-    {
+impl CharacterLibrary {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        active: &PersonaSnapshot,
+        draft: &CharacterManifest,
+        source: &str,
+    ) -> Option<LibraryDraft> {
         let mut selected = None;
         let mut remove = None;
         egui::CollapsingHeader::new("角色收藏（选择 / 新建）").default_open(true).show(ui, |ui|

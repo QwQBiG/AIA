@@ -8,8 +8,7 @@ use crate::{
     TurnOutcome,
 };
 
-enum RuntimeCommand
-{
+enum RuntimeCommand {
     Submit {
         input: String,
         response: oneshot::Sender<Result<TurnOutcome, AppError>>,
@@ -33,15 +32,12 @@ enum RuntimeCommand
 }
 
 #[derive(Clone)]
-pub struct RuntimeHandle
-{
+pub struct RuntimeHandle {
     sender: mpsc::Sender<RuntimeCommand>,
 }
 
-impl RuntimeHandle
-{
-    pub async fn submit(&self, input: impl Into<String>) -> Result<TurnOutcome, AppError>
-    {
+impl RuntimeHandle {
+    pub async fn submit(&self, input: impl Into<String>) -> Result<TurnOutcome, AppError> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(RuntimeCommand::Submit {
@@ -55,8 +51,7 @@ impl RuntimeHandle
             .map_err(|_| AppError::unavailable("runtime response dropped"))?
     }
 
-    pub async fn interrupt(&self, reason: impl Into<String>) -> Result<(), AppError>
-    {
+    pub async fn interrupt(&self, reason: impl Into<String>) -> Result<(), AppError> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(RuntimeCommand::Interrupt {
@@ -70,8 +65,7 @@ impl RuntimeHandle
             .map_err(|_| AppError::unavailable("interrupt response dropped"))?
     }
 
-    pub async fn set_system_prompt(&self, prompt: impl Into<String>) -> Result<(), AppError>
-    {
+    pub async fn set_system_prompt(&self, prompt: impl Into<String>) -> Result<(), AppError> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(RuntimeCommand::SetSystemPrompt {
@@ -85,8 +79,7 @@ impl RuntimeHandle
             .map_err(|_| AppError::unavailable("persona update response dropped"))?
     }
 
-    pub async fn shutdown(&self) -> Result<(), AppError>
-    {
+    pub async fn shutdown(&self) -> Result<(), AppError> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(RuntimeCommand::Shutdown { response })
@@ -97,12 +90,19 @@ impl RuntimeHandle
             .map_err(|_| AppError::unavailable("shutdown response dropped"))?
     }
 
-    pub async fn set_persona(&self, profile_id: String, prompt: String) -> Result<(), AppError>
-    {
+    pub async fn set_persona(&self, profile_id: String, prompt: String) -> Result<(), AppError> {
         let (response, receiver) = oneshot::channel();
-        self.sender.send(RuntimeCommand::SetPersona { profile_id, prompt, response }).await
+        self.sender
+            .send(RuntimeCommand::SetPersona {
+                profile_id,
+                prompt,
+                response,
+            })
+            .await
             .map_err(|_| AppError::unavailable("runtime actor stopped"))?;
-        receiver.await.map_err(|_| AppError::unavailable("persona update response dropped"))?
+        receiver
+            .await
+            .map_err(|_| AppError::unavailable("persona update response dropped"))?
     }
 }
 
@@ -117,20 +117,21 @@ where
     N: MemoryPort + 'static,
     E: EventSink + 'static,
 {
-    if capacity == 0
-    {
-        return Err(AppError::configuration("runtime actor capacity must be positive"));
+    if capacity == 0 {
+        return Err(AppError::configuration(
+            "runtime actor capacity must be positive",
+        ));
     }
     let (sender, receiver) = mpsc::channel(capacity);
-    tokio::spawn(run_actor(runtime, receiver));
+    tokio::spawn(run_actor(runtime, receiver, capacity));
     Ok(RuntimeHandle { sender })
 }
 
 async fn run_actor<M, S, A, N, E>(
     mut runtime: Runtime<M, S, A, N, E>,
     mut receiver: mpsc::Receiver<RuntimeCommand>,
-)
-where
+    pending_capacity: usize,
+) where
     M: LanguageModelPort,
     S: SpeechPort,
     A: AvatarPort,
@@ -139,30 +140,24 @@ where
 {
     let mut stopping = false;
     let mut pending = VecDeque::new();
-    loop
-    {
-        let command = match pending.pop_front()
-        {
+    loop {
+        let command = match pending.pop_front() {
             Some(command) => command,
-            None => match receiver.recv().await
-            {
+            None => match receiver.recv().await {
                 Some(command) => command,
                 None => break,
             },
         };
-        match command
-        {
-            RuntimeCommand::Submit { input, response } =>
-            {
+        match command {
+            RuntimeCommand::Submit { input, response } => {
                 let mut shutdown_response: Option<oneshot::Sender<Result<(), AppError>>> = None;
+                let mut deferred_interrupt = None;
                 {
                     let (control, mut control_receiver) = mpsc::channel(4);
                     let turn = runtime.run_turn_controlled(input, &mut control_receiver);
                     tokio::pin!(turn);
-                    loop
-                    {
-                        tokio::select!
-                        {
+                    loop {
+                        tokio::select! {
                             result = &mut turn =>
                             {
                                 let _ignored = response.send(result);
@@ -174,10 +169,8 @@ where
                                 {
                                     Some(RuntimeCommand::Interrupt { reason, response }) =>
                                     {
-                                        let result = control
-                                            .send(RuntimeControl::Interrupt { reason })
-                                            .await
-                                            .map_err(|_| AppError::unavailable("turn control stopped"));
+                                        deferred_interrupt = Some(reason.clone());
+                                        let result = signal_control(&control, RuntimeControl::Interrupt { reason });
                                         let _ignored = response.send(result);
                                     }
                                     Some(RuntimeCommand::SetSystemPrompt { response, .. })
@@ -189,10 +182,7 @@ where
                                     }
                                     Some(RuntimeCommand::Shutdown { response }) =>
                                     {
-                                        let result = control
-                                            .send(RuntimeControl::Shutdown)
-                                            .await
-                                            .map_err(|_| AppError::unavailable("turn control stopped"));
+                                        let result = signal_control(&control, RuntimeControl::Shutdown);
                                         match result
                                         {
                                             Ok(()) =>
@@ -206,13 +196,17 @@ where
                                             }
                                         }
                                     }
-                                    Some(command @ RuntimeCommand::Submit { .. }) =>
+                                    Some(RuntimeCommand::Submit { input, response }) =>
                                     {
-                                        pending.push_back(command);
+                                        if pending.len() < pending_capacity {
+                                            pending.push_back(RuntimeCommand::Submit { input, response });
+                                        } else {
+                                            let _ignored = response.send(Err(AppError::unavailable("conversation queue is full; wait for a pending turn")));
+                                        }
                                     }
                                     None =>
                                     {
-                                        let _ignored = control.send(RuntimeControl::Shutdown).await;
+                                        let _ignored = signal_control(&control, RuntimeControl::Shutdown);
                                         stopping = true;
                                     }
                                 }
@@ -220,37 +214,49 @@ where
                         }
                     }
                 }
-                if stopping
-                {
+                if stopping {
                     let result = runtime.stop().await;
-                    if let Some(response) = shutdown_response.take()
-                    {
+                    if let Some(response) = shutdown_response.take() {
                         let _ignored = response.send(result);
                     }
+                } else if let Some(reason) = deferred_interrupt {
+                    // Covers an accepted command racing with the turn's final commit.
+                    let _ignored = runtime.interrupt(reason).await;
                 }
             }
-            RuntimeCommand::Interrupt { reason, response } =>
-            {
+            RuntimeCommand::Interrupt { reason, response } => {
                 let _ignored = response.send(runtime.interrupt(reason).await);
             }
-            RuntimeCommand::SetSystemPrompt { prompt, response } =>
-            {
+            RuntimeCommand::SetSystemPrompt { prompt, response } => {
                 let _ignored = response.send(runtime.set_system_prompt(prompt));
             }
-            RuntimeCommand::SetPersona { profile_id, prompt, response } =>
-            {
+            RuntimeCommand::SetPersona {
+                profile_id,
+                prompt,
+                response,
+            } => {
                 let _ignored = response.send(runtime.set_persona(profile_id, prompt).await);
             }
-            RuntimeCommand::Shutdown { response } =>
-            {
+            RuntimeCommand::Shutdown { response } => {
                 let result = runtime.stop().await;
                 let _ignored = response.send(result);
                 break;
             }
         }
-        if stopping
-        {
+        if stopping {
             break;
+        }
+    }
+}
+
+fn signal_control(
+    sender: &mpsc::Sender<RuntimeControl>,
+    command: RuntimeControl,
+) -> Result<(), AppError> {
+    match sender.try_send(command) {
+        Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => Ok(()),
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            Err(AppError::unavailable("turn control stopped"))
         }
     }
 }

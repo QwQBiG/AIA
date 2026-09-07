@@ -10,33 +10,34 @@ use crate::{
 };
 
 #[async_trait]
-pub trait AutomationPluginTransport: Send
-{
+pub trait AutomationPluginTransport: Send {
     async fn call(
         &mut self,
         request: AutomationPluginRequest,
     ) -> Result<AutomationPluginResponse, AppError>;
 }
 
-pub struct PluginAutomationPort<T>
-{
+pub struct PluginAutomationPort<T> {
     transport: T,
 }
 
-impl<T> PluginAutomationPort<T>
-{
-    pub fn new(transport: T) -> Self
-    {
+impl<T> PluginAutomationPort<T> {
+    pub fn new(transport: T) -> Self {
         Self { transport }
     }
 
-    pub async fn observe(&mut self, prompt: impl Into<String>) -> Result<AutomationPluginResponse, AppError>
+    pub async fn observe(
+        &mut self,
+        prompt: impl Into<String>,
+    ) -> Result<AutomationPluginResponse, AppError>
     where
         T: AutomationPluginTransport,
     {
-        self.call(AutomationPluginRequest::new(AutomationPluginRequestKind::Observe {
-            prompt: prompt.into(),
-        }))
+        self.call(AutomationPluginRequest::new(
+            AutomationPluginRequestKind::Observe {
+                prompt: prompt.into(),
+            },
+        ))
         .await
     }
 
@@ -45,15 +46,16 @@ impl<T> PluginAutomationPort<T>
         T: AutomationPluginTransport,
     {
         let response = self
-            .call(AutomationPluginRequest::new(AutomationPluginRequestKind::Interrupt))
+            .call(AutomationPluginRequest::new(
+                AutomationPluginRequestKind::Interrupt,
+            ))
             .await?;
-        if matches!(response.payload, AutomationPluginResponseKind::Interrupted)
-        {
+        if matches!(response.payload, AutomationPluginResponseKind::Interrupted) {
             Ok(())
-        }
-        else
-        {
-            Err(AppError::protocol("automation plugin interrupt response is invalid"))
+        } else {
+            Err(AppError::protocol(
+                "automation plugin interrupt response is invalid",
+            ))
         }
     }
 
@@ -67,8 +69,7 @@ impl<T> PluginAutomationPort<T>
         request.validate()?;
         let response = self.transport.call(request.clone()).await?;
         response.validate()?;
-        if response.request_id != request.request_id
-        {
+        if response.request_id != request.request_id {
             return Err(AppError::protocol(
                 "automation plugin response request ID mismatch",
             ));
@@ -86,25 +87,24 @@ where
         &mut self,
         permit: &Permit,
         action: &AutomationAction,
-    ) -> Result<ActionResult, AppError>
-    {
+    ) -> Result<ActionResult, AppError> {
         permit.ensure_active()?;
         action.validate()?;
-        if permit.capability() != action.required_capability()
-        {
+        if permit.capability() != action.required_capability() {
             return Err(AppError::safety(
                 "automation permit capability does not match action",
             ));
         }
         let response = self
-            .call(AutomationPluginRequest::new(AutomationPluginRequestKind::Execute {
-                target: permit.target().to_owned(),
-                rationale: permit.rationale().to_owned(),
-                action: action.clone(),
-            }))
+            .call(AutomationPluginRequest::new(
+                AutomationPluginRequestKind::Execute {
+                    target: permit.target().to_owned(),
+                    rationale: permit.rationale().to_owned(),
+                    action: action.clone(),
+                },
+            ))
             .await?;
-        match response.payload
-        {
+        match response.payload {
             AutomationPluginResponseKind::ActionAccepted { .. }
             | AutomationPluginResponseKind::Observation { .. } => Ok(ActionResult::Completed),
             AutomationPluginResponseKind::Interrupted => Err(AppError::protocol(
@@ -115,8 +115,7 @@ where
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use std::collections::BTreeSet;
 
     use ai_ex_safety::{ActionRequest, Capability, SafetyGate, SafetyPolicy};
@@ -125,27 +124,23 @@ mod tests
     use super::*;
 
     use crate::AUTOMATION_PLUGIN_SCHEMA_VERSION;
-    struct FakeTransport
-    {
+    struct FakeTransport {
         response: Option<AutomationPluginResponse>,
     }
 
     #[async_trait]
-    impl AutomationPluginTransport for FakeTransport
-    {
+    impl AutomationPluginTransport for FakeTransport {
         async fn call(
             &mut self,
             request: AutomationPluginRequest,
-        ) -> Result<AutomationPluginResponse, AppError>
-        {
+        ) -> Result<AutomationPluginResponse, AppError> {
             let mut response = self.response.take().expect("fake response configured");
             response.request_id = request.request_id;
             Ok(response)
         }
     }
 
-    fn permit() -> Permit
-    {
+    fn permit() -> Permit {
         SafetyGate::new(SafetyPolicy {
             automation_enabled: true,
             allowed_capabilities: BTreeSet::from([Capability::MouseInput]),
@@ -160,8 +155,7 @@ mod tests
     }
 
     #[tokio::test]
-    async fn executes_typed_request_after_safety_validation()
-    {
+    async fn executes_typed_request_after_safety_validation() {
         let transport = FakeTransport {
             response: Some(AutomationPluginResponse {
                 schema_version: AUTOMATION_PLUGIN_SCHEMA_VERSION,
@@ -185,18 +179,15 @@ mod tests
     }
 
     #[tokio::test]
-    async fn rejects_wrong_response_request_id()
-    {
+    async fn rejects_wrong_response_request_id() {
         struct MismatchTransport;
 
         #[async_trait]
-        impl AutomationPluginTransport for MismatchTransport
-        {
+        impl AutomationPluginTransport for MismatchTransport {
             async fn call(
                 &mut self,
                 _request: AutomationPluginRequest,
-            ) -> Result<AutomationPluginResponse, AppError>
-            {
+            ) -> Result<AutomationPluginResponse, AppError> {
                 Ok(AutomationPluginResponse {
                     schema_version: AUTOMATION_PLUGIN_SCHEMA_VERSION,
                     request_id: Uuid::nil(),

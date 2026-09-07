@@ -10,8 +10,7 @@ use crate::{
     ExecutionPhase, ExecutionReceipt,
 };
 
-pub struct AutomationCoordinator<P, A>
-{
+pub struct AutomationCoordinator<P, A> {
     safety: Arc<SafetyGate>,
     port: P,
     audit: A,
@@ -22,8 +21,7 @@ where
     P: AutomationPort,
     A: AuditSink,
 {
-    pub fn new(safety: Arc<SafetyGate>, port: P, audit: A) -> Self
-    {
+    pub fn new(safety: Arc<SafetyGate>, port: P, audit: A) -> Self {
         Self {
             safety,
             port,
@@ -36,22 +34,34 @@ where
         target: impl Into<String>,
         rationale: impl Into<String>,
         action: AutomationAction,
-    ) -> Result<ExecutionReceipt, ExecutionFailure>
-    {
+    ) -> Result<ExecutionReceipt, ExecutionFailure> {
         let action_id = Uuid::new_v4();
         let target = target.into();
         let rationale = rationale.into();
         let capability = action.required_capability();
         let label = action.audit_label();
-        if let Err(error) = action.validate()
-        {
+        if let Err(error) = action.validate() {
             let _ignored = self
-                .record(action_id, AuditStage::Rejected, capability, &target, &label, &error.message)
+                .record(
+                    action_id,
+                    AuditStage::Rejected,
+                    capability,
+                    &target,
+                    &label,
+                    &error.message,
+                )
                 .await;
             return Err(failure(action_id, ExecutionPhase::BeforeExecution, error));
         }
         if let Err(error) = self
-            .record(action_id, AuditStage::Requested, capability, &target, &label, &rationale)
+            .record(
+                action_id,
+                AuditStage::Requested,
+                capability,
+                &target,
+                &label,
+                &rationale,
+            )
             .await
         {
             return Err(failure(action_id, ExecutionPhase::BeforeExecution, error));
@@ -60,11 +70,9 @@ where
             capability,
             target: target.clone(),
             rationale,
-        })
-        {
+        }) {
             Ok(permit) => permit,
-            Err(error) =>
-            {
+            Err(error) => {
                 let _ignored = self
                     .record(
                         action_id,
@@ -91,8 +99,7 @@ where
         {
             return Err(failure(action_id, ExecutionPhase::BeforeExecution, error));
         }
-        if let Err(error) = permit.ensure_active()
-        {
+        if let Err(error) = permit.ensure_active() {
             let _ignored = self
                 .record(
                     action_id,
@@ -105,11 +112,9 @@ where
                 .await;
             return Err(failure(action_id, ExecutionPhase::BeforeExecution, error));
         }
-        let result = match self.port.execute(&permit, &action).await
-        {
+        let result = match self.port.execute(&permit, &action).await {
             Ok(result) => result,
-            Err(error) =>
-            {
+            Err(error) => {
                 let _ignored = self
                     .record(
                         action_id,
@@ -149,8 +154,7 @@ where
         target: &str,
         action: &str,
         detail: &str,
-    ) -> Result<(), AppError>
-    {
+    ) -> Result<(), AppError> {
         self.audit
             .record(AuditRecord {
                 action_id,
@@ -165,8 +169,7 @@ where
     }
 }
 
-fn failure(action_id: Uuid, phase: ExecutionPhase, error: AppError) -> ExecutionFailure
-{
+fn failure(action_id: Uuid, phase: ExecutionPhase, error: AppError) -> ExecutionFailure {
     ExecutionFailure {
         action_id,
         phase,
@@ -174,9 +177,10 @@ fn failure(action_id: Uuid, phase: ExecutionPhase, error: AppError) -> Execution
     }
 }
 
-fn timestamp_ms() -> u64
-{
+fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .map_or(0, |duration| {
+            duration.as_millis().min(u128::from(u64::MAX)) as u64
+        })
 }

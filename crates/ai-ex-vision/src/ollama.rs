@@ -7,31 +7,26 @@ use serde::{Deserialize, Serialize};
 use crate::{VisionAnalyzerPort, VisionObservation, VisionRequest};
 
 #[derive(Debug, Clone)]
-pub struct OllamaVisionSettings
-{
+pub struct OllamaVisionSettings {
     pub base_url: String,
     pub model: String,
     pub timeout: Duration,
 }
 
-pub struct OllamaVisionClient
-{
+pub struct OllamaVisionClient {
     client: reqwest::Client,
     base_url: String,
     model: String,
 }
 
-impl OllamaVisionClient
-{
-    pub fn new(settings: OllamaVisionSettings) -> Result<Self, AppError>
-    {
-        if !settings.base_url.starts_with("http://")
-            && !settings.base_url.starts_with("https://")
-        {
-            return Err(AppError::configuration("vision base URL must be HTTP or HTTPS"));
+impl OllamaVisionClient {
+    pub fn new(settings: OllamaVisionSettings) -> Result<Self, AppError> {
+        if !settings.base_url.starts_with("http://") && !settings.base_url.starts_with("https://") {
+            return Err(AppError::configuration(
+                "vision base URL must be HTTP or HTTPS",
+            ));
         }
-        if settings.model.trim().is_empty() || settings.timeout.is_zero()
-        {
+        if settings.model.trim().is_empty() || settings.timeout.is_zero() {
             return Err(AppError::configuration(
                 "vision model and positive timeout are required",
             ));
@@ -47,8 +42,7 @@ impl OllamaVisionClient
         })
     }
 
-    pub async fn health(&self) -> ComponentHealth
-    {
+    pub async fn health(&self) -> ComponentHealth {
         match self
             .client
             .get(format!("{}/api/tags", self.base_url))
@@ -66,16 +60,14 @@ impl OllamaVisionClient
 }
 
 #[derive(Serialize)]
-struct ChatRequest
-{
+struct ChatRequest {
     model: String,
     stream: bool,
     messages: Vec<ChatMessage>,
 }
 
 #[derive(Serialize)]
-struct ChatMessage
-{
+struct ChatMessage {
     role: &'static str,
     content: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -83,29 +75,26 @@ struct ChatMessage
 }
 
 #[derive(Deserialize)]
-struct ChatResponse
-{
+struct ChatResponse {
     message: ResponseMessage,
 }
 
 #[derive(Deserialize)]
-struct ResponseMessage
-{
+struct ResponseMessage {
     content: String,
 }
 
 #[async_trait]
-impl VisionAnalyzerPort for OllamaVisionClient
-{
-    async fn analyze(&mut self, request: VisionRequest) -> Result<VisionObservation, AppError>
-    {
+impl VisionAnalyzerPort for OllamaVisionClient {
+    async fn analyze(&mut self, request: VisionRequest) -> Result<VisionObservation, AppError> {
         let payload = ChatRequest {
             model: self.model.clone(),
             stream: false,
             messages: vec![
                 ChatMessage {
                     role: "system",
-                    content: "Describe observations only. Do not issue or execute actions.".to_owned(),
+                    content: "Describe observations only. Do not issue or execute actions."
+                        .to_owned(),
                     images: Vec::new(),
                 },
                 ChatMessage {
@@ -123,8 +112,7 @@ impl VisionAnalyzerPort for OllamaVisionClient
             .await
             .map_err(|error| AppError::connectivity(format!("vision request failed: {error}")))?;
         let status = response.status();
-        if !status.is_success()
-        {
+        if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(AppError::protocol(format!(
                 "vision returned {status}: {}",
@@ -135,8 +123,7 @@ impl VisionAnalyzerPort for OllamaVisionClient
             .json()
             .await
             .map_err(|error| AppError::protocol(format!("invalid vision response: {error}")))?;
-        if response.message.content.trim().is_empty()
-        {
+        if response.message.content.trim().is_empty() {
             return Err(AppError::protocol("vision returned an empty observation"));
         }
         Ok(VisionObservation {
@@ -146,32 +133,23 @@ impl VisionAnalyzerPort for OllamaVisionClient
     }
 }
 
-fn encode_base64(bytes: &[u8]) -> String
-{
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3)
-    {
+    for chunk in bytes.chunks(3) {
         let first = chunk[0];
         let second = chunk.get(1).copied().unwrap_or_default();
         let third = chunk.get(2).copied().unwrap_or_default();
         output.push(TABLE[(first >> 2) as usize] as char);
         output.push(TABLE[(((first & 0x03) << 4) | (second >> 4)) as usize] as char);
-        output.push(if chunk.len() > 1
-        {
+        output.push(if chunk.len() > 1 {
             TABLE[(((second & 0x0f) << 2) | (third >> 6)) as usize] as char
-        }
-        else
-        {
+        } else {
             '='
         });
-        output.push(if chunk.len() > 2
-        {
+        output.push(if chunk.len() > 2 {
             TABLE[(third & 0x3f) as usize] as char
-        }
-        else
-        {
+        } else {
             '='
         });
     }
@@ -179,13 +157,11 @@ fn encode_base64(bytes: &[u8]) -> String
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::encode_base64;
 
     #[test]
-    fn encodes_standard_base64_vectors()
-    {
+    fn encodes_standard_base64_vectors() {
         assert_eq!(encode_base64(b""), "");
         assert_eq!(encode_base64(b"f"), "Zg==");
         assert_eq!(encode_base64(b"fo"), "Zm8=");

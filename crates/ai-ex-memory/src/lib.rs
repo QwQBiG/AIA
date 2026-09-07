@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ai_ex_core::MemoryPort;
-use ai_ex_domain::{AppError, ComponentHealth, MemoryKind, MemoryProjection, Message, Role, TurnId};
+use ai_ex_domain::{
+    AppError, ComponentHealth, MemoryKind, MemoryProjection, Message, Role, TurnId,
+};
 use async_trait::async_trait;
 use record::MemoryRecord;
 use tokio::io::AsyncWriteExt;
@@ -22,13 +24,11 @@ use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct MemoryStore
-{
+pub struct MemoryStore {
     inner: Arc<MemoryInner>,
 }
 
-struct MemoryInner
-{
+struct MemoryInner {
     profile_id: RwLock<String>,
     path: PathBuf,
     records: RwLock<Vec<MemoryRecord>>,
@@ -36,22 +36,17 @@ struct MemoryInner
     enabled: bool,
 }
 
-impl MemoryStore
-{
-    pub async fn open(path: impl AsRef<Path>) -> Result<Self, AppError>
-    {
+impl MemoryStore {
+    pub async fn open(path: impl AsRef<Path>) -> Result<Self, AppError> {
         let path = path.as_ref().to_owned();
-        let content = match tokio::fs::read_to_string(&path).await
-        {
+        let content = match tokio::fs::read_to_string(&path).await {
             Ok(content) => content,
             Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
             Err(error) => return Err(AppError::unavailable(error.to_string())),
         };
         let mut records = Vec::new();
-        for (line_number, line) in content.lines().enumerate()
-        {
-            if line.trim().is_empty()
-            {
+        for (line_number, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
                 continue;
             }
             let record = serde_json::from_str(line).map_err(|error| {
@@ -70,8 +65,7 @@ impl MemoryStore
         })
     }
 
-    pub fn disabled() -> Self
-    {
+    pub fn disabled() -> Self {
         Self {
             inner: Arc::new(MemoryInner {
                 profile_id: RwLock::new(record::default_profile()),
@@ -83,15 +77,14 @@ impl MemoryStore
         }
     }
 
-    pub async fn len(&self) -> usize
-    {
+    pub async fn len(&self) -> usize {
         self.count(None).await
     }
 
-    pub async fn count(&self, kind: Option<MemoryKind>) -> usize
-    {
+    pub async fn count(&self, kind: Option<MemoryKind>) -> usize {
         let profile_id = self.inner.profile_id.read().await;
-        self.inner.records
+        self.inner
+            .records
             .read()
             .await
             .iter()
@@ -100,26 +93,23 @@ impl MemoryStore
             .count()
     }
 
-    pub async fn is_empty(&self) -> bool
-    {
+    pub async fn is_empty(&self) -> bool {
         self.len().await == 0
     }
 
-    pub async fn select_profile(&self, profile_id: &str) -> Result<(), AppError>
-    {
-        if profile_id.trim().is_empty() || profile_id.chars().count() > 128
-        {
-            return Err(AppError::configuration("memory profile ID is outside supported bounds"));
+    pub async fn select_profile(&self, profile_id: &str) -> Result<(), AppError> {
+        if profile_id.trim().is_empty() || profile_id.chars().count() > 128 {
+            return Err(AppError::configuration(
+                "memory profile ID is outside supported bounds",
+            ));
         }
         // Readers retain their scope until their complete operation has finished.
         *self.inner.profile_id.write().await = profile_id.to_owned();
         Ok(())
     }
 
-    pub async fn health(&self) -> ComponentHealth
-    {
-        if !self.inner.enabled
-        {
+    pub async fn health(&self) -> ComponentHealth {
+        if !self.inner.enabled {
             return ComponentHealth {
                 component: "memory".to_owned(),
                 ready: true,
@@ -138,10 +128,8 @@ impl MemoryStore
         kind: Option<MemoryKind>,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<Message>, AppError>
-    {
-        if !self.inner.enabled
-        {
+    ) -> Result<Vec<Message>, AppError> {
+        if !self.inner.enabled {
             return Ok(Vec::new());
         }
         let profile_id = self.inner.profile_id.read().await;
@@ -150,8 +138,7 @@ impl MemoryStore
             .iter()
             .filter(|record| record.profile_id == *profile_id)
             .filter(|record| kind.is_none_or(|expected| record.kind == expected))
-            .filter_map(|record|
-            {
+            .filter_map(|record| {
                 let score = record.relevance(query);
                 (score > 0).then_some((score, record))
             })
@@ -160,8 +147,7 @@ impl MemoryStore
         Ok(ranked
             .into_iter()
             .take(limit)
-            .map(|(_score, record)|
-            {
+            .map(|(_score, record)| {
                 Message::new(
                     Role::System,
                     format!(
@@ -180,10 +166,8 @@ impl MemoryStore
         kinds: &[MemoryKind],
         query: &str,
         limit: usize,
-    ) -> Result<Vec<Message>, AppError>
-    {
-        if !self.inner.enabled
-        {
+    ) -> Result<Vec<Message>, AppError> {
+        if !self.inner.enabled {
             return Ok(Vec::new());
         }
         let profile_id = self.inner.profile_id.read().await;
@@ -192,8 +176,7 @@ impl MemoryStore
             .iter()
             .filter(|record| record.profile_id == *profile_id)
             .filter(|record| kinds.contains(&record.kind))
-            .filter_map(|record|
-            {
+            .filter_map(|record| {
                 let score = record.relevance(query);
                 (score > 0).then_some((score, record))
             })
@@ -202,8 +185,7 @@ impl MemoryStore
         Ok(ranked
             .into_iter()
             .take(limit)
-            .map(|(_score, record)|
-            {
+            .map(|(_score, record)| {
                 Message::new(
                     Role::System,
                     format!(
@@ -223,16 +205,13 @@ impl MemoryStore
         turn_id: TurnId,
         user_text: String,
         assistant_text: String,
-    ) -> Result<(), AppError>
-    {
-        if !self.inner.enabled
-        {
+    ) -> Result<(), AppError> {
+        if !self.inner.enabled {
             return Ok(());
         }
         let profile_id = self.inner.profile_id.read().await;
         let _write_guard = self.inner.write_lock.lock().await;
-        if let Some(parent) = self.inner.path.parent()
-        {
+        if let Some(parent) = self.inner.path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|error| AppError::unavailable(error.to_string()))?;
@@ -273,8 +252,7 @@ impl MemoryStore
     pub async fn remember_projection(
         &mut self,
         projection: &MemoryProjection,
-    ) -> Result<(), AppError>
-    {
+    ) -> Result<(), AppError> {
         self.remember_kind(
             projection.kind,
             projection.turn_id.unwrap_or_default(),
@@ -287,8 +265,7 @@ impl MemoryStore
         &self,
         kind: Option<MemoryKind>,
         destination: impl AsRef<Path>,
-    ) -> Result<usize, AppError>
-    {
+    ) -> Result<usize, AppError> {
         let profile_id = self.inner.profile_id.read().await;
         let records: Vec<_> = self
             .inner
@@ -302,8 +279,7 @@ impl MemoryStore
             .collect();
         let content = serialize_records(&records)?;
         let destination = destination.as_ref();
-        if let Some(parent) = destination.parent()
-        {
+        if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|error| AppError::unavailable(error.to_string()))?;
@@ -314,10 +290,8 @@ impl MemoryStore
         Ok(records.len())
     }
 
-    pub async fn clear_kind(&mut self, kind: MemoryKind) -> Result<usize, AppError>
-    {
-        if !self.inner.enabled
-        {
+    pub async fn clear_kind(&mut self, kind: MemoryKind) -> Result<usize, AppError> {
+        if !self.inner.enabled {
             return Ok(0);
         }
         let profile_id = self.inner.profile_id.read().await;
@@ -330,18 +304,19 @@ impl MemoryStore
             .collect();
         let removed = records.len().saturating_sub(retained.len());
         drop(records);
-        if removed == 0
-        {
+        if removed == 0 {
             return Ok(0);
         }
         let content = serialize_records(&retained)?;
-        let temporary = self.inner.path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        let temporary = self
+            .inner
+            .path
+            .with_extension(format!("{}.tmp", Uuid::new_v4()));
         write_new_synced(&temporary, content.as_bytes())
             .await
             .map_err(|error| AppError::unavailable(error.to_string()))?;
         // Replace directly: deleting the original first loses data if rename fails.
-        if let Err(error) = tokio::fs::rename(&temporary, &self.inner.path).await
-        {
+        if let Err(error) = tokio::fs::rename(&temporary, &self.inner.path).await {
             let _ = tokio::fs::remove_file(&temporary).await;
             return Err(AppError::unavailable(error.to_string()));
         }
@@ -351,15 +326,12 @@ impl MemoryStore
 }
 
 #[async_trait]
-impl MemoryPort for MemoryStore
-{
-    async fn select_profile(&mut self, profile_id: &str) -> Result<(), AppError>
-    {
+impl MemoryPort for MemoryStore {
+    async fn select_profile(&mut self, profile_id: &str) -> Result<(), AppError> {
         MemoryStore::select_profile(self, profile_id).await
     }
 
-    async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError>
-    {
+    async fn recall(&self, query: &str, limit: usize) -> Result<Vec<Message>, AppError> {
         self.recall_kind(None, query, limit).await
     }
 
@@ -367,10 +339,13 @@ impl MemoryPort for MemoryStore
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<Message>, AppError>
-    {
+    ) -> Result<Vec<Message>, AppError> {
         self.recall_kinds(
-            &[MemoryKind::Conversation, MemoryKind::Persona, MemoryKind::Viewer],
+            &[
+                MemoryKind::Conversation,
+                MemoryKind::Persona,
+                MemoryKind::Viewer,
+            ],
             query,
             limit,
         )
@@ -382,15 +357,13 @@ impl MemoryPort for MemoryStore
         turn_id: TurnId,
         user_text: String,
         assistant_text: String,
-    ) -> Result<(), AppError>
-    {
+    ) -> Result<(), AppError> {
         self.remember_kind(MemoryKind::Conversation, turn_id, user_text, assistant_text)
             .await
     }
 }
 
-async fn write_new_synced(path: &Path, content: &[u8]) -> std::io::Result<()>
-{
+async fn write_new_synced(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -403,20 +376,17 @@ async fn write_new_synced(path: &Path, content: &[u8]) -> std::io::Result<()>
     }
     .await;
     drop(file);
-    if result.is_err()
-    {
+    if result.is_err() {
         let _ = tokio::fs::remove_file(path).await;
     }
     result
 }
 
-fn serialize_records(records: &[MemoryRecord]) -> Result<String, AppError>
-{
+fn serialize_records(records: &[MemoryRecord]) -> Result<String, AppError> {
     let mut content = String::new();
-    for record in records
-    {
-        let line = serde_json::to_string(record)
-            .map_err(|error| AppError::protocol(error.to_string()))?;
+    for record in records {
+        let line =
+            serde_json::to_string(record).map_err(|error| AppError::protocol(error.to_string()))?;
         content.push_str(&line);
         content.push('\n');
     }
@@ -424,13 +394,11 @@ fn serialize_records(records: &[MemoryRecord]) -> Result<String, AppError>
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn persists_and_recalls_relevant_turns()
-    {
+    async fn persists_and_recalls_relevant_turns() {
         let path = std::env::temp_dir().join(format!("ai-ex-memory-{}.jsonl", Uuid::new_v4()));
         let mut store = MemoryStore::open(&path).await.expect("store opens");
         store
@@ -446,14 +414,16 @@ mod tests
 
         let reopened = MemoryStore::open(&path).await.expect("store reopens");
         assert_eq!(reopened.len().await, 1);
-        tokio::fs::remove_file(&path).await.expect("temporary memory removed");
+        tokio::fs::remove_file(&path)
+            .await
+            .expect("temporary memory removed");
     }
 
     #[tokio::test]
-    async fn filters_exports_and_clears_memory_kinds()
-    {
+    async fn filters_exports_and_clears_memory_kinds() {
         let path = std::env::temp_dir().join(format!("ai-ex-memory-{}.jsonl", Uuid::new_v4()));
-        let export_path = std::env::temp_dir().join(format!("ai-ex-memory-export-{}.jsonl", Uuid::new_v4()));
+        let export_path =
+            std::env::temp_dir().join(format!("ai-ex-memory-export-{}.jsonl", Uuid::new_v4()));
         let mut store = MemoryStore::open(&path).await.expect("store opens");
         store
             .remember_kind(
@@ -474,22 +444,39 @@ mod tests
             .await
             .expect("persona memory persists");
         assert_eq!(store.count(Some(MemoryKind::Viewer)).await, 1);
-        assert_eq!(store.recall_kind(Some(MemoryKind::Persona), "星星", 3).await.unwrap().len(), 1);
-        assert_eq!(store.export_kind(Some(MemoryKind::Viewer), &export_path).await.unwrap(), 1);
+        assert_eq!(
+            store
+                .recall_kind(Some(MemoryKind::Persona), "星星", 3)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .export_kind(Some(MemoryKind::Viewer), &export_path)
+                .await
+                .unwrap(),
+            1
+        );
         assert_eq!(store.clear_kind(MemoryKind::Viewer).await.unwrap(), 1);
         assert_eq!(store.count(Some(MemoryKind::Viewer)).await, 0);
 
         let reopened = MemoryStore::open(&path).await.expect("store reopens");
         assert_eq!(reopened.count(Some(MemoryKind::Persona)).await, 1);
         assert_eq!(reopened.count(Some(MemoryKind::Viewer)).await, 0);
-        tokio::fs::remove_file(&path).await.expect("temporary memory removed");
-        tokio::fs::remove_file(&export_path).await.expect("temporary export removed");
+        tokio::fs::remove_file(&path)
+            .await
+            .expect("temporary memory removed");
+        tokio::fs::remove_file(&export_path)
+            .await
+            .expect("temporary export removed");
     }
 
     #[tokio::test]
-    async fn cloned_stores_serialize_concurrent_appends()
-    {
-        let path = std::env::temp_dir().join(format!("ai-ex-memory-shared-{}.jsonl", Uuid::new_v4()));
+    async fn cloned_stores_serialize_concurrent_appends() {
+        let path =
+            std::env::temp_dir().join(format!("ai-ex-memory-shared-{}.jsonl", Uuid::new_v4()));
         let store = MemoryStore::open(&path).await.expect("store opens");
         let mut first = store.clone();
         let mut second = store.clone();
@@ -508,14 +495,18 @@ mod tests
         let (first_result, second_result) = tokio::join!(first_write, second_write);
         first_result.expect("first append succeeds");
         second_result.expect("second append succeeds");
-        let reopened = MemoryStore::open(&path).await.expect("shared memory reopens");
+        let reopened = MemoryStore::open(&path)
+            .await
+            .expect("shared memory reopens");
         assert_eq!(reopened.len().await, 2);
-        tokio::fs::remove_file(&path).await.expect("shared memory removed");
+        tokio::fs::remove_file(&path)
+            .await
+            .expect("shared memory removed");
     }
     #[tokio::test]
-    async fn remembers_a_projected_live_event()
-    {
-        let path = std::env::temp_dir().join(format!("ai-ex-memory-projection-{}.jsonl", Uuid::new_v4()));
+    async fn remembers_a_projected_live_event() {
+        let path =
+            std::env::temp_dir().join(format!("ai-ex-memory-projection-{}.jsonl", Uuid::new_v4()));
         let mut store = MemoryStore::open(&path).await.expect("store opens");
         let projection = MemoryProjection {
             kind: MemoryKind::LiveEvent,
@@ -529,28 +520,34 @@ mod tests
             .await
             .expect("projection persists");
         assert_eq!(store.count(Some(MemoryKind::LiveEvent)).await, 1);
-        tokio::fs::remove_file(&path).await.expect("projection memory removed");
+        tokio::fs::remove_file(&path)
+            .await
+            .expect("projection memory removed");
     }
     #[tokio::test]
-    async fn reads_legacy_records_without_a_kind()
-    {
-        let path = std::env::temp_dir().join(format!("ai-ex-memory-legacy-{}.jsonl", Uuid::new_v4()));
+    async fn reads_legacy_records_without_a_kind() {
+        let path =
+            std::env::temp_dir().join(format!("ai-ex-memory-legacy-{}.jsonl", Uuid::new_v4()));
         let turn_id = serde_json::to_string(&TurnId::new()).expect("turn id serializes");
         let legacy = format!(
             "{{\"id\":\"{}\",\"turn_id\":{},\"created_ms\":1,\"user_text\":\"旧记录\",\"assistant_text\":\"兼容\"}}\n",
             Uuid::new_v4(),
             turn_id,
         );
-        tokio::fs::write(&path, legacy).await.expect("legacy memory written");
+        tokio::fs::write(&path, legacy)
+            .await
+            .expect("legacy memory written");
         let store = MemoryStore::open(&path).await.expect("legacy memory opens");
         assert_eq!(store.count(Some(MemoryKind::Conversation)).await, 1);
-        tokio::fs::remove_file(&path).await.expect("legacy memory removed");
+        tokio::fs::remove_file(&path)
+            .await
+            .expect("legacy memory removed");
     }
 
     #[tokio::test]
-    async fn context_recall_excludes_live_event_memory()
-    {
-        let path = std::env::temp_dir().join(format!("ai-ex-memory-context-{}.jsonl", Uuid::new_v4()));
+    async fn context_recall_excludes_live_event_memory() {
+        let path =
+            std::env::temp_dir().join(format!("ai-ex-memory-context-{}.jsonl", Uuid::new_v4()));
         let mut store = MemoryStore::open(&path).await.expect("store opens");
         store
             .remember_kind(
@@ -572,7 +569,11 @@ mod tests
             .expect("live event memory persists");
         let context = store
             .recall_kinds(
-                &[MemoryKind::Conversation, MemoryKind::Persona, MemoryKind::Viewer],
+                &[
+                    MemoryKind::Conversation,
+                    MemoryKind::Persona,
+                    MemoryKind::Viewer,
+                ],
                 "蓝莓",
                 8,
             )
@@ -580,6 +581,8 @@ mod tests
             .expect("context recall succeeds");
         assert_eq!(context.len(), 1);
         assert!(context[0].content.contains("对话记忆"));
-        tokio::fs::remove_file(&path).await.expect("context memory removed");
+        tokio::fs::remove_file(&path)
+            .await
+            .expect("context memory removed");
     }
 }

@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.96.0 --profile minimal --component clippy
+        run: rustup toolchain install 1.96.0 --profile minimal --component clippy --component rustfmt
 
       - name: Select Rust toolchain
         run: rustup default 1.96.0
@@ -29,9 +29,8 @@ jobs:
       - name: Lint workspace
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-      - name: Enforce Allman control-flow style
-        shell: pwsh
-        run: ./tools/check_rust_style.ps1
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Enforce crate dependency boundaries
         shell: pwsh
@@ -46,13 +45,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.96.0 --profile minimal --component clippy
+        run: rustup toolchain install 1.96.0 --profile minimal --component clippy --component rustfmt
 
       - name: Select Rust toolchain
         run: rustup default 1.96.0
 
       - name: Test desktop without opening windows
         run: cargo test --manifest-path crates/ai-ex-desktop/Cargo.toml --locked
+
+      - name: Check desktop formatting
+        run: cargo fmt --manifest-path crates/ai-ex-desktop/Cargo.toml -- --check
 
       - name: Lint desktop
         run: cargo clippy --manifest-path crates/ai-ex-desktop/Cargo.toml --all-targets --locked -- -D warnings

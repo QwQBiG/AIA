@@ -11,8 +11,7 @@ use crate::server::read_line_limited;
 use crate::{ControlCommand, ControlPayload, ControlRequest, ControlResponse};
 
 #[derive(Clone)]
-pub struct ControlClient
-{
+pub struct ControlClient {
     address: SocketAddr,
     token: Arc<str>,
     max_message_bytes: usize,
@@ -23,30 +22,27 @@ pub struct ControlClient
 #[path = "client_tests.rs"]
 mod tests;
 
-impl ControlClient
-{
+impl ControlClient {
     pub fn new(
         address: &str,
         token: impl Into<String>,
         max_message_bytes: usize,
-    ) -> Result<Self, AppError>
-    {
-        let address: SocketAddr = address
-            .parse()
-            .map_err(|error| AppError::configuration(format!("invalid control address: {error}")))?;
-        if !address.ip().is_loopback()
-        {
-            return Err(AppError::safety("control client requires a loopback address"));
+    ) -> Result<Self, AppError> {
+        let address: SocketAddr = address.parse().map_err(|error| {
+            AppError::configuration(format!("invalid control address: {error}"))
+        })?;
+        if !address.ip().is_loopback() {
+            return Err(AppError::safety(
+                "control client requires a loopback address",
+            ));
         }
         let token = token.into();
-        if token.len() < 32
-        {
+        if token.len() < 32 {
             return Err(AppError::configuration(
                 "control token must contain at least 32 bytes",
             ));
         }
-        if max_message_bytes < 256
-        {
+        if max_message_bytes < 256 {
             return Err(AppError::configuration(
                 "control message limit must be at least 256 bytes",
             ));
@@ -59,17 +55,15 @@ impl ControlClient
         })
     }
 
-    pub async fn send(&self, command: ControlCommand) -> Result<ControlPayload, AppError>
-    {
+    pub async fn send(&self, command: ControlCommand) -> Result<ControlPayload, AppError> {
         tokio::time::timeout(self.request_timeout, self.send_request(command))
             .await
-            .map_err(|_| AppError::connectivity(
-                "control request timed out; command outcome may be unknown",
-            ))?
+            .map_err(|_| {
+                AppError::connectivity("control request timed out; command outcome may be unknown")
+            })?
     }
 
-    async fn send_request(&self, command: ControlCommand) -> Result<ControlPayload, AppError>
-    {
+    async fn send_request(&self, command: ControlCommand) -> Result<ControlPayload, AppError> {
         let request_id = Uuid::new_v4();
         let request = ControlRequest {
             request_id,
@@ -79,8 +73,7 @@ impl ControlClient
         let mut bytes = serde_json::to_vec(&request)
             .map_err(|error| AppError::protocol(format!("cannot encode request: {error}")))?;
         bytes.push(b'\n');
-        if bytes.len() > self.max_message_bytes
-        {
+        if bytes.len() > self.max_message_bytes {
             return Err(AppError::protocol("control request exceeds size limit"));
         }
         let mut stream = TcpStream::connect(self.address)
@@ -90,16 +83,12 @@ impl ControlClient
             .write_all(&bytes)
             .await
             .map_err(|error| AppError::connectivity(format!("control write failed: {error}")))?;
-        let response = read_line_limited(
-            &mut BufReader::new(stream),
-            self.max_message_bytes,
-        )
-        .await?
-        .ok_or_else(|| AppError::protocol("control server closed without a response"))?;
+        let response = read_line_limited(&mut BufReader::new(stream), self.max_message_bytes)
+            .await?
+            .ok_or_else(|| AppError::protocol("control server closed without a response"))?;
         let response: ControlResponse = serde_json::from_slice(&response)
             .map_err(|error| AppError::protocol(format!("invalid control response: {error}")))?;
-        match response
-        {
+        match response {
             ControlResponse::Success {
                 request_id: response_id,
                 payload,

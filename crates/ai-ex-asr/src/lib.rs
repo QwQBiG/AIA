@@ -12,31 +12,28 @@ use serde::Deserialize;
 
 pub use wav::encode_pcm16_wav;
 
-pub struct WhisperHttpTranscriber
-{
+pub struct WhisperHttpTranscriber {
     client: reqwest::Client,
     endpoint: String,
     model: String,
     language: Option<String>,
 }
 
-impl WhisperHttpTranscriber
-{
+impl WhisperHttpTranscriber {
     pub fn new(
         endpoint: impl Into<String>,
         model: impl Into<String>,
         language: Option<String>,
         timeout: Duration,
-    ) -> Result<Self, AppError>
-    {
+    ) -> Result<Self, AppError> {
         let endpoint = endpoint.into();
-        if !endpoint.starts_with("http://") && !endpoint.starts_with("https://")
-        {
-            return Err(AppError::configuration("ASR endpoint must be HTTP or HTTPS"));
+        if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
+            return Err(AppError::configuration(
+                "ASR endpoint must be HTTP or HTTPS",
+            ));
         }
         let model = model.into();
-        if model.trim().is_empty()
-        {
+        if model.trim().is_empty() {
             return Err(AppError::configuration("ASR model must not be empty"));
         }
         let client = reqwest::Client::builder()
@@ -51,10 +48,8 @@ impl WhisperHttpTranscriber
         })
     }
 
-    pub async fn health(&self) -> ComponentHealth
-    {
-        match self.client.get(&self.endpoint).send().await
-        {
+    pub async fn health(&self) -> ComponentHealth {
+        match self.client.get(&self.endpoint).send().await {
             Ok(response)
                 if response.status().is_success()
                     || response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED =>
@@ -75,16 +70,13 @@ impl WhisperHttpTranscriber
 }
 
 #[derive(Deserialize)]
-struct TranscriptionResponse
-{
+struct TranscriptionResponse {
     text: String,
 }
 
 #[async_trait]
-impl TranscriberPort for WhisperHttpTranscriber
-{
-    async fn transcribe(&mut self, utterance: Utterance) -> Result<String, AppError>
-    {
+impl TranscriberPort for WhisperHttpTranscriber {
+    async fn transcribe(&mut self, utterance: Utterance) -> Result<String, AppError> {
         let wav = encode_pcm16_wav(&utterance)?;
         let file = Part::bytes(wav)
             .file_name("utterance.wav")
@@ -93,8 +85,7 @@ impl TranscriberPort for WhisperHttpTranscriber
         let mut form = Form::new()
             .part("file", file)
             .text("model", self.model.clone());
-        if let Some(language) = &self.language
-        {
+        if let Some(language) = &self.language {
             form = form.text("language", language.clone());
         }
         let response = self
@@ -105,8 +96,7 @@ impl TranscriberPort for WhisperHttpTranscriber
             .await
             .map_err(|error| AppError::connectivity(format!("ASR request failed: {error}")))?;
         let status = response.status();
-        if !status.is_success()
-        {
+        if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(AppError::protocol(format!("ASR returned {status}: {body}")));
         }

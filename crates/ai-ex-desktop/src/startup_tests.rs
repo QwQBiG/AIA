@@ -3,8 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
 #[test]
-fn configured_token_path_is_used_without_a_sibling_token()
-{
+fn configured_token_path_is_used_without_a_sibling_token() {
     let path = std::env::temp_dir().join(format!("aiex-custom-{}.token", uuid::Uuid::new_v4()));
     let token = "custom-token-with-at-least-thirty-two-bytes";
     std::fs::write(&path, token).unwrap();
@@ -16,44 +15,40 @@ fn configured_token_path_is_used_without_a_sibling_token()
 }
 
 #[test]
-fn existing_service_is_reused_only_after_authentication()
-{
-    for authenticated in [true, false]
-    {
+fn existing_service_is_reused_only_after_authentication() {
+    for authenticated in [true, false] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let mut config = AppConfig::default();
         config.control.bind = listener.local_addr().unwrap().to_string();
-        let server = std::thread::spawn(move ||
-        {
+        let server = std::thread::spawn(move || {
             drop(listener.accept().unwrap());
             let (mut socket, _) = listener.accept().unwrap();
-            socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             let mut line = String::new();
             BufReader::new(&socket).read_line(&mut line).unwrap();
             let request: ai_ex_control::ControlRequest = serde_json::from_str(&line).unwrap();
             assert_eq!(request.command, ControlCommand::Status);
-            let response = if authenticated
-            {
+            let response = if authenticated {
                 ai_ex_control::ControlResponse::Success {
                     request_id: request.request_id,
-                    payload: ControlPayload::Snapshot(ai_ex_observability::EventHub::new(8).unwrap().current()),
+                    payload: ControlPayload::Snapshot(
+                        ai_ex_observability::EventHub::new(8).unwrap().current(),
+                    ),
                 }
-            }
-            else
-            {
+            } else {
                 ai_ex_control::ControlResponse::Failure {
-                    request_id: Some(request.request_id), error: AppError::safety("invalid token"),
+                    request_id: Some(request.request_id),
+                    error: AppError::safety("invalid token"),
                 }
             };
             writeln!(socket, "{}", serde_json::to_string(&response).unwrap()).unwrap();
         });
         let result = service_is_running(&config, "startup-test-token-with-thirty-two-bytes");
-        if authenticated
-        {
+        if authenticated {
             assert!(result.unwrap());
-        }
-        else
-        {
+        } else {
             assert!(result.unwrap_err().to_string().contains("occupied"));
         }
         server.join().unwrap();
@@ -61,13 +56,21 @@ fn existing_service_is_reused_only_after_authentication()
 }
 
 #[test]
-fn unused_address_allows_starting_and_cli_overrides_are_exclusive()
-{
+fn unused_address_allows_starting_and_cli_overrides_are_exclusive() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let mut config = AppConfig::default();
     config.control.bind = listener.local_addr().unwrap().to_string();
     drop(listener);
     assert!(!service_is_running(&config, "startup-test-token-with-thirty-two-bytes").unwrap());
-    assert!(crate::parse_options(["--connect-only".to_owned()].into_iter()).unwrap().connect_only);
-    assert!(crate::parse_options(["--connect-only".to_owned(), "--start-service".to_owned()].into_iter()).is_err());
+    assert!(
+        crate::parse_options(["--connect-only".to_owned()].into_iter())
+            .unwrap()
+            .connect_only
+    );
+    assert!(
+        crate::parse_options(
+            ["--connect-only".to_owned(), "--start-service".to_owned()].into_iter()
+        )
+        .is_err()
+    );
 }

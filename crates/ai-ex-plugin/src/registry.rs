@@ -8,31 +8,25 @@ use serde::{Deserialize, Serialize};
 use crate::{PluginHealth, PluginManifest};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PluginStatus
-{
+pub struct PluginStatus {
     pub manifest: PluginManifest,
     pub health: PluginHealth,
 }
 
-pub struct PluginRegistry
-{
+pub struct PluginRegistry {
     entries: BTreeMap<String, PluginStatus>,
 }
 
-impl PluginRegistry
-{
-    pub fn new() -> Self
-    {
+impl PluginRegistry {
+    pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
         }
     }
 
-    pub fn register(&mut self, manifest: PluginManifest) -> Result<(), AppError>
-    {
+    pub fn register(&mut self, manifest: PluginManifest) -> Result<(), AppError> {
         manifest.validate()?;
-        if self.entries.contains_key(&manifest.id)
-        {
+        if self.entries.contains_key(&manifest.id) {
             return Err(AppError::configuration(format!(
                 "plugin id already registered: {}",
                 manifest.id,
@@ -56,11 +50,9 @@ impl PluginRegistry
         &mut self,
         id: impl Into<String>,
         detail: impl Into<String>,
-    ) -> Result<(), AppError>
-    {
+    ) -> Result<(), AppError> {
         let id = id.into();
-        if id.trim().is_empty() || self.entries.contains_key(&id)
-        {
+        if id.trim().is_empty() || self.entries.contains_key(&id) {
             return Err(AppError::configuration(
                 "cannot register unavailable plugin with duplicate or empty id",
             ));
@@ -83,12 +75,7 @@ impl PluginRegistry
         );
         Ok(())
     }
-    pub fn update_health(
-        &mut self,
-        id: &str,
-        health: PluginHealth,
-    ) -> Result<(), AppError>
-    {
+    pub fn update_health(&mut self, id: &str, health: PluginHealth) -> Result<(), AppError> {
         let status = self
             .entries
             .get_mut(id)
@@ -97,28 +84,23 @@ impl PluginRegistry
         Ok(())
     }
 
-    pub fn get(&self, id: &str) -> Option<&PluginStatus>
-    {
+    pub fn get(&self, id: &str) -> Option<&PluginStatus> {
         self.entries.get(id)
     }
 
-    pub fn len(&self) -> usize
-    {
+    pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    pub fn is_empty(&self) -> bool
-    {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    pub fn statuses(&self) -> impl Iterator<Item = &PluginStatus>
-    {
+    pub fn statuses(&self) -> impl Iterator<Item = &PluginStatus> {
         self.entries.values()
     }
 
-    pub fn health(&self) -> ComponentHealth
-    {
+    pub fn health(&self) -> ComponentHealth {
         let ready = self.entries.values().all(|status| status.health.ready);
         ComponentHealth {
             component: "plugin-registry".to_owned(),
@@ -127,8 +109,7 @@ impl PluginRegistry
         }
     }
 
-    pub fn component_health(&self) -> Vec<ComponentHealth>
-    {
+    pub fn component_health(&self) -> Vec<ComponentHealth> {
         self.entries
             .values()
             .map(|status| ComponentHealth {
@@ -136,32 +117,26 @@ impl PluginRegistry
                 ready: status.health.ready,
                 detail: format!(
                     "{} v{}: {}",
-                    status.manifest.id,
-                    status.manifest.version,
-                    status.health.detail,
+                    status.manifest.id, status.manifest.version, status.health.detail,
                 ),
             })
             .collect()
     }
 }
 
-impl Default for PluginRegistry
-{
-    fn default() -> Self
-    {
+impl Default for PluginRegistry {
+    fn default() -> Self {
         Self::new()
     }
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use serde_json::Value;
 
     use super::*;
 
-    fn manifest(id: &str) -> PluginManifest
-    {
+    fn manifest(id: &str) -> PluginManifest {
         PluginManifest {
             protocol_version: 1,
             id: id.to_owned(),
@@ -172,10 +147,11 @@ mod tests
     }
 
     #[test]
-    fn registers_updates_and_projects_plugin_health()
-    {
+    fn registers_updates_and_projects_plugin_health() {
         let mut registry = PluginRegistry::new();
-        registry.register(manifest("vision.demo")).expect("registers");
+        registry
+            .register(manifest("vision.demo"))
+            .expect("registers");
         assert_eq!(registry.len(), 1);
         assert!(!registry.health().ready);
         registry
@@ -188,23 +164,27 @@ mod tests
             )
             .expect("health updates");
         assert!(registry.health().ready);
-        assert_eq!(registry.component_health()[0].component, "plugin:vision.demo");
+        assert_eq!(
+            registry.component_health()[0].component,
+            "plugin:vision.demo"
+        );
     }
 
     #[test]
-    fn rejects_duplicate_and_unknown_plugins()
-    {
+    fn rejects_duplicate_and_unknown_plugins() {
         let mut registry = PluginRegistry::new();
         registry.register(manifest("game.demo")).expect("registers");
         assert!(registry.register(manifest("game.demo")).is_err());
-        assert!(registry
-            .update_health(
-                "missing",
-                PluginHealth {
-                    ready: true,
-                    detail: String::new(),
-                },
-            )
-            .is_err());
+        assert!(
+            registry
+                .update_health(
+                    "missing",
+                    PluginHealth {
+                        ready: true,
+                        detail: String::new(),
+                    },
+                )
+                .is_err()
+        );
     }
 }

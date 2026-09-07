@@ -3,8 +3,7 @@ use ai_ex_duplex::Utterance;
 
 const HEADER_SIZE: usize = 44;
 
-pub fn encode_pcm16_wav(utterance: &Utterance) -> Result<Vec<u8>, AppError>
-{
+pub fn encode_pcm16_wav(utterance: &Utterance) -> Result<Vec<u8>, AppError> {
     validate(utterance)?;
     let data_size = utterance
         .samples
@@ -40,14 +39,10 @@ pub fn encode_pcm16_wav(utterance: &Utterance) -> Result<Vec<u8>, AppError>
     output.extend_from_slice(&16_u16.to_le_bytes());
     output.extend_from_slice(b"data");
     output.extend_from_slice(&data_size.to_le_bytes());
-    for sample in &utterance.samples
-    {
-        let scaled = if *sample < 0.0
-        {
+    for sample in &utterance.samples {
+        let scaled = if *sample < 0.0 {
             sample.clamp(-1.0, 1.0) * 32_768.0
-        }
-        else
-        {
+        } else {
             sample.clamp(-1.0, 1.0) * 32_767.0
         };
         output.extend_from_slice(&(scaled.round() as i16).to_le_bytes());
@@ -55,31 +50,25 @@ pub fn encode_pcm16_wav(utterance: &Utterance) -> Result<Vec<u8>, AppError>
     Ok(output)
 }
 
-fn validate(utterance: &Utterance) -> Result<(), AppError>
-{
-    if utterance.samples.is_empty()
-    {
+fn validate(utterance: &Utterance) -> Result<(), AppError> {
+    if utterance.samples.is_empty() {
         return Err(AppError::protocol("cannot encode an empty utterance"));
     }
-    if utterance.sample_rate == 0 || utterance.channels == 0
-    {
+    if utterance.sample_rate == 0 || utterance.channels == 0 {
         return Err(AppError::protocol("utterance audio format is invalid"));
     }
-    if !utterance.samples.iter().all(|sample| sample.is_finite())
-    {
+    if !utterance.samples.iter().all(|sample| sample.is_finite()) {
         return Err(AppError::protocol("utterance contains non-finite samples"));
     }
     Ok(())
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn encodes_standard_pcm16_header_and_samples()
-    {
+    fn encodes_standard_pcm16_header_and_samples() {
         let wav = encode_pcm16_wav(&Utterance {
             samples: vec![-1.0, 0.0, 1.0],
             sample_rate: 16_000,
@@ -92,13 +81,18 @@ mod tests
         assert_eq!(&wav[36..40], b"data");
         assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 6);
         assert_eq!(wav.len(), HEADER_SIZE + 6);
-        assert_eq!(i16::from_le_bytes(wav[44..46].try_into().unwrap()), i16::MIN);
-        assert_eq!(i16::from_le_bytes(wav[48..50].try_into().unwrap()), i16::MAX);
+        assert_eq!(
+            i16::from_le_bytes(wav[44..46].try_into().unwrap()),
+            i16::MIN
+        );
+        assert_eq!(
+            i16::from_le_bytes(wav[48..50].try_into().unwrap()),
+            i16::MAX
+        );
     }
 
     #[test]
-    fn rejects_empty_utterance()
-    {
+    fn rejects_empty_utterance() {
         let result = encode_pcm16_wav(&Utterance {
             samples: Vec::new(),
             sample_rate: 16_000,

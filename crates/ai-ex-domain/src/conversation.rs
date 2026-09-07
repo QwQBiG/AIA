@@ -5,26 +5,21 @@ use uuid::Uuid;
 #[serde(transparent)]
 pub struct TurnId(pub Uuid);
 
-impl TurnId
-{
-    pub fn new() -> Self
-    {
+impl TurnId {
+    pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 }
 
-impl Default for TurnId
-{
-    fn default() -> Self
-    {
+impl Default for TurnId {
+    fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ConversationState
-{
+pub enum ConversationState {
     Idle,
     Listening,
     Thinking,
@@ -34,18 +29,15 @@ pub enum ConversationState
     Stopped,
 }
 
-impl ConversationState
-{
-    pub fn accepts_input(self) -> bool
-    {
+impl ConversationState {
+    pub fn accepts_input(self) -> bool {
         matches!(self, Self::Idle | Self::Listening | Self::Interrupted)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Role
-{
+pub enum Role {
     System,
     User,
     Assistant,
@@ -53,8 +45,7 @@ pub enum Role
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Emotion
-{
+pub enum Emotion {
     Neutral,
     Happy,
     Angry,
@@ -62,12 +53,9 @@ pub enum Emotion
     Surprised,
 }
 
-impl Emotion
-{
-    pub fn parse(value: &str) -> Option<Self>
-    {
-        match value.trim().to_ascii_lowercase().as_str()
-        {
+impl Emotion {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
             "neutral" => Some(Self::Neutral),
             "happy" => Some(Self::Happy),
             "angry" => Some(Self::Angry),
@@ -77,10 +65,8 @@ impl Emotion
         }
     }
 
-    pub const fn as_str(self) -> &'static str
-    {
-        match self
-        {
+    pub const fn as_str(self) -> &'static str {
+        match self {
             Self::Neutral => "neutral",
             Self::Happy => "happy",
             Self::Angry => "angry",
@@ -91,16 +77,13 @@ impl Emotion
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Message
-{
+pub struct Message {
     pub role: Role,
     pub content: String,
 }
 
-impl Message
-{
-    pub fn new(role: Role, content: impl Into<String>) -> Self
-    {
+impl Message {
+    pub fn new(role: Role, content: impl Into<String>) -> Self {
         Self {
             role,
             content: content.into(),

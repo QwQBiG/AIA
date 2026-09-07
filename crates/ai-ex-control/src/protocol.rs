@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ControlRequest
-{
+pub struct ControlRequest {
     pub request_id: Uuid,
     pub token: String,
     pub command: ControlCommand,
@@ -13,8 +12,7 @@ pub struct ControlRequest
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ControlCommand
-{
+pub enum ControlCommand {
     Submit { text: String },
     Interrupt { reason: String },
     Status,
@@ -28,8 +26,7 @@ pub enum ControlCommand
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub enum ControlPayload
-{
+pub enum ControlPayload {
     Accepted,
     Snapshot(RuntimeSnapshot),
     Persona(PersonaSnapshot),
@@ -40,8 +37,7 @@ pub enum ControlPayload
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum ControlResponse
-{
+pub enum ControlResponse {
     Success {
         request_id: Uuid,
         payload: ControlPayload,

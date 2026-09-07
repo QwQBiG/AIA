@@ -8,17 +8,14 @@ use async_trait::async_trait;
 
 use crate::{ActionResult, AutomationAction, AutomationPort, ScreenFrame};
 
-pub struct DryRunAutomationPort
-{
+pub struct DryRunAutomationPort {
     actions: VecDeque<AutomationAction>,
     capacity: usize,
     screen: ScreenFrame,
 }
 
-impl DryRunAutomationPort
-{
-    pub fn new(capacity: usize, width: u32, height: u32) -> Result<Self, AppError>
-    {
+impl DryRunAutomationPort {
+    pub fn new(capacity: usize, width: u32, height: u32) -> Result<Self, AppError> {
         let pixel_count = usize::try_from(width)
             .ok()
             .zip(usize::try_from(height).ok())
@@ -31,10 +28,8 @@ impl DryRunAutomationPort
         Self::with_screen(capacity, screen)
     }
 
-    pub fn with_screen(capacity: usize, screen: ScreenFrame) -> Result<Self, AppError>
-    {
-        if capacity == 0
-        {
+    pub fn with_screen(capacity: usize, screen: ScreenFrame) -> Result<Self, AppError> {
+        if capacity == 0 {
             return Err(AppError::configuration(
                 "automation dry-run capacity must be positive",
             ));
@@ -46,52 +41,41 @@ impl DryRunAutomationPort
         })
     }
 
-    pub fn actions(&self) -> impl Iterator<Item = &AutomationAction>
-    {
+    pub fn actions(&self) -> impl Iterator<Item = &AutomationAction> {
         self.actions.iter()
     }
 
-    pub fn len(&self) -> usize
-    {
+    pub fn len(&self) -> usize {
         self.actions.len()
     }
 
-    pub fn is_empty(&self) -> bool
-    {
+    pub fn is_empty(&self) -> bool {
         self.actions.is_empty()
     }
 
-    pub fn clear(&mut self)
-    {
+    pub fn clear(&mut self) {
         self.actions.clear();
     }
 }
 
 #[async_trait]
-impl AutomationPort for DryRunAutomationPort
-{
+impl AutomationPort for DryRunAutomationPort {
     async fn execute(
         &mut self,
         permit: &Permit,
         action: &AutomationAction,
-    ) -> Result<ActionResult, AppError>
-    {
+    ) -> Result<ActionResult, AppError> {
         permit.ensure_active()?;
         action.validate()?;
-        if permit.capability() != action.required_capability()
-        {
+        if permit.capability() != action.required_capability() {
             return Err(AppError::safety(
                 "automation permit capability does not match action",
             ));
         }
-        if self.actions.len() >= self.capacity
-        {
-            return Err(AppError::unavailable(
-                "automation dry-run queue is full",
-            ));
+        if self.actions.len() >= self.capacity {
+            return Err(AppError::unavailable("automation dry-run queue is full"));
         }
-        let result = match action
-        {
+        let result = match action {
             AutomationAction::CaptureScreen => ActionResult::ScreenCaptured(self.screen.clone()),
             _ => ActionResult::Completed,
         };
@@ -101,22 +85,17 @@ impl AutomationPort for DryRunAutomationPort
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use std::collections::BTreeSet;
 
     use ai_ex_safety::{ActionRequest, Capability, SafetyGate, SafetyPolicy};
 
     use super::*;
 
-    fn permit(capability: Capability) -> (SafetyGate, Permit)
-    {
+    fn permit(capability: Capability) -> (SafetyGate, Permit) {
         let gate = SafetyGate::new(SafetyPolicy {
             automation_enabled: true,
-            allowed_capabilities: BTreeSet::from([
-                Capability::ScreenRead,
-                Capability::MouseInput,
-            ]),
+            allowed_capabilities: BTreeSet::from([Capability::ScreenRead, Capability::MouseInput]),
             allowed_targets: vec!["game".to_owned()],
         });
         let permit = gate
@@ -130,16 +109,14 @@ mod tests
     }
 
     #[tokio::test]
-    async fn captures_deterministic_frame_and_records_action()
-    {
+    async fn captures_deterministic_frame_and_records_action() {
         let (_gate, permit) = permit(Capability::ScreenRead);
         let mut port = DryRunAutomationPort::new(4, 2, 1).expect("dry-run creates");
         let result = port
             .execute(&permit, &AutomationAction::CaptureScreen)
             .await
             .expect("capture succeeds");
-        let ActionResult::ScreenCaptured(frame) = result else
-        {
+        let ActionResult::ScreenCaptured(frame) = result else {
             panic!("capture returns a frame");
         };
         assert_eq!((frame.width, frame.height), (2, 1));
@@ -148,15 +125,11 @@ mod tests
     }
 
     #[tokio::test]
-    async fn rejects_capability_mismatch_and_revoked_permit()
-    {
+    async fn rejects_capability_mismatch_and_revoked_permit() {
         let (gate, permit) = permit(Capability::ScreenRead);
         let mut port = DryRunAutomationPort::new(2, 1, 1).expect("dry-run creates");
         let mismatch = port
-            .execute(
-                &permit,
-                &AutomationAction::MovePointer { x: 0.5, y: 0.5 },
-            )
+            .execute(&permit, &AutomationAction::MovePointer { x: 0.5, y: 0.5 })
             .await
             .expect_err("screen permit cannot move pointer");
         assert_eq!(mismatch.kind, ai_ex_domain::ErrorKind::Safety);
@@ -170,8 +143,7 @@ mod tests
     }
 
     #[test]
-    fn rejects_zero_capacity()
-    {
+    fn rejects_zero_capacity() {
         assert!(DryRunAutomationPort::new(0, 1, 1).is_err());
     }
 }

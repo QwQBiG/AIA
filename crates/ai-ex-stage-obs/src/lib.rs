@@ -16,14 +16,12 @@ pub const OBS_STAGE_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ObsStageMode
-{
+pub enum ObsStageMode {
     DryRun,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StageRecord
-{
+pub struct StageRecord {
     pub schema_version: u16,
     pub sequence: u64,
     pub timestamp_ms: u64,
@@ -31,20 +29,16 @@ pub struct StageRecord
     pub action: StageAction,
 }
 
-pub struct ObsDryRunStage
-{
+pub struct ObsDryRunStage {
     actions: VecDeque<StageAction>,
     records: VecDeque<StageRecord>,
     capacity: usize,
     sequence: u64,
 }
 
-impl ObsDryRunStage
-{
-    pub fn new(capacity: usize) -> Result<Self, AppError>
-    {
-        if capacity == 0
-        {
+impl ObsDryRunStage {
+    pub fn new(capacity: usize) -> Result<Self, AppError> {
+        if capacity == 0 {
             return Err(AppError::configuration(
                 "OBS dry-run capacity must be positive",
             ));
@@ -57,51 +51,39 @@ impl ObsDryRunStage
         })
     }
 
-    pub fn actions(&self) -> impl Iterator<Item = &StageAction>
-    {
+    pub fn actions(&self) -> impl Iterator<Item = &StageAction> {
         self.actions.iter()
     }
 
-    pub fn records(&self) -> impl Iterator<Item = &StageRecord>
-    {
+    pub fn records(&self) -> impl Iterator<Item = &StageRecord> {
         self.records.iter()
     }
 
-    pub fn drain_records(&mut self) -> Vec<StageRecord>
-    {
+    pub fn drain_records(&mut self) -> Vec<StageRecord> {
         self.records.drain(..).collect()
     }
 
-    pub fn records_jsonl(&self) -> Result<String, AppError>
-    {
+    pub fn records_jsonl(&self) -> Result<String, AppError> {
         self.records
             .iter()
-            .map(|record|
-            {
-                serde_json::to_string(record).map_err(|error|
-                {
+            .map(|record| {
+                serde_json::to_string(record).map_err(|error| {
                     AppError::protocol(format!("OBS record encode failed: {error}"))
                 })
             })
             .collect::<Result<Vec<_>, _>>()
-            .map(|lines|
-            {
-                if lines.is_empty()
-                {
+            .map(|lines| {
+                if lines.is_empty() {
                     String::new()
-                }
-                else
-                {
+                } else {
                     format!("{}\n", lines.join("\n"))
                 }
             })
     }
 
-    fn record(&mut self, action: StageAction)
-    {
+    fn record(&mut self, action: StageAction) {
         self.sequence = self.sequence.saturating_add(1);
-        if self.records.len() == self.capacity
-        {
+        if self.records.len() == self.capacity {
             self.records.pop_front();
         }
         self.records.push_back(StageRecord {
@@ -115,10 +97,8 @@ impl ObsDryRunStage
 }
 
 #[async_trait]
-impl StageExecutor for ObsDryRunStage
-{
-    fn capabilities(&self) -> BTreeSet<StageCapability>
-    {
+impl StageExecutor for ObsDryRunStage {
+    fn capabilities(&self) -> BTreeSet<StageCapability> {
         BTreeSet::from([
             StageCapability::Hotkey,
             StageCapability::Interrupt,
@@ -127,31 +107,24 @@ impl StageExecutor for ObsDryRunStage
         ])
     }
 
-    async fn health(&self) -> ComponentHealth
-    {
+    async fn health(&self) -> ComponentHealth {
         ComponentHealth::ready("obs-dry-run")
     }
 
-    async fn execute(&mut self, action: StageAction) -> Result<(), AppError>
-    {
+    async fn execute(&mut self, action: StageAction) -> Result<(), AppError> {
         action.validate()?;
-        if matches!(action, StageAction::Stop)
-        {
+        if matches!(action, StageAction::Stop) {
             return self.interrupt().await;
         }
         if !matches!(
             action,
-            StageAction::Subtitle { .. }
-                | StageAction::Scene { .. }
-                | StageAction::Hotkey { .. }
-        )
-        {
+            StageAction::Subtitle { .. } | StageAction::Scene { .. } | StageAction::Hotkey { .. }
+        ) {
             return Err(AppError::configuration(
                 "OBS stage supports subtitle, scene and hotkey actions only",
             ));
         }
-        if self.actions.len() >= self.capacity
-        {
+        if self.actions.len() >= self.capacity {
             return Err(AppError::unavailable("OBS dry-run queue is full"));
         }
         self.record(action.clone());
@@ -159,38 +132,34 @@ impl StageExecutor for ObsDryRunStage
         Ok(())
     }
 
-    async fn interrupt(&mut self) -> Result<(), AppError>
-    {
+    async fn interrupt(&mut self) -> Result<(), AppError> {
         self.actions.clear();
         self.record(StageAction::Stop);
         Ok(())
     }
 }
 
-pub fn parse_records_jsonl(input: &str) -> Result<Vec<StageRecord>, AppError>
-{
+pub fn parse_records_jsonl(input: &str) -> Result<Vec<StageRecord>, AppError> {
     let mut records = Vec::new();
     let mut previous_sequence = 0_u64;
-    for (line_index, line) in input.lines().enumerate()
-    {
+    for (line_index, line) in input.lines().enumerate() {
         let line = line.trim();
-        if line.is_empty()
-        {
+        if line.is_empty() {
             continue;
         }
-        let record: StageRecord = serde_json::from_str(line).map_err(|error|
-        {
-            AppError::protocol(format!("invalid OBS record at line {}: {error}", line_index + 1))
+        let record: StageRecord = serde_json::from_str(line).map_err(|error| {
+            AppError::protocol(format!(
+                "invalid OBS record at line {}: {error}",
+                line_index + 1
+            ))
         })?;
-        if record.schema_version != OBS_STAGE_SCHEMA_VERSION
-        {
+        if record.schema_version != OBS_STAGE_SCHEMA_VERSION {
             return Err(AppError::protocol(format!(
                 "unsupported OBS record schema version {}",
                 record.schema_version,
             )));
         }
-        if record.sequence == 0 || record.sequence <= previous_sequence
-        {
+        if record.sequence == 0 || record.sequence <= previous_sequence {
             return Err(AppError::protocol(format!(
                 "OBS record sequence is not strictly increasing at line {}",
                 line_index + 1,
@@ -206,16 +175,13 @@ pub fn parse_records_jsonl(input: &str) -> Result<Vec<StageRecord>, AppError>
 pub async fn replay_records(
     stage: &mut ObsDryRunStage,
     records: &[StageRecord],
-) -> Result<usize, AppError>
-{
-    for record in records
-    {
+) -> Result<usize, AppError> {
+    for record in records {
         stage.execute(record.action.clone()).await?;
     }
     Ok(records.len())
 }
-fn unix_timestamp_ms() -> u64
-{
+fn unix_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -225,13 +191,11 @@ fn unix_timestamp_ms() -> u64
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn records_subtitle_scene_and_hotkey_actions()
-    {
+    async fn records_subtitle_scene_and_hotkey_actions() {
         let mut stage = ObsDryRunStage::new(4).expect("OBS stage creates");
         for action in [
             StageAction::Subtitle {
@@ -244,8 +208,7 @@ mod tests
             StageAction::Hotkey {
                 id: "camera".to_owned(),
             },
-        ]
-        {
+        ] {
             stage.execute(action).await.expect("action records");
         }
         assert_eq!(stage.actions().count(), 3);
@@ -255,8 +218,7 @@ mod tests
     }
 
     #[tokio::test]
-    async fn rejects_non_obs_actions_and_exports_jsonl()
-    {
+    async fn rejects_non_obs_actions_and_exports_jsonl() {
         let mut stage = ObsDryRunStage::new(2).expect("OBS stage creates");
         let error = stage
             .execute(StageAction::Speak {
@@ -282,8 +244,7 @@ mod tests
     }
 
     #[tokio::test]
-    async fn interrupt_clears_pending_actions_but_keeps_audit_record()
-    {
+    async fn interrupt_clears_pending_actions_but_keeps_audit_record() {
         let mut stage = ObsDryRunStage::new(2).expect("OBS stage creates");
         stage
             .execute(StageAction::Scene {
@@ -296,8 +257,7 @@ mod tests
         assert_eq!(stage.records().last().unwrap().action.kind(), "stop");
     }
     #[tokio::test]
-    async fn parses_and_replays_versioned_jsonl()
-    {
+    async fn parses_and_replays_versioned_jsonl() {
         let mut source = ObsDryRunStage::new(4).expect("OBS stage creates");
         source
             .execute(StageAction::Subtitle {
@@ -309,13 +269,20 @@ mod tests
         let records = parse_records_jsonl(&source.records_jsonl().expect("records encode"))
             .expect("records parse");
         let mut replay = ObsDryRunStage::new(4).expect("replay stage creates");
-        assert_eq!(replay_records(&mut replay, &records).await.expect("replay works"), 1);
-        assert_eq!(replay.actions().next().map(StageAction::kind), Some("subtitle"));
+        assert_eq!(
+            replay_records(&mut replay, &records)
+                .await
+                .expect("replay works"),
+            1
+        );
+        assert_eq!(
+            replay.actions().next().map(StageAction::kind),
+            Some("subtitle")
+        );
     }
 
     #[test]
-    fn rejects_invalid_record_sequence()
-    {
+    fn rejects_invalid_record_sequence() {
         let record = serde_json::json!({
             "schema_version": OBS_STAGE_SCHEMA_VERSION,
             "sequence": 0,

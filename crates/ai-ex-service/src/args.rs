@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use ai_ex_domain::AppError;
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Args
-{
+pub struct Args {
     pub config: PathBuf,
     pub check: bool,
     pub serve: bool,
@@ -18,10 +17,8 @@ pub struct Args
     pub vision_prompt: Option<String>,
 }
 
-impl Args
-{
-    pub fn parse(values: impl IntoIterator<Item = String>) -> Result<Self, AppError>
-    {
+impl Args {
+    pub fn parse(values: impl IntoIterator<Item = String>) -> Result<Self, AppError> {
         let mut config = PathBuf::from("config/ai-ex.example.toml");
         let mut check = false;
         let mut serve = false;
@@ -34,88 +31,79 @@ impl Args
         let mut vision_image = None;
         let mut vision_prompt = None;
         let mut values = values.into_iter();
-        while let Some(value) = values.next()
-        {
-            match value.as_str()
-            {
-                "--config" =>
-                {
-                    let path = values.next().ok_or_else(|| {
-                        AppError::configuration("--config requires a path")
-                    })?;
+        while let Some(value) = values.next() {
+            match value.as_str() {
+                "--config" => {
+                    let path = values
+                        .next()
+                        .ok_or_else(|| AppError::configuration("--config requires a path"))?;
                     config = PathBuf::from(path);
                 }
                 "--check" => check = true,
                 "--serve" => serve = true,
                 "--managed" => managed = true,
-                "--replay-events" =>
-                {
+                "--replay-events" => {
                     let path = values.next().ok_or_else(|| {
                         AppError::configuration("--replay-events requires a JSONL path")
                     })?;
                     replay_events = Some(PathBuf::from(path));
                 }
-                "--replay-report" =>
-                {
+                "--replay-report" => {
                     let path = values.next().ok_or_else(|| {
                         AppError::configuration("--replay-report requires a JSONL path")
                     })?;
                     replay_report = Some(PathBuf::from(path));
                 }
-                "--replay-automation" =>
-                {
+                "--replay-automation" => {
                     let path = values.next().ok_or_else(|| {
                         AppError::configuration("--replay-automation requires a JSONL path")
                     })?;
                     replay_automation = Some(PathBuf::from(path));
                 }
-                "--replay-stage" =>
-                {
+                "--replay-stage" => {
                     let path = values.next().ok_or_else(|| {
                         AppError::configuration("--replay-stage requires a JSONL path")
                     })?;
                     replay_stage = Some(PathBuf::from(path));
                 }
-                "--prompt" =>
-                {
-                    prompt = Some(values.next().ok_or_else(|| {
-                        AppError::configuration("--prompt requires text")
-                    })?);
+                "--prompt" => {
+                    prompt = Some(
+                        values
+                            .next()
+                            .ok_or_else(|| AppError::configuration("--prompt requires text"))?,
+                    );
                 }
-                "--vision-image" =>
-                {
-                    let path = values.next().ok_or_else(|| {
-                        AppError::configuration("--vision-image requires a path")
-                    })?;
+                "--vision-image" => {
+                    let path = values
+                        .next()
+                        .ok_or_else(|| AppError::configuration("--vision-image requires a path"))?;
                     vision_image = Some(PathBuf::from(path));
                 }
-                "--vision-prompt" =>
-                {
-                    vision_prompt = Some(values.next().ok_or_else(|| {
-                        AppError::configuration("--vision-prompt requires text")
-                    })?);
+                "--vision-prompt" => {
+                    vision_prompt =
+                        Some(values.next().ok_or_else(|| {
+                            AppError::configuration("--vision-prompt requires text")
+                        })?);
                 }
-                "--help" | "-h" =>
-                {
+                "--help" | "-h" => {
                     return Err(AppError::configuration(
                         "usage: ai-ex-service [--config PATH] [--serve | --managed | --check | --replay-events PATH [--replay-report PATH] | --replay-automation PATH | --replay-stage PATH | --prompt TEXT | \
                          --vision-image PATH --vision-prompt TEXT]",
                     ));
                 }
-                _ =>
-                {
+                _ => {
                     return Err(AppError::configuration(format!(
                         "unknown argument: {value}"
                     )));
                 }
             }
         }
-        if replay_report.is_some() && replay_events.is_none()
-        {
-            return Err(AppError::configuration("--replay-report requires --replay-events"));
+        if replay_report.is_some() && replay_events.is_none() {
+            return Err(AppError::configuration(
+                "--replay-report requires --replay-events",
+            ));
         }
-        if vision_image.is_some() != vision_prompt.is_some()
-        {
+        if vision_image.is_some() != vision_prompt.is_some() {
             return Err(AppError::configuration(
                 "--vision-image and --vision-prompt must be used together",
             ));
@@ -128,8 +116,7 @@ impl Args
             + usize::from(replay_stage.is_some())
             + usize::from(prompt.is_some())
             + usize::from(vision_image.is_some());
-        if selected_modes > 1
-        {
+        if selected_modes > 1 {
             return Err(AppError::configuration(
                 "--serve, --managed, --check, --replay-events, --replay-automation, --replay-stage, --prompt, and vision analysis modes are mutually exclusive",
             ));
@@ -151,31 +138,30 @@ impl Args
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn background_modes_are_explicit_and_exclusive()
-    {
+    fn background_modes_are_explicit_and_exclusive() {
         assert!(Args::parse(["--serve".to_owned()]).unwrap().serve);
         assert!(Args::parse(["--managed".to_owned()]).unwrap().managed);
-        for conflict in ["--managed", "--check", "--serve"]
-        {
-            let first = if conflict == "--serve" { "--managed" } else { "--serve" };
+        for conflict in ["--managed", "--check", "--serve"] {
+            let first = if conflict == "--serve" {
+                "--managed"
+            } else {
+                "--serve"
+            };
             assert!(Args::parse([first.to_owned(), conflict.to_owned()]).is_err());
         }
     }
 
     #[test]
-    fn rejects_missing_prompt_value()
-    {
+    fn rejects_missing_prompt_value() {
         assert!(Args::parse(["--prompt".to_owned()]).is_err());
     }
 
     #[test]
-    fn accepts_config_and_check()
-    {
+    fn accepts_config_and_check() {
         let args = Args::parse([
             "--config".to_owned(),
             "custom.toml".to_owned(),
@@ -187,18 +173,13 @@ mod tests
     }
 
     #[test]
-    fn accepts_event_replay_mode()
-    {
-        let args = Args::parse([
-            "--replay-events".to_owned(),
-            "events.jsonl".to_owned(),
-        ])
-        .expect("replay arguments parse");
+    fn accepts_event_replay_mode() {
+        let args = Args::parse(["--replay-events".to_owned(), "events.jsonl".to_owned()])
+            .expect("replay arguments parse");
         assert_eq!(args.replay_events, Some(PathBuf::from("events.jsonl")));
     }
     #[test]
-    fn accepts_event_replay_report()
-    {
+    fn accepts_event_replay_report() {
         let args = Args::parse([
             "--replay-events".to_owned(),
             "events.jsonl".to_owned(),
@@ -210,30 +191,27 @@ mod tests
     }
 
     #[test]
-    fn accepts_automation_replay_mode()
-    {
+    fn accepts_automation_replay_mode() {
         let args = Args::parse([
             "--replay-automation".to_owned(),
             "automation.jsonl".to_owned(),
         ])
         .expect("automation replay arguments parse");
-        assert_eq!(args.replay_automation, Some(PathBuf::from("automation.jsonl")));
+        assert_eq!(
+            args.replay_automation,
+            Some(PathBuf::from("automation.jsonl"))
+        );
     }
 
     #[test]
-    fn accepts_stage_replay_mode()
-    {
-        let args = Args::parse([
-            "--replay-stage".to_owned(),
-            "stage.jsonl".to_owned(),
-        ])
-        .expect("stage replay arguments parse");
+    fn accepts_stage_replay_mode() {
+        let args = Args::parse(["--replay-stage".to_owned(), "stage.jsonl".to_owned()])
+            .expect("stage replay arguments parse");
         assert_eq!(args.replay_stage, Some(PathBuf::from("stage.jsonl")));
     }
 
     #[test]
-    fn accepts_complete_vision_mode()
-    {
+    fn accepts_complete_vision_mode() {
         let args = Args::parse([
             "--vision-image".to_owned(),
             "screen.png".to_owned(),
@@ -247,18 +225,15 @@ mod tests
     }
 
     #[test]
-    fn rejects_partial_or_conflicting_modes()
-    {
-        assert!(Args::parse([
-            "--vision-image".to_owned(),
-            "screen.png".to_owned(),
-        ])
-        .is_err());
-        assert!(Args::parse([
-            "--check".to_owned(),
-            "--prompt".to_owned(),
-            "hello".to_owned(),
-        ])
-        .is_err());
+    fn rejects_partial_or_conflicting_modes() {
+        assert!(Args::parse(["--vision-image".to_owned(), "screen.png".to_owned(),]).is_err());
+        assert!(
+            Args::parse([
+                "--check".to_owned(),
+                "--prompt".to_owned(),
+                "hello".to_owned(),
+            ])
+            .is_err()
+        );
     }
 }

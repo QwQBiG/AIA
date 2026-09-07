@@ -15,8 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeSnapshot
-{
+pub struct RuntimeSnapshot {
     pub state: ConversationState,
     pub active_turn: Option<TurnId>,
     pub current_emotion: Option<Emotion>,
@@ -35,10 +34,8 @@ pub struct RuntimeSnapshot
     pub speech_cancelled: bool,
 }
 
-impl Default for RuntimeSnapshot
-{
-    fn default() -> Self
-    {
+impl Default for RuntimeSnapshot {
+    fn default() -> Self {
         Self {
             state: ConversationState::Idle,
             active_turn: None,
@@ -58,15 +55,13 @@ impl Default for RuntimeSnapshot
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SequencedEvent
-{
+pub struct SequencedEvent {
     pub sequence: u64,
     pub event: SystemEvent,
 }
 
 #[derive(Clone)]
-pub struct EventHub
-{
+pub struct EventHub {
     events: broadcast::Sender<SequencedEvent>,
     snapshot: watch::Sender<RuntimeSnapshot>,
     sequence: Arc<AtomicU64>,
@@ -74,13 +69,12 @@ pub struct EventHub
     capacity: usize,
 }
 
-impl EventHub
-{
-    pub fn new(capacity: usize) -> Result<Self, AppError>
-    {
-        if capacity == 0
-        {
-            return Err(AppError::configuration("event hub capacity must be positive"));
+impl EventHub {
+    pub fn new(capacity: usize) -> Result<Self, AppError> {
+        if capacity == 0 {
+            return Err(AppError::configuration(
+                "event hub capacity must be positive",
+            ));
         }
         let (events, _receiver) = broadcast::channel(capacity);
         let (snapshot, _receiver) = watch::channel(RuntimeSnapshot::default());
@@ -93,23 +87,19 @@ impl EventHub
         })
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<SequencedEvent>
-    {
+    pub fn subscribe(&self) -> broadcast::Receiver<SequencedEvent> {
         self.events.subscribe()
     }
 
-    pub fn watch(&self) -> watch::Receiver<RuntimeSnapshot>
-    {
+    pub fn watch(&self) -> watch::Receiver<RuntimeSnapshot> {
         self.snapshot.subscribe()
     }
 
-    pub fn current(&self) -> RuntimeSnapshot
-    {
+    pub fn current(&self) -> RuntimeSnapshot {
         self.snapshot.borrow().clone()
     }
 
-    pub fn events_since(&self, after: u64, limit: usize) -> Vec<SequencedEvent>
-    {
+    pub fn events_since(&self, after: u64, limit: usize) -> Vec<SequencedEvent> {
         let history = self
             .history
             .lock()
@@ -122,40 +112,34 @@ impl EventHub
             .collect()
     }
 
-    fn update(&self, event: &SystemEvent, sequence: u64)
-    {
-        self.snapshot.send_modify(|snapshot|
-        {
+    fn update(&self, event: &SystemEvent, sequence: u64) {
+        self.snapshot.send_modify(|snapshot| {
             snapshot.last_sequence = sequence;
             snapshot.observe_speech_event(event);
-            match event
-            {
-                SystemEvent::TurnStarted { turn_id, .. } =>
-                {
+            match event {
+                SystemEvent::TurnStarted { turn_id, .. } => {
                     snapshot.active_turn = Some(*turn_id);
                     snapshot.turns_started += 1;
                 }
                 SystemEvent::SentenceReady { .. } => snapshot.sentences_ready += 1,
-                SystemEvent::SpeechPlayback { .. } | SystemEvent::SpeechProgress { .. } | SystemEvent::SpeechCancelled => {},
-                SystemEvent::EmotionChanged { emotion, .. } =>
-                {
+                SystemEvent::SpeechPlayback { .. }
+                | SystemEvent::SpeechProgress { .. }
+                | SystemEvent::SpeechCancelled => {}
+                SystemEvent::EmotionChanged { emotion, .. } => {
                     snapshot.current_emotion = Some(*emotion);
                 }
-                SystemEvent::TurnFinished { .. } =>
-                {
+                SystemEvent::TurnFinished { .. } => {
                     snapshot.active_turn = None;
                     snapshot.current_emotion = None;
                     snapshot.turns_completed += 1;
                 }
-                SystemEvent::TurnInterrupted { .. } =>
-                {
+                SystemEvent::TurnInterrupted { .. } => {
                     snapshot.active_turn = None;
                     snapshot.current_emotion = None;
                     snapshot.turns_interrupted += 1;
                 }
                 SystemEvent::StateChanged { to, .. } => snapshot.state = *to,
-                SystemEvent::Fault { message } =>
-                {
+                SystemEvent::Fault { message } => {
                     snapshot.faults += 1;
                     snapshot.last_fault = Some(message.clone());
                 }
@@ -163,23 +147,22 @@ impl EventHub
                 | SystemEvent::LiveEventReceived { .. }
                 | SystemEvent::LiveResponseSuggested { .. }
                 | SystemEvent::PersonaChanged { .. }
-                | SystemEvent::ComponentHealthChanged { .. } =>
-                {
-                }
+                | SystemEvent::ComponentHealthChanged { .. } => {}
             }
         });
     }
 
-    pub fn publish_now(&self, event: SystemEvent)
-    {
+    pub fn publish_now(&self, event: SystemEvent) {
         // Assign sequence, update snapshot and broadcast under the same lock.
         // Audio and runtime publishers must never expose reordered events.
-        let mut history = self.history.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut history = self
+            .history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let sequence = self.sequence.fetch_add(1, Ordering::AcqRel) + 1;
         self.update(&event, sequence);
         let event = SequencedEvent { sequence, event };
-        if history.len() == self.capacity
-        {
+        if history.len() == self.capacity {
             history.pop_front();
         }
         history.push_back(event.clone());
@@ -188,24 +171,19 @@ impl EventHub
 }
 
 #[async_trait]
-impl EventSink for EventHub
-{
-    async fn publish(&mut self, event: SystemEvent)
-    {
+impl EventSink for EventHub {
+    async fn publish(&mut self, event: SystemEvent) {
         self.publish_now(event);
     }
 }
 
-pub struct TeeEventSink<A, B>
-{
+pub struct TeeEventSink<A, B> {
     first: A,
     second: B,
 }
 
-impl<A, B> TeeEventSink<A, B>
-{
-    pub fn new(first: A, second: B) -> Self
-    {
+impl<A, B> TeeEventSink<A, B> {
+    pub fn new(first: A, second: B) -> Self {
         Self { first, second }
     }
 }
@@ -216,21 +194,18 @@ where
     A: EventSink,
     B: EventSink,
 {
-    async fn publish(&mut self, event: SystemEvent)
-    {
+    async fn publish(&mut self, event: SystemEvent) {
         self.first.publish(event.clone()).await;
         self.second.publish(event).await;
     }
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn broadcasts_events_and_updates_snapshot()
-    {
+    async fn broadcasts_events_and_updates_snapshot() {
         let mut hub = EventHub::new(8).expect("event hub");
         let mut events = hub.subscribe();
         let turn_id = TurnId::new();
@@ -263,8 +238,7 @@ mod tests
         assert_eq!(snapshot.turns_completed, 1);
         assert_eq!(snapshot.sentences_ready, 1);
         assert_eq!(snapshot.last_sequence, 4);
-        for sequence in 1..=4
-        {
+        for sequence in 1..=4 {
             assert_eq!(
                 events.try_recv().expect("broadcast event").sequence,
                 sequence,
@@ -274,11 +248,9 @@ mod tests
     }
 
     #[tokio::test]
-    async fn replay_is_ordered_and_bounded()
-    {
+    async fn replay_is_ordered_and_bounded() {
         let mut hub = EventHub::new(2).expect("event hub");
-        for index in 0..3
-        {
+        for index in 0..3 {
             hub.publish(SystemEvent::Fault {
                 message: format!("fault {index}"),
             })
@@ -294,8 +266,7 @@ mod tests
     }
 
     #[tokio::test]
-    async fn replays_component_health_transitions_for_diagnostics()
-    {
+    async fn replays_component_health_transitions_for_diagnostics() {
         let mut hub = EventHub::new(8).expect("event hub");
         hub.publish(SystemEvent::ComponentHealthChanged {
             component: "bilibili".to_owned(),
@@ -325,25 +296,19 @@ mod tests
         assert_eq!(hub.current().last_sequence, 2);
     }
     #[test]
-    fn rejects_zero_capacity()
-    {
+    fn rejects_zero_capacity() {
         assert!(EventHub::new(0).is_err());
     }
 
     #[test]
-    fn concurrent_audio_and_runtime_publishers_keep_snapshot_history_and_broadcast_in_order()
-    {
+    fn concurrent_audio_and_runtime_publishers_keep_snapshot_history_and_broadcast_in_order() {
         let hub = EventHub::new(512).unwrap();
         let mut receiver = hub.subscribe();
-        std::thread::scope(|scope|
-        {
-            for _ in 0..8
-            {
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
                 let hub = hub.clone();
-                scope.spawn(move ||
-                {
-                    for _ in 0..32
-                    {
+                scope.spawn(move || {
+                    for _ in 0..32 {
                         hub.publish_now(SystemEvent::SpeechPlayback {
                             playback: ai_ex_domain::SpeechPlaybackSnapshot::default(),
                         });
@@ -354,8 +319,7 @@ mod tests
         let history = hub.events_since(0, 512);
         assert_eq!(history.len(), 256);
         assert_eq!(hub.current().last_sequence, 256);
-        for (index, event) in history.iter().enumerate()
-        {
+        for (index, event) in history.iter().enumerate() {
             assert_eq!(event.sequence, index as u64 + 1);
             assert_eq!(receiver.try_recv().unwrap().sequence, event.sequence);
         }

@@ -5,8 +5,8 @@ use ai_ex_domain::{ComponentHealth, PersonaSnapshot, StageSnapshot, SystemEvent}
 use ai_ex_ui_model::{ApplyOutcome, ConnectionState, TurnStatus, UiState};
 use eframe::egui;
 
-use crate::worker::{WorkerCommand, WorkerEvent, WorkerHandle};
 use crate::appearance::AppearancePanel;
+use crate::worker::{WorkerCommand, WorkerEvent, WorkerHandle};
 
 #[cfg(test)]
 #[path = "character_app_tests.rs"]
@@ -33,8 +33,7 @@ mod library;
 #[path = "library_app_tests.rs"]
 mod library_tests;
 
-pub struct DesktopApp
-{
+pub struct DesktopApp {
     state: UiState,
     worker: WorkerHandle,
     input: String,
@@ -65,18 +64,24 @@ pub struct DesktopApp
     active_source: String,
 }
 
-impl DesktopApp
-{
-    pub fn new(context: &eframe::CreationContext<'_>, worker: WorkerHandle, developer_mode: bool, launch: crate::scene_resume::ResumeLaunch) -> Self
-    {
+impl DesktopApp {
+    pub fn new(
+        context: &eframe::CreationContext<'_>,
+        worker: WorkerHandle,
+        developer_mode: bool,
+        launch: crate::scene_resume::ResumeLaunch,
+    ) -> Self {
         configure_appearance(&context.egui_ctx);
         let mut app = Self::with_storage(worker, developer_mode, context.storage);
         app.resume = crate::scene_resume::SceneResume::load(context.storage, launch);
         app
     }
 
-    fn with_storage(worker: WorkerHandle, developer_mode: bool, storage: Option<&dyn eframe::Storage>) -> Self
-    {
+    fn with_storage(
+        worker: WorkerHandle,
+        developer_mode: bool,
+        storage: Option<&dyn eframe::Storage>,
+    ) -> Self {
         Self {
             state: UiState::new(200).expect("valid UI capacity"),
             worker,
@@ -98,7 +103,9 @@ impl DesktopApp
             stage: StageSnapshot::default(),
             appearance: AppearancePanel::load(storage),
             character_files: Default::default(),
-            active_character: ai_ex_config::character::CharacterManifest::from_persona(Default::default()),
+            active_character: ai_ex_config::character::CharacterManifest::from_persona(
+                Default::default(),
+            ),
             scene_files: Default::default(),
             pending_scene: None,
             applying_scene: None,
@@ -109,38 +116,31 @@ impl DesktopApp
         }
     }
 
-    fn push_log(&mut self, message: impl Into<String>)
-    {
-        if self.logs.len() >= 200
-        {
+    fn push_log(&mut self, message: impl Into<String>) {
+        if self.logs.len() >= 200 {
             self.logs.pop_front();
         }
         self.logs.push_back(message.into());
     }
 
-    fn active_model_health(&self) -> Option<&ComponentHealth>
-    {
-        self.health.iter().find(|item| {
-            matches!(item.component.as_str(), "deepseek" | "koboldcpp" | "ollama")
-        })
+    fn active_model_health(&self) -> Option<&ComponentHealth> {
+        self.health
+            .iter()
+            .find(|item| matches!(item.component.as_str(), "deepseek" | "koboldcpp" | "ollama"))
     }
 
-    fn export_diagnostics(&mut self)
-    {
+    fn export_diagnostics(&mut self) {
         let path = std::env::current_dir()
             .unwrap_or_else(|_| std::env::temp_dir())
             .join("aiex-desktop-diagnostics.log");
         let content = self.logs.iter().cloned().collect::<Vec<_>>().join("\n");
-        match std::fs::write(&path, content)
-        {
-            Ok(()) =>
-            {
+        match std::fs::write(&path, content) {
+            Ok(()) => {
                 let message = format!("诊断日志已导出：{}", path.display());
                 self.export_feedback = Some(message.clone());
                 self.push_log(message);
             }
-            Err(error) =>
-            {
+            Err(error) => {
                 let message = format!("诊断日志导出失败：{error}");
                 self.export_feedback = Some(message.clone());
                 self.push_log(message);
@@ -148,54 +148,58 @@ impl DesktopApp
         }
     }
 
-    fn drain_events(&mut self)
-    {
-        while let Ok(event) = self.worker.events.try_recv()
-        {
-            match event
-            {
-                WorkerEvent::Connection(connected) =>
-                {
-                    if !connected { self.persona_synced = false; }
-                    self.push_log(if connected { "control connected" } else { "control disconnected" });
-                    self.state.connection = if connected
-                    {
-                        ConnectionState::Connected
+    fn drain_events(&mut self) {
+        while let Ok(event) = self.worker.events.try_recv() {
+            match event {
+                WorkerEvent::Connection(connected) => {
+                    if !connected {
+                        self.persona_synced = false;
                     }
-                    else
-                    {
+                    self.push_log(if connected {
+                        "control connected"
+                    } else {
+                        "control disconnected"
+                    });
+                    self.state.connection = if connected {
+                        ConnectionState::Connected
+                    } else {
                         ConnectionState::Disconnected
                     };
                 }
                 WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
-                WorkerEvent::Persona(profile) =>
-                {
+                WorkerEvent::Persona(profile) => {
                     self.persona_synced = self.state.connection == ConnectionState::Connected;
-                    if !self.persona_apply_pending
-                    {
-                        if self.active_persona != profile
-                        {
-                            self.active_character = ai_ex_config::character::CharacterManifest::from_persona(profile.clone());
+                    if !self.persona_apply_pending {
+                        if self.active_persona != profile {
+                            self.active_character =
+                                ai_ex_config::character::CharacterManifest::from_persona(
+                                    profile.clone(),
+                                );
                             self.active_source = "服务同步（未提供包来源）".to_owned();
                         }
-                        if self.active_source.is_empty() { self.active_source = "服务同步（未提供包来源）".to_owned(); }
+                        if self.active_source.is_empty() {
+                            self.active_source = "服务同步（未提供包来源）".to_owned();
+                        }
                         self.active_persona = profile.clone();
                     }
-                    if !self.persona_apply_pending && !self.persona_dirty && self.pending_persona.is_none() && !self.character_files.is_loading()
+                    if !self.persona_apply_pending
+                        && !self.persona_dirty
+                        && self.pending_persona.is_none()
+                        && !self.character_files.is_loading()
                     {
                         self.taboos_editor = profile.taboos.join("\n");
                         self.persona = profile;
                         self.persona_dirty = false;
                         self.persona_apply_pending = false;
                         self.sync_character_draft_metadata();
-                    }
-                    else
-                    {
-                        self.push_log(format!("persona update received while editing: {}@{}", profile.profile_id, profile.revision));
+                    } else {
+                        self.push_log(format!(
+                            "persona update received while editing: {}@{}",
+                            profile.profile_id, profile.revision
+                        ));
                     }
                 }
-                WorkerEvent::PersonaApplied(profile) =>
-                {
+                WorkerEvent::PersonaApplied(profile) => {
                     self.persona_synced = true;
                     self.finish_scene(&profile);
                     self.active_persona = profile.clone();
@@ -205,41 +209,45 @@ impl DesktopApp
                     self.persona_apply_pending = false;
                     self.sync_character_draft_metadata();
                 }
-                WorkerEvent::PersonaApplyFailed(error) =>
-                {
-                    if self.applying_scene.take().is_some()
-                    {
-                        self.scene_files.feedback = Some("场景未获服务确认，外形保持原样；请检查连接与当前角色后重试。".to_owned());
+                WorkerEvent::PersonaApplyFailed(error) => {
+                    if self.applying_scene.take().is_some() {
+                        self.scene_files.feedback = Some(
+                            "场景未获服务确认，外形保持原样；请检查连接与当前角色后重试。"
+                                .to_owned(),
+                        );
                     }
                     self.persona_apply_pending = false;
                     self.last_error = Some(error);
                 }
-                WorkerEvent::Stage(snapshot) =>
-                {
-                    self.push_log(format!("stage snapshot received: {} action(s)", snapshot.actions.len()));
+                WorkerEvent::Stage(snapshot) => {
+                    self.push_log(format!(
+                        "stage snapshot received: {} action(s)",
+                        snapshot.actions.len()
+                    ));
                     self.stage = snapshot;
                 }
-                WorkerEvent::Health(health) =>
-                {
+                WorkerEvent::Health(health) => {
                     let details = health
                         .iter()
                         .map(|item| {
-                            format!("health {} ready={} {}", item.component, item.ready, item.detail)
+                            format!(
+                                "health {} ready={} {}",
+                                item.component, item.ready, item.detail
+                            )
                         })
                         .collect::<Vec<_>>();
-                    self.push_log(format!("health snapshot received: {} component(s)", health.len()));
+                    self.push_log(format!(
+                        "health snapshot received: {} component(s)",
+                        health.len()
+                    ));
                     self.health = health;
-                    for detail in details
-                    {
+                    for detail in details {
                         self.push_log(detail);
                     }
                 }
-                WorkerEvent::Events(events) =>
-                {
-                    for event in events
-                    {
-                        match &event.event
-                        {
+                WorkerEvent::Events(events) => {
+                    for event in events {
+                        match &event.event {
                             ai_ex_domain::SystemEvent::LiveEventReceived {
                                 event_type,
                                 summary,
@@ -250,42 +258,42 @@ impl DesktopApp
                             } => self.push_log(format!(
                                 "live reaction suggested (automatic={automatic})",
                             )),
-                            ai_ex_domain::SystemEvent::SentenceReady { text, .. } =>
-                            {
+                            ai_ex_domain::SystemEvent::SentenceReady { text, .. } => {
                                 let preview = text.replace("\r", " ").replace("\n", " ");
                                 self.push_log(format!(
                                     "stage speech queued: {}",
                                     preview.chars().take(120).collect::<String>(),
                                 ));
                             }
-                            ai_ex_domain::SystemEvent::EmotionChanged { emotion, .. } =>
-                            {
+                            ai_ex_domain::SystemEvent::EmotionChanged { emotion, .. } => {
                                 self.push_log(format!("stage expression: {emotion:?}"));
                             }
-                            SystemEvent::PersonaChanged { profile_id, revision } =>
-                            {
+                            SystemEvent::PersonaChanged {
+                                profile_id,
+                                revision,
+                            } => {
                                 self.push_log(format!("persona changed: {profile_id}@{revision}"));
                             }
-                            SystemEvent::ComponentHealthChanged { component, ready, detail } =>
-                            {
+                            SystemEvent::ComponentHealthChanged {
+                                component,
+                                ready,
+                                detail,
+                            } => {
                                 let state = if *ready { "ready" } else { "unavailable" };
-                                self.push_log(format!("health transition {component}={state}: {detail}"));
+                                self.push_log(format!(
+                                    "health transition {component}={state}: {detail}"
+                                ));
                             }
-                            _ =>
-                            {
-                            }
+                            _ => {}
                         }
-                        if self.state.apply_event(event) == ApplyOutcome::GapDetected
-                        {
-                            self.last_error = Some(
-                                "事件序号出现缺口，正在等待状态重新同步。".to_owned(),
-                            );
+                        if self.state.apply_event(event) == ApplyOutcome::GapDetected {
+                            self.last_error =
+                                Some("事件序号出现缺口，正在等待状态重新同步。".to_owned());
                             break;
                         }
                     }
                 }
-                WorkerEvent::Failure(error) =>
-                {
+                WorkerEvent::Failure(error) => {
                     self.push_log(format!("failure: {error}"));
                     self.last_error = Some(error);
                 }
@@ -294,26 +302,25 @@ impl DesktopApp
         }
     }
 
-    fn send(&mut self, command: WorkerCommand)
-    {
-        if self.worker.commands.send(command).is_err()
-        {
+    fn send(&mut self, command: WorkerCommand) {
+        if self.worker.commands.send(command).is_err() {
             self.last_error = Some("桌面网络工作线程已停止。".to_owned());
         }
     }
 
-    fn can_submit(&self) -> bool
-    {
-        self.state.connection == ConnectionState::Connected && !self.persona_apply_pending && !self.confirm_persona
+    fn can_submit(&self) -> bool {
+        self.state.connection == ConnectionState::Connected
+            && !self.persona_apply_pending
+            && !self.confirm_persona
             && self.resume.phase == crate::scene_resume::ResumePhase::Idle
     }
 
-    fn submit(&mut self)
-    {
-        if !self.can_submit() { return; }
+    fn submit(&mut self) {
+        if !self.can_submit() {
+            return;
+        }
         let text = self.input.trim();
-        if text.is_empty()
-        {
+        if text.is_empty() {
             return;
         }
         let text = text.to_owned();
@@ -321,14 +328,11 @@ impl DesktopApp
         self.input.clear();
     }
 
-    fn show_header(&mut self, ui: &mut egui::Ui)
-    {
-        ui.horizontal(|ui|
-        {
+    fn show_header(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
             ui.heading("AIex");
             ui.separator();
-            let (label, color) = match self.state.connection
-            {
+            let (label, color) = match self.state.connection {
                 ConnectionState::Connected => ("已连接", egui::Color32::from_rgb(80, 200, 140)),
                 ConnectionState::Connecting => ("连接中", egui::Color32::YELLOW),
                 ConnectionState::Disconnected => ("未连接", egui::Color32::LIGHT_RED),
@@ -336,31 +340,32 @@ impl DesktopApp
             ui.colored_label(color, label);
             ui.separator();
             ui.label(format!("状态：{:?}", self.state.runtime.state));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui|
-            {
-                if ui.button(if self.show_developer { "隐藏开发者诊断" } else { "开发者诊断" }).clicked()
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button(if self.show_developer {
+                        "隐藏开发者诊断"
+                    } else {
+                        "开发者诊断"
+                    })
+                    .clicked()
                 {
                     self.show_developer = !self.show_developer;
                 }
-                if ui.button("急停").clicked()
-                {
+                if ui.button("急停").clicked() {
                     self.confirm_emergency_stop = true;
                 }
-                if ui.button("打断").clicked()
-                {
+                if ui.button("打断").clicked() {
                     self.send(WorkerCommand::Interrupt);
                 }
             });
         });
-        if let Some(error) = &self.last_error
-        {
+        if let Some(error) = &self.last_error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
         ui.separator();
     }
 
-    fn show_beginner_panel(&self, ui: &mut egui::Ui)
-    {
+    fn show_beginner_panel(&self, ui: &mut egui::Ui) {
         ui.group(|ui|
         {
             ui.heading("新手控制台");
@@ -413,10 +418,8 @@ impl DesktopApp
         });
     }
 
-    fn show_persona_panel(&mut self, ui: &mut egui::Ui)
-    {
-        if let Some(manifest) = self.character_files.poll(ui.ctx())
-        {
+    fn show_persona_panel(&mut self, ui: &mut egui::Ui) {
+        if let Some(manifest) = self.character_files.poll(ui.ctx()) {
             self.persona = manifest.persona;
             self.taboos_editor = self.persona.taboos.join("\n");
             self.persona_dirty = true;
@@ -494,8 +497,7 @@ impl DesktopApp
             }
             });
         });
-        if changed
-        {
+        if changed {
             self.persona_dirty = true;
             self.persona.taboos = self
                 .taboos_editor
@@ -505,8 +507,7 @@ impl DesktopApp
                 .map(str::to_owned)
                 .collect();
         }
-        if request_confirm
-        {
+        if request_confirm {
             self.persona.taboos = self
                 .taboos_editor
                 .lines()
@@ -514,10 +515,8 @@ impl DesktopApp
                 .filter(|item| !item.is_empty())
                 .map(str::to_owned)
                 .collect();
-            match self.persona.validate()
-            {
-                Ok(()) =>
-                {
+            match self.persona.validate() {
+                Ok(()) => {
                     self.pending_persona = Some(self.persona.clone());
                     self.confirm_persona = true;
                     self.push_log("persona draft is ready for confirmation");
@@ -527,25 +526,17 @@ impl DesktopApp
         }
     }
 
-    fn show_health(&self, ui: &mut egui::Ui)
-    {
-        ui.collapsing("组件健康状态（实时刷新）", |ui|
-        {
-            if self.health.is_empty()
-            {
+    fn show_health(&self, ui: &mut egui::Ui) {
+        ui.collapsing("组件健康状态（实时刷新）", |ui| {
+            if self.health.is_empty() {
                 ui.weak("等待服务健康信息……");
                 return;
             }
-            ui.horizontal_wrapped(|ui|
-            {
-                for item in &self.health
-                {
-                    let color = if item.ready
-                    {
+            ui.horizontal_wrapped(|ui| {
+                for item in &self.health {
+                    let color = if item.ready {
                         egui::Color32::from_rgb(80, 200, 140)
-                    }
-                    else
-                    {
+                    } else {
                         egui::Color32::LIGHT_RED
                     };
                     let label = if item.ready { "就绪" } else { "不可用" };
@@ -556,8 +547,7 @@ impl DesktopApp
         });
     }
 
-    fn show_model_panel(&self, ui: &mut egui::Ui)
-    {
+    fn show_model_panel(&self, ui: &mut egui::Ui) {
         ui.collapsing("模型 Provider 诊断", |ui|
         {
             let Some(item) = self.active_model_health() else
@@ -580,48 +570,36 @@ impl DesktopApp
         });
     }
 
-    fn show_policy_panel(&self, ui: &mut egui::Ui)
-    {
-        ui.collapsing("人格、记忆与自动化策略", |ui|
-        {
+    fn show_policy_panel(&self, ui: &mut egui::Ui) {
+        ui.collapsing("人格、记忆与自动化策略", |ui| {
             ui.label(format!(
                 "当前人格：{} @ revision {} · 直播模式：{}",
                 self.active_persona.name,
                 self.active_persona.revision,
                 self.active_persona.live_mode,
             ));
-            if let Some(memory) = self.health.iter().find(|item| item.component == "memory")
-            {
+            if let Some(memory) = self.health.iter().find(|item| item.component == "memory") {
                 let state = if memory.ready { "可用" } else { "不可用" };
                 ui.label(format!("记忆：{}（{}）", state, memory.detail));
-            }
-            else
-            {
+            } else {
                 ui.weak("记忆状态尚未同步。");
             }
-            if let Some(safety) = self.health.iter().find(|item| item.component == "safety")
-            {
+            if let Some(safety) = self.health.iter().find(|item| item.component == "safety") {
                 let emergency = safety.detail.contains("emergency stop");
-                let color = if emergency
-                {
+                let color = if emergency {
                     egui::Color32::LIGHT_RED
-                }
-                else
-                {
+                } else {
                     egui::Color32::from_rgb(80, 200, 140)
                 };
                 ui.colored_label(color, format!("自动化安全门：{}", safety.detail));
-            }
-            else
-            {
+            } else {
                 ui.weak("自动化安全状态尚未同步。");
             }
             ui.small("人格修改必须确认；记忆默认本地保存；外部动作仍受权限、冷却和急停约束。");
         });
     }
 
-    fn show_automation_panel(&self, ui: &mut egui::Ui)
-    {
+    fn show_automation_panel(&self, ui: &mut egui::Ui) {
         ui.collapsing("视觉与游戏安全状态", |ui|
         {
             ui.horizontal(|ui|
@@ -669,62 +647,53 @@ impl DesktopApp
             }
         });
     }
-    fn show_stage_panel(&self, ui: &mut egui::Ui)
-    {
-        if !self.show_developer
-        {
+    fn show_stage_panel(&self, ui: &mut egui::Ui) {
+        if !self.show_developer {
             return;
         }
-        ui.collapsing("舞台/OBS 动作遥测", |ui|
-        {
-            ui.small(format!("schema={}，最近 {} 个动作", self.stage.schema_version, self.stage.actions.len()));
-            if self.stage.capabilities.is_empty()
-            {
+        ui.collapsing("舞台/OBS 动作遥测", |ui| {
+            ui.small(format!(
+                "schema={}，最近 {} 个动作",
+                self.stage.schema_version,
+                self.stage.actions.len()
+            ));
+            if self.stage.capabilities.is_empty() {
                 ui.weak("舞台能力尚未同步；旧服务快照可能没有能力字段。");
-            }
-            else
-            {
+            } else {
                 ui.small(format!("当前能力：{}", self.stage.capabilities.join("、")));
             }
-            if self.stage.actions.is_empty()
-            {
+            if self.stage.actions.is_empty() {
                 ui.weak("尚未收到舞台动作；可发送一条对话或运行 dry-run 回放后刷新。");
                 return;
             }
-            for action in self.stage.actions.iter().rev().take(24)
-            {
-                ui.monospace(format!("#{} [{}] {}", action.sequence, action.kind, action.detail));
+            for action in self.stage.actions.iter().rev().take(24) {
+                ui.monospace(format!(
+                    "#{} [{}] {}",
+                    action.sequence, action.kind, action.detail
+                ));
             }
         });
     }
 
-    fn show_developer_panel(&mut self, ui: &mut egui::Ui)
-    {
-        if !self.show_developer
-        {
+    fn show_developer_panel(&mut self, ui: &mut egui::Ui) {
+        if !self.show_developer {
             return;
         }
-        ui.collapsing("开发者诊断日志", |ui|
-        {
-            ui.horizontal_wrapped(|ui|
-            {
+        ui.collapsing("开发者诊断日志", |ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.small("桌面控制协议与事件流日志；服务端原始日志继续输出到启动终端。");
-                if ui.button("导出日志").clicked()
-                {
+                if ui.button("导出日志").clicked() {
                     self.export_diagnostics();
                 }
-                if ui.button("清空").clicked()
-                {
+                if ui.button("清空").clicked() {
                     self.logs.clear();
                     self.export_feedback = None;
                 }
             });
-            ui.horizontal(|ui|
-            {
+            ui.horizontal(|ui| {
                 ui.label("筛选");
                 ui.text_edit_singleline(&mut self.log_filter);
-                if ui.button("清除筛选").clicked()
-                {
+                if ui.button("清除筛选").clicked() {
                     self.log_filter.clear();
                 }
             });
@@ -733,37 +702,34 @@ impl DesktopApp
                 .iter()
                 .filter(|line| self.log_filter.is_empty() || line.contains(&self.log_filter))
                 .collect::<Vec<_>>();
-            ui.small(format!("显示 {} / {} 条；日志最多保留 200 条。", filtered.len(), self.logs.len()));
-            if let Some(feedback) = &self.export_feedback
-            {
+            ui.small(format!(
+                "显示 {} / {} 条；日志最多保留 200 条。",
+                filtered.len(),
+                self.logs.len()
+            ));
+            if let Some(feedback) = &self.export_feedback {
                 ui.weak(feedback);
             }
             egui::ScrollArea::vertical()
                 .max_height(180.0)
                 .stick_to_bottom(true)
-                .show(ui, |ui|
-                {
-                    for line in filtered
-                    {
+                .show(ui, |ui| {
+                    for line in filtered {
                         ui.monospace(line);
                     }
                 });
         });
     }
 
-    fn show_conversation(&self, ui: &mut egui::Ui)
-    {
+    fn show_conversation(&self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical()
             .id_salt("conversation_history")
             .max_height((ui.available_height() - 130.0).max(60.0))
             .stick_to_bottom(true)
             .auto_shrink([false, false])
-            .show(ui, |ui|
-            {
-                for turn in &self.state.turns
-                {
-                    ui.group(|ui|
-                    {
+            .show(ui, |ui| {
+                for turn in &self.state.turns {
+                    ui.group(|ui| {
                         ui.strong(format!("你：{}", turn.user_text));
                         ui.add_space(6.0);
                         ui.label(format!("AIex：{}", turn.assistant_text));
@@ -772,18 +738,15 @@ impl DesktopApp
                     });
                     ui.add_space(8.0);
                 }
-                if self.state.turns.is_empty()
-                {
-                    ui.centered_and_justified(|ui|
-                    {
+                if self.state.turns.is_empty() {
+                    ui.centered_and_justified(|ui| {
                         ui.weak("连接服务后，从这里开始对话。");
                     });
                 }
             });
     }
 
-    fn show_composer(&mut self, ui: &mut egui::Ui)
-    {
+    fn show_composer(&mut self, ui: &mut egui::Ui) {
         ui.separator();
         let response = ui.add(
             egui::TextEdit::multiline(&mut self.input)
@@ -792,11 +755,8 @@ impl DesktopApp
                 .hint_text("输入消息；Ctrl + Enter 发送"),
         );
         let keyboard_submit = response.has_focus()
-            && ui.input(|input| {
-                input.key_pressed(egui::Key::Enter) && input.modifiers.ctrl
-            });
-        ui.horizontal(|ui|
-        {
+            && ui.input(|input| input.key_pressed(egui::Key::Enter) && input.modifiers.ctrl);
+        ui.horizontal(|ui| {
             let enabled = self.can_submit();
             if ui.add_enabled(enabled, egui::Button::new("发送")).clicked()
                 || (enabled && keyboard_submit)
@@ -813,14 +773,11 @@ impl DesktopApp
         });
     }
 
-    fn show_persona_confirmation(&mut self, context: &egui::Context)
-    {
-        if !self.confirm_persona
-        {
+    fn show_persona_confirmation(&mut self, context: &egui::Context) {
+        if !self.confirm_persona {
             return;
         }
-        let Some(profile) = self.pending_persona.clone() else
-        {
+        let Some(profile) = self.pending_persona.clone() else {
             self.confirm_persona = false;
             return;
         };
@@ -852,26 +809,25 @@ impl DesktopApp
                     }
                 });
             });
-        if apply
-        {
+        if apply {
             self.apply_pending_persona(profile);
-        }
-        else if cancel
-        {
+        } else if cancel {
             self.cancel_pending_persona();
         }
     }
 
-    fn apply_pending_persona(&mut self, profile: PersonaSnapshot)
-    {
-        if self.state.connection != ConnectionState::Connected
-        {
+    fn apply_pending_persona(&mut self, profile: PersonaSnapshot) {
+        if self.state.connection != ConnectionState::Connected {
             self.last_error = Some("服务未连接，无法应用角色。".to_owned());
             return;
         }
         self.resume.phase = crate::scene_resume::ResumePhase::Idle;
         self.persona_apply_pending = true;
-        if self.worker.commands.send(WorkerCommand::SetPersona(profile)).is_err()
+        if self
+            .worker
+            .commands
+            .send(WorkerCommand::SetPersona(profile))
+            .is_err()
         {
             self.persona_apply_pending = false;
             self.last_error = Some("桌面网络工作线程已停止。".to_owned());
@@ -883,22 +839,18 @@ impl DesktopApp
         self.pending_persona = None;
     }
 
-    fn cancel_pending_persona(&mut self)
-    {
+    fn cancel_pending_persona(&mut self) {
         self.resume.phase = crate::scene_resume::ResumePhase::Idle;
         self.confirm_persona = false;
         self.pending_persona = None;
-        if self.pending_scene.take().is_some()
-        {
+        if self.pending_scene.take().is_some() {
             self.scene_files.feedback = Some("已取消场景切换，当前组合与草稿保留。".to_owned());
         }
         self.push_log("persona draft discarded");
     }
 
-    fn show_emergency_confirmation(&mut self, context: &egui::Context)
-    {
-        if !self.confirm_emergency_stop
-        {
+    fn show_emergency_confirmation(&mut self, context: &egui::Context) {
+        if !self.confirm_emergency_stop {
             return;
         }
         let mut confirm = false;
@@ -907,14 +859,11 @@ impl DesktopApp
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(context, |ui|
-            {
+            .show(context, |ui| {
                 ui.label("急停会撤销全部自动化许可，并尝试立即打断当前输出。");
                 ui.label("本次服务运行期间不能从桌面界面恢复。");
-                ui.horizontal(|ui|
-                {
-                    if ui.button("取消").clicked()
-                    {
+                ui.horizontal(|ui| {
+                    if ui.button("取消").clicked() {
                         cancel = true;
                     }
                     if ui
@@ -925,22 +874,17 @@ impl DesktopApp
                     }
                 });
             });
-        if confirm
-        {
+        if confirm {
             self.send(WorkerCommand::EmergencyStop);
             self.confirm_emergency_stop = false;
-        }
-        else if cancel
-        {
+        } else if cancel {
             self.confirm_emergency_stop = false;
         }
     }
 }
 
-impl eframe::App for DesktopApp
-{
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame)
-    {
+impl eframe::App for DesktopApp {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.drain_events();
         self.poll_scene(ui.ctx());
         self.show_header(ui);
@@ -948,16 +892,14 @@ impl eframe::App for DesktopApp
         egui::ScrollArea::vertical()
             .id_salt("character_settings")
             .max_height(settings_height)
-            .show(ui, |ui|
-            {
+            .show(ui, |ui| {
                 egui::CollapsingHeader::new("数字人外形")
                     .default_open(true)
-                    .show(ui, |ui|
-                    {
+                    .show(ui, |ui| {
                         let state = ai_ex_ui_model::PresentationState::from_ui(&self.state);
-                        ui.add_enabled_ui(!self.scene_busy(), |ui|
-                        {
-                            self.appearance.show(ui, state, &self.active_persona.name, 150.0);
+                        ui.add_enabled_ui(!self.scene_busy(), |ui| {
+                            self.appearance
+                                .show(ui, state, &self.active_persona.name, 150.0);
                         });
                     });
                 self.show_beginner_panel(ui);
@@ -975,27 +917,26 @@ impl eframe::App for DesktopApp
         self.show_composer(ui);
         self.show_persona_confirmation(ui.ctx());
         self.show_emergency_confirmation(ui.ctx());
-        if (self.resume.dirty || self.character_library.dirty) && let Some(storage) = frame.storage_mut()
+        if (self.resume.dirty || self.character_library.dirty)
+            && let Some(storage) = frame.storage_mut()
         {
             self.save_resume(storage);
             self.save_library(storage);
             storage.flush();
         }
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
     }
 
-    fn save(&mut self, storage: &mut dyn eframe::Storage)
-    {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.appearance.save(storage);
         self.save_resume(storage);
         self.save_library(storage);
     }
 }
 
-fn turn_status(status: TurnStatus) -> (&'static str, egui::Color32)
-{
-    match status
-    {
+fn turn_status(status: TurnStatus) -> (&'static str, egui::Color32) {
+    match status {
         TurnStatus::Streaming => ("生成中", egui::Color32::LIGHT_BLUE),
         TurnStatus::Completed => ("完成", egui::Color32::GRAY),
         TurnStatus::Interrupted => ("已打断", egui::Color32::YELLOW),
@@ -1003,8 +944,7 @@ fn turn_status(status: TurnStatus) -> (&'static str, egui::Color32)
     }
 }
 
-pub(crate) fn configure_appearance(context: &egui::Context)
-{
+pub(crate) fn configure_appearance(context: &egui::Context) {
     context.set_visuals(egui::Visuals::dark());
     let mut style = (*context.style_of(egui::Theme::Dark)).clone();
     style.spacing.item_spacing = egui::vec2(10.0, 8.0);
@@ -1015,8 +955,7 @@ pub(crate) fn configure_appearance(context: &egui::Context)
         Path::new("C:/Windows/Fonts/msyh.ttc"),
         Path::new("C:/Windows/Fonts/simhei.ttf"),
     ];
-    let Some(bytes) = font_paths.iter().find_map(|path| std::fs::read(path).ok()) else
-    {
+    let Some(bytes) = font_paths.iter().find_map(|path| std::fs::read(path).ok()) else {
         return;
     };
     let mut fonts = egui::FontDefinitions::default();
@@ -1024,8 +963,7 @@ pub(crate) fn configure_appearance(context: &egui::Context)
         "ai-ex-cjk".to_owned(),
         egui::FontData::from_owned(bytes).into(),
     );
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace]
-    {
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
         fonts
             .families
             .entry(family)

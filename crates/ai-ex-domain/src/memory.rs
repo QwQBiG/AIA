@@ -4,8 +4,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MemoryKind
-{
+pub enum MemoryKind {
     #[default]
     Conversation,
     Viewer,
@@ -13,12 +12,9 @@ pub enum MemoryKind
     LiveEvent,
 }
 
-impl MemoryKind
-{
-    pub const fn as_str(self) -> &'static str
-    {
-        match self
-        {
+impl MemoryKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
             Self::Conversation => "conversation",
             Self::Viewer => "viewer",
             Self::Persona => "persona",
@@ -28,8 +24,7 @@ impl MemoryKind
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryProjection
-{
+pub struct MemoryProjection {
     pub kind: MemoryKind,
     pub event_id: Uuid,
     pub turn_id: Option<TurnId>,

@@ -7,44 +7,52 @@ mod lifecycle;
 mod playback;
 
 #[cfg(test)]
+mod interruption_tests;
+#[cfg(test)]
 mod speech_tests;
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ai_ex_audio::{AudioPlayer, SpeechQueue, SpeechReceiver};
-use ai_ex_automation::{AutomationPluginRequest, AutomationPluginResponse, AutomationPluginTransport};
-use ai_ex_bilibili::{BilibiliConnector, BilibiliSettings};
 use ai_ex_asr::WhisperHttpTranscriber;
+use ai_ex_audio::{AudioPlayer, SpeechQueue, SpeechReceiver};
 use ai_ex_audit::JsonlAuditLog;
+use ai_ex_automation::{
+    AutomationPluginRequest, AutomationPluginResponse, AutomationPluginTransport,
+};
+use ai_ex_bilibili::{BilibiliConnector, BilibiliSettings};
 use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend, PluginConfig};
-use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
 use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
 use ai_ex_core::{
-    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle, StageJournal, StageOutput,
-    spawn_runtime,
+    ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle,
+    StageJournal, StageOutput, spawn_runtime,
 };
-use ai_ex_domain::{AppError, ComponentHealth, ErrorKind, LiveResponseMode, PersonaSnapshot, SystemEvent, TurnId};
-use ai_ex_event_bus::{load_jsonl, project_memory, EventBus, EventPolicy, PublishOutcome};
+use ai_ex_deepseek::{DeepSeekClient, DeepSeekSettings};
+use ai_ex_domain::{
+    AppError, ComponentHealth, ErrorKind, LiveResponseMode, PersonaSnapshot, SystemEvent, TurnId,
+};
+use ai_ex_event_bus::{EventBus, EventPolicy, PublishOutcome, load_jsonl, project_memory};
 use ai_ex_koboldcpp::{KoboldCppClient, KoboldCppSettings};
 use ai_ex_memory::MemoryStore;
 use ai_ex_observability::{EventHub, TeeEventSink};
-use ai_ex_plugin::{PluginHealth, PluginRegistry, StdioPlugin};
 use ai_ex_ollama::OllamaClient;
-use ai_ex_stage::{StageExecutor, StageRouter};
+use ai_ex_plugin::{PluginHealth, PluginRegistry, StdioPlugin};
 use ai_ex_safety::{Capability, SafetyGate, SafetyPolicy};
-use ai_ex_stage_obs::{ObsDryRunStage, ObsSettings, ObsWebSocketStage, parse_records_jsonl, replay_records};
+use ai_ex_stage::{StageExecutor, StageRouter};
+use ai_ex_stage_obs::{
+    ObsDryRunStage, ObsSettings, ObsWebSocketStage, parse_records_jsonl, replay_records,
+};
 use ai_ex_tts::{GptSovitsClient, GptSovitsSettings};
-use ai_ex_vts::{VtsClient, VtsSettings};
 use ai_ex_vision::{
     OllamaVisionClient, OllamaVisionSettings, VisionAnalyzerPort, VisionRequest, VisualFrame,
 };
-use async_trait::async_trait;
+use ai_ex_vts::{VtsClient, VtsSettings};
 use args::Args;
+use async_trait::async_trait;
 use automation_replay::replay as replay_automation;
 use events::ConsoleEvents;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -54,23 +62,17 @@ use tracing_subscriber::EnvFilter;
 #[cfg(feature = "native-capture")]
 use ai_ex_capture::{CaptureSettings, NativeAudioSource};
 #[cfg(feature = "native-capture")]
-use ai_ex_duplex::{
-    AudioSourcePort, DuplexController, DuplexDirective, EnergyVad, VadConfig,
-};
+use ai_ex_duplex::{AudioSourcePort, DuplexController, DuplexDirective, EnergyVad, VadConfig};
 
-enum ConfiguredModel
-{
+enum ConfiguredModel {
     Ollama(OllamaClient),
     DeepSeek(DeepSeekClient),
     KoboldCpp(KoboldCppClient),
 }
 
-impl ConfiguredModel
-{
-    async fn health(&self) -> ComponentHealth
-    {
-        match self
-        {
+impl ConfiguredModel {
+    async fn health(&self) -> ComponentHealth {
+        match self {
             Self::Ollama(client) => client.health().await,
             Self::DeepSeek(client) => client.health().await,
             Self::KoboldCpp(client) => client.health().await,
@@ -79,25 +81,20 @@ impl ConfiguredModel
 }
 
 #[async_trait]
-impl LanguageModelPort for ConfiguredModel
-{
+impl LanguageModelPort for ConfiguredModel {
     async fn stream(
         &mut self,
         request: ModelRequest,
-    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, AppError>>, AppError>
-    {
-        match self
-        {
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, AppError>>, AppError> {
+        match self {
             Self::Ollama(client) => client.stream(request).await,
             Self::DeepSeek(client) => client.stream(request).await,
             Self::KoboldCpp(client) => client.stream(request).await,
         }
     }
 
-    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError>
-    {
-        match self
-        {
+    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError> {
+        match self {
             Self::Ollama(client) => client.cancel(turn_id).await,
             Self::DeepSeek(client) => client.cancel(turn_id).await,
             Self::KoboldCpp(client) => client.cancel(turn_id).await,
@@ -106,53 +103,44 @@ impl LanguageModelPort for ConfiguredModel
 }
 
 #[tokio::main]
-async fn main()
-{
+async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
-    if let Err(error) = run().await
-    {
+    if let Err(error) = run().await {
         eprintln!("AIex failed: {error}");
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<(), AppError>
-{
+async fn run() -> Result<(), AppError> {
     let args = Args::parse(std::env::args().skip(1))?;
     let config = AppConfig::load(&args.config).await?;
-    if (args.serve || args.managed) && !config.control.enabled
-    {
-        return Err(AppError::configuration("--serve and --managed require control.enabled = true"));
+    if (args.serve || args.managed) && !config.control.enabled {
+        return Err(AppError::configuration(
+            "--serve and --managed require control.enabled = true",
+        ));
     }
-    if let Some(path) = args.replay_events.as_ref()
-    {
-        let mut memory = if config.memory.enabled
-        {
+    if let Some(path) = args.replay_events.as_ref() {
+        let mut memory = if config.memory.enabled {
             MemoryStore::open(&config.memory.path).await?
-        }
-        else
-        {
+        } else {
             MemoryStore::disabled()
         };
         memory.select_profile(&config.persona.profile_id).await?;
         return replay_events_to_memory(path, &mut memory, args.replay_report.as_deref()).await;
     }
-    if let Some(path) = args.replay_stage.as_ref()
-    {
+    if let Some(path) = args.replay_stage.as_ref() {
         return replay_stage_records(path).await;
     }
-    if let Some(path) = args.replay_automation.as_ref()
-    {
+    if let Some(path) = args.replay_automation.as_ref() {
         return replay_automation(path, &config).await;
     }
     let vision = build_vision(&config)?;
-    if let (Some(image_path), Some(prompt)) = (args.vision_image, args.vision_prompt)
-    {
+    if let (Some(image_path), Some(prompt)) = (args.vision_image, args.vision_prompt) {
         let mut vision = vision.ok_or_else(|| {
             AppError::configuration("vision analysis requires vision.enabled = true")
         })?;
@@ -170,8 +158,7 @@ async fn run() -> Result<(), AppError>
     let model = build_model(&config)?;
     let vts = connect_vts(&config).await;
     let obs_runtime = connect_obs(&config).await;
-    if obs_runtime.connected
-    {
+    if obs_runtime.connected {
         tracing::info!("OBS WebSocket stage connected");
     }
     let (speech, receiver) = SpeechQueue::new(config.audio.queue_capacity)?;
@@ -181,18 +168,14 @@ async fn run() -> Result<(), AppError>
     let audit = build_audit(&config).await?;
     let plugin_runtime = connect_plugins(&config.plugins).await;
 
-    let memory = if config.memory.enabled
-    {
+    let memory = if config.memory.enabled {
         MemoryStore::open(&config.memory.path).await?
-    }
-    else
-    {
+    } else {
         MemoryStore::disabled()
     };
     memory.select_profile(&config.persona.profile_id).await?;
 
-    if args.check
-    {
+    if args.check {
         return run_check(HealthContext {
             model: &model,
             vts: &vts,
@@ -257,10 +240,14 @@ async fn run() -> Result<(), AppError>
             memory_recall_limit: config.conversation.memory_recall_limit,
         },
     )?;
-    runtime.set_persona(config.persona.profile_id.clone(), config.effective_system_prompt()).await?;
+    runtime
+        .set_persona(
+            config.persona.profile_id.clone(),
+            config.effective_system_prompt(),
+        )
+        .await?;
     let runtime = spawn_runtime(runtime, 32)?;
-    if let Some(prompt) = args.prompt
-    {
+    if let Some(prompt) = args.prompt {
         runtime.submit(prompt).await?;
         runtime.shutdown().await?;
         drop(stage_output);
@@ -275,8 +262,7 @@ async fn run() -> Result<(), AppError>
         event_hub.clone(),
         Arc::clone(&safety),
     )?;
-    if let Some(handle) = bilibili_runtime.health_handle.clone()
-    {
+    if let Some(handle) = bilibili_runtime.health_handle.clone() {
         let health = handle
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -299,24 +285,18 @@ async fn run() -> Result<(), AppError>
     )
     .await?;
     let duplex_task = spawn_duplex(&config, runtime.clone())?;
-    let session_result = if args.serve || args.managed
-    {
+    let session_result = if args.serve || args.managed {
         lifecycle::wait_for_shutdown(args.managed).await
-    }
-    else
-    {
+    } else {
         run_interactive(&runtime, &event_hub, &safety).await
     };
-    if let Some(task) = bilibili_runtime.task
-    {
+    if let Some(task) = bilibili_runtime.task {
         task.abort();
     }
-    if let Some(task) = duplex_task
-    {
+    if let Some(task) = duplex_task {
         task.abort();
     }
-    if let Some(task) = control_task
-    {
+    if let Some(task) = control_task {
         task.abort();
     }
     let shutdown_result = runtime.shutdown().await;
@@ -331,11 +311,8 @@ async fn run_interactive(
     runtime: &RuntimeHandle,
     event_hub: &EventHub,
     safety: &SafetyGate,
-) -> Result<(), AppError>
-{
-    println!(
-        "AIex Rust interactive mode. Commands: /status, /interrupt, /emergency-stop, /quit.",
-    );
+) -> Result<(), AppError> {
+    println!("AIex Rust interactive mode. Commands: /status, /interrupt, /emergency-stop, /quit.",);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = lines
         .next_line()
@@ -343,32 +320,26 @@ async fn run_interactive(
         .map_err(|error| AppError::unavailable(error.to_string()))?
     {
         let line = line.trim();
-        if line == "/quit"
-        {
+        if line == "/quit" {
             break;
         }
-        if line.is_empty()
-        {
+        if line.is_empty() {
             continue;
         }
-        if line == "/interrupt"
-        {
-            if let Err(error) = runtime.interrupt("interactive barge-in").await
-            {
+        if line == "/interrupt" {
+            if let Err(error) = runtime.interrupt("interactive barge-in").await {
                 eprintln!("interrupt failed: {error}");
             }
             continue;
         }
-        if line == "/status"
-        {
+        if line == "/status" {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&event_hub.current()).unwrap_or_default(),
             );
             continue;
         }
-        if line == "/emergency-stop"
-        {
+        if line == "/emergency-stop" {
             safety.trigger_emergency_stop();
             if let Err(error) = runtime.interrupt("emergency stop").await
                 && error.kind != ErrorKind::InvalidTransition
@@ -380,10 +351,8 @@ async fn run_interactive(
         }
         let submitter = runtime.clone();
         let input = line.to_owned();
-        tokio::spawn(async move
-        {
-            if let Err(error) = submitter.submit(input).await
-            {
+        tokio::spawn(async move {
+            if let Err(error) = submitter.submit(input).await {
                 eprintln!("turn failed: {error}");
             }
         });
@@ -391,8 +360,7 @@ async fn run_interactive(
     Ok(())
 }
 
-struct BilibiliRuntime
-{
+struct BilibiliRuntime {
     task: Option<tokio::task::JoinHandle<()>>,
     health_handle: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
 }
@@ -403,10 +371,8 @@ fn spawn_bilibili(
     runtime: RuntimeHandle,
     event_hub: EventHub,
     safety: Arc<SafetyGate>,
-) -> Result<BilibiliRuntime, AppError>
-{
-    if !config.enabled
-    {
+) -> Result<BilibiliRuntime, AppError> {
+    if !config.enabled {
         return Ok(BilibiliRuntime {
             task: None,
             health_handle: None,
@@ -414,35 +380,31 @@ fn spawn_bilibili(
     }
     let mut settings = BilibiliSettings::new(config.room_id)?;
     settings.endpoint = config.endpoint.clone();
-    settings.cookie_env = config.cookie_env.clone().filter(|value| !value.trim().is_empty());
+    settings.cookie_env = config
+        .cookie_env
+        .clone()
+        .filter(|value| !value.trim().is_empty());
     settings.reconnect_delay_ms = config.reconnect_delay_ms;
     let response_mode = config.response_mode();
     let reaction_cooldown_ms = config.reaction_cooldown_ms;
     let reconnect_delay_ms = config.reconnect_delay_ms;
     let connector = BilibiliConnector::new(settings);
     let health_handle = Some(connector.health_handle());
-    let task = tokio::spawn(async move
-    {
+    let task = tokio::spawn(async move {
         let mut memory = memory;
         let mut event_hub = event_hub;
         let mut connector = connector;
         let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
         let mut reactions = tokio::task::JoinSet::new();
         let mut last_reaction_ms = None;
-        loop
-        {
-            match connector.next_events().await
-            {
-                Ok(events) =>
-                {
-                    for event in events
-                    {
-                        if bus.publish(event) != PublishOutcome::Accepted
-                        {
+        loop {
+            match connector.next_events().await {
+                Ok(events) => {
+                    for event in events {
+                        if bus.publish(event) != PublishOutcome::Accepted {
                             continue;
                         }
-                        while let Ok(delivered) = receiver.try_recv()
-                        {
+                        while let Ok(delivered) = receiver.try_recv() {
                             let event_id = delivered.event_id;
                             let event_type = delivered.payload.event_type().to_owned();
                             let summary = delivered.payload.summary();
@@ -455,15 +417,12 @@ fn spawn_bilibili(
                                     summary,
                                 })
                                 .await;
-                            for projection in project_memory(&delivered)
-                            {
-                                if let Err(error) = memory.remember_projection(&projection).await
-                                {
+                            for projection in project_memory(&delivered) {
+                                if let Err(error) = memory.remember_projection(&projection).await {
                                     tracing::error!(%error, "bilibili memory projection failed");
                                 }
                             }
-                            let Some(prompt) = delivered.payload.reaction_prompt() else
-                            {
+                            let Some(prompt) = delivered.payload.reaction_prompt() else {
                                 continue;
                             };
                             let automatic = reaction_allowed(
@@ -481,27 +440,21 @@ fn spawn_bilibili(
                                     automatic,
                                 })
                                 .await;
-                            if !automatic
-                            {
+                            if !automatic {
                                 continue;
                             }
                             last_reaction_ms = Some(delivered.timestamp_ms);
                             let submitter = runtime.clone();
-                            reactions.spawn(async move
-                            {
-                                if let Err(error) = submitter.submit(prompt).await
-                                {
+                            reactions.spawn(async move {
+                                if let Err(error) = submitter.submit(prompt).await {
                                     tracing::warn!(%error, %event_id, "live reaction failed");
                                 }
                             });
                         }
                     }
-                    while reactions.try_join_next().is_some()
-                    {
-                    }
+                    while reactions.try_join_next().is_some() {}
                 }
-                Err(error) =>
-                {
+                Err(error) => {
                     tracing::warn!(%error, "bilibili event input stopped; retrying");
                     tokio::time::sleep(Duration::from_millis(reconnect_delay_ms)).await;
                 }
@@ -519,28 +472,24 @@ fn reaction_allowed(
     last_reaction_ms: Option<u64>,
     now_ms: u64,
     cooldown_ms: u64,
-) -> bool
-{
+) -> bool {
     response_mode.allows_automatic()
         && !emergency_stop
         && cooldown_ms > 0
-        && last_reaction_ms.is_none_or(|previous| {
-            now_ms.saturating_sub(previous) >= cooldown_ms
-        })
+        && last_reaction_ms.is_none_or(|previous| now_ms.saturating_sub(previous) >= cooldown_ms)
 }
 async fn replay_events_to_memory(
     path: &Path,
     memory: &mut MemoryStore,
     report_path: Option<&Path>,
-) -> Result<(), AppError>
-{
+) -> Result<(), AppError> {
     let events = load_jsonl(path)?;
     let input_count = events.len();
     let mut report = report_path
         .map(|path| {
-            File::create(path)
-                .map(BufWriter::new)
-                .map_err(|error| AppError::unavailable(format!("cannot create replay report: {error}")))
+            File::create(path).map(BufWriter::new).map_err(|error| {
+                AppError::unavailable(format!("cannot create replay report: {error}"))
+            })
         })
         .transpose()?;
     let (mut bus, mut receiver) = EventBus::new(EventPolicy::default());
@@ -549,23 +498,18 @@ async fn replay_events_to_memory(
     let mut projected = 0_usize;
     let mut reaction_suggestions = 0_usize;
     let before = memory.len().await;
-    for event in events
-    {
+    for event in events {
         let event_id = event.event_id.to_string();
         let timestamp_ms = event.timestamp_ms;
         let event_type = event.payload.event_type().to_owned();
         let priority = format!("{:?}", event.payload.priority());
         let outcome = bus.publish(event);
-        let (reaction_prompt, projection_count) = if outcome == PublishOutcome::Accepted
-        {
+        let (reaction_prompt, projection_count) = if outcome == PublishOutcome::Accepted {
             accepted += 1;
-            match receiver.try_recv()
-            {
-                Ok(delivered) =>
-                {
+            match receiver.try_recv() {
+                Ok(delivered) => {
                     let reaction_prompt = delivered.payload.reaction_prompt();
-                    if let Some(prompt) = reaction_prompt.as_ref()
-                    {
+                    if let Some(prompt) = reaction_prompt.as_ref() {
                         reaction_suggestions += 1;
                         println!(
                             "live reaction suggestion: event={} type={} summary={} prompt={}",
@@ -577,8 +521,7 @@ async fn replay_events_to_memory(
                     }
                     let projections = project_memory(&delivered);
                     let projection_count = projections.len();
-                    for projection in projections
-                    {
+                    for projection in projections {
                         memory.remember_projection(&projection).await?;
                         projected += 1;
                     }
@@ -586,15 +529,12 @@ async fn replay_events_to_memory(
                 }
                 Err(_) => (None, 0),
             }
-        }
-        else
-        {
+        } else {
             filtered += 1;
             println!("live event filtered: type={event_type} outcome={outcome:?}");
             (None, 0)
         };
-        if let Some(writer) = report.as_mut()
-        {
+        if let Some(writer) = report.as_mut() {
             let record = serde_json::json!({
                 "event_id": event_id,
                 "timestamp_ms": timestamp_ms,
@@ -604,18 +544,18 @@ async fn replay_events_to_memory(
                 "reaction_prompt": reaction_prompt,
                 "memory_projections": projection_count,
             });
-            serde_json::to_writer(&mut *writer, &record)
-                .map_err(|error| AppError::protocol(format!("cannot encode replay report: {error}")))?;
-            writer
-                .write_all(b"\n")
-                .map_err(|error| AppError::unavailable(format!("cannot write replay report: {error}")))?;
+            serde_json::to_writer(&mut *writer, &record).map_err(|error| {
+                AppError::protocol(format!("cannot encode replay report: {error}"))
+            })?;
+            writer.write_all(b"\n").map_err(|error| {
+                AppError::unavailable(format!("cannot write replay report: {error}"))
+            })?;
         }
     }
-    if let Some(writer) = report.as_mut()
-    {
-        writer
-            .flush()
-            .map_err(|error| AppError::unavailable(format!("cannot flush replay report: {error}")))?;
+    if let Some(writer) = report.as_mut() {
+        writer.flush().map_err(|error| {
+            AppError::unavailable(format!("cannot flush replay report: {error}"))
+        })?;
     }
     let persisted = memory.len().await.saturating_sub(before);
     println!(
@@ -624,33 +564,34 @@ async fn replay_events_to_memory(
     );
     Ok(())
 }
-async fn replay_stage_records(path: &Path) -> Result<(), AppError>
-{
-    let input = tokio::fs::read_to_string(path).await.map_err(|error|
-    {
-        AppError::unavailable(format!("failed to read OBS stage JSONL {}: {error}", path.display()))
+async fn replay_stage_records(path: &Path) -> Result<(), AppError> {
+    let input = tokio::fs::read_to_string(path).await.map_err(|error| {
+        AppError::unavailable(format!(
+            "failed to read OBS stage JSONL {}: {error}",
+            path.display()
+        ))
     })?;
     let records = parse_records_jsonl(&input)?;
     let mut stage = ObsDryRunStage::new(records.len().max(1))?;
     let count = replay_records(&mut stage, &records).await?;
     println!("OBS dry-run replay complete: records={count}");
-    for record in stage.records()
-    {
-        println!("stage action #{}: {}", record.sequence, record.action.kind());
+    for record in stage.records() {
+        println!(
+            "stage action #{}: {}",
+            record.sequence,
+            record.action.kind()
+        );
     }
     Ok(())
 }
 
-async fn join_speech_worker(task: tokio::task::JoinHandle<()>) -> Result<(), AppError>
-{
+async fn join_speech_worker(task: tokio::task::JoinHandle<()>) -> Result<(), AppError> {
     task.await
         .map_err(|error| AppError::unavailable(format!("speech worker failed: {error}")))
 }
 
-async fn connect_vts(config: &AppConfig) -> VtsClient
-{
-    if !config.vts.enabled
-    {
+async fn connect_vts(config: &AppConfig) -> VtsClient {
+    if !config.vts.enabled {
         return VtsClient::disabled();
     }
     let settings = VtsSettings {
@@ -661,32 +602,26 @@ async fn connect_vts(config: &AppConfig) -> VtsClient
         developer: config.vts.developer.clone(),
         expression_hotkeys: config.vts.expression_hotkeys.clone(),
     };
-    match VtsClient::connect(settings).await
-    {
+    match VtsClient::connect(settings).await {
         Ok(client) => client,
-        Err(error) =>
-        {
+        Err(error) => {
             tracing::warn!(%error, "VTS unavailable; avatar output disabled");
             VtsClient::unavailable(error.to_string())
         }
     }
 }
 
-struct ObsRuntime
-{
+struct ObsRuntime {
     stage: Box<dyn StageExecutor>,
     health: ComponentHealth,
     health_handle: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
     connected: bool,
 }
-fn fallback_obs_stage() -> Box<dyn StageExecutor>
-{
+fn fallback_obs_stage() -> Box<dyn StageExecutor> {
     Box::new(ObsDryRunStage::new(256).expect("valid OBS dry-run capacity"))
 }
-async fn connect_obs(config: &AppConfig) -> ObsRuntime
-{
-    if !config.obs.enabled
-    {
+async fn connect_obs(config: &AppConfig) -> ObsRuntime {
+    if !config.obs.enabled {
         return ObsRuntime {
             stage: fallback_obs_stage(),
             health: obs_stage_health(),
@@ -694,11 +629,9 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
             connected: false,
         };
     }
-    let mut settings = match ObsSettings::new(config.obs.host.clone(), config.obs.port)
-    {
+    let mut settings = match ObsSettings::new(config.obs.host.clone(), config.obs.port) {
         Ok(settings) => settings,
-        Err(error) =>
-        {
+        Err(error) => {
             return ObsRuntime {
                 stage: fallback_obs_stage(),
                 health: ComponentHealth::unavailable("obs-websocket", error.to_string()),
@@ -710,10 +643,8 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
     settings.password = std::env::var(&config.obs.password_env).ok();
     settings.subtitle_input = Some(config.obs.subtitle_input.clone());
     settings.timeout = Duration::from_secs(config.obs.timeout_seconds);
-    match ObsWebSocketStage::connect(settings).await
-    {
-        Ok(stage) =>
-        {
+    match ObsWebSocketStage::connect(settings).await {
+        Ok(stage) => {
             let health = stage.health();
             let health_handle = Some(stage.health_handle());
             ObsRuntime {
@@ -723,8 +654,7 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
                 connected: true,
             }
         }
-        Err(error) =>
-        {
+        Err(error) => {
             tracing::warn!(%error, "OBS WebSocket unavailable; stage output disabled");
             ObsRuntime {
                 stage: fallback_obs_stage(),
@@ -736,8 +666,7 @@ async fn connect_obs(config: &AppConfig) -> ObsRuntime
     }
 }
 
-fn replace_component_health(snapshot: &mut Vec<ComponentHealth>, health: ComponentHealth)
-{
+fn replace_component_health(snapshot: &mut Vec<ComponentHealth>, health: ComponentHealth) {
     snapshot.retain(|item| item.component != health.component);
     snapshot.push(health);
 }
@@ -746,8 +675,7 @@ fn update_component_health(
     snapshot: &mut Vec<ComponentHealth>,
     health: ComponentHealth,
     events: &EventHub,
-)
-{
+) {
     let changed = snapshot
         .iter()
         .find(|item| item.component == health.component)
@@ -756,8 +684,7 @@ fn update_component_health(
     let ready = health.ready;
     let detail = health.detail.clone();
     replace_component_health(snapshot, health);
-    if changed
-    {
+    if changed {
         events.publish_now(SystemEvent::ComponentHealthChanged {
             component,
             ready,
@@ -769,11 +696,9 @@ fn update_component_health(
 async fn publish_health_snapshot(
     health_snapshot: &Arc<RwLock<Vec<ComponentHealth>>>,
     events: &EventHub,
-)
-{
+) {
     let snapshot = health_snapshot.read().await.clone();
-    for health in snapshot
-    {
+    for health in snapshot {
         events.publish_now(SystemEvent::ComponentHealthChanged {
             component: health.component,
             ready: health.ready,
@@ -786,13 +711,10 @@ fn spawn_obs_health_refresh(
     health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
     obs_health: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
     events: EventHub,
-) -> Option<tokio::task::JoinHandle<()>>
-{
+) -> Option<tokio::task::JoinHandle<()>> {
     let obs_health = obs_health?;
-    Some(tokio::spawn(async move
-    {
-        loop
-        {
+    Some(tokio::spawn(async move {
+        loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             let health = obs_health
                 .read()
@@ -808,13 +730,10 @@ fn spawn_bilibili_health_refresh(
     health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
     bilibili_health: Option<std::sync::Arc<std::sync::RwLock<ComponentHealth>>>,
     events: EventHub,
-) -> Option<tokio::task::JoinHandle<()>>
-{
+) -> Option<tokio::task::JoinHandle<()>> {
     let bilibili_health = bilibili_health?;
-    Some(tokio::spawn(async move
-    {
-        loop
-        {
+    Some(tokio::spawn(async move {
+        loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             let health = bilibili_health
                 .read()
@@ -826,70 +745,59 @@ fn spawn_bilibili_health_refresh(
     }))
 }
 
-pub struct StdioAutomationTransport
-{
+pub struct StdioAutomationTransport {
     plugin: StdioPlugin,
 }
 
-impl StdioAutomationTransport
-{
-    pub fn new(plugin: StdioPlugin) -> Self
-    {
+impl StdioAutomationTransport {
+    pub fn new(plugin: StdioPlugin) -> Self {
         Self { plugin }
     }
 }
 
 #[async_trait]
-impl AutomationPluginTransport for StdioAutomationTransport
-{
+impl AutomationPluginTransport for StdioAutomationTransport {
     async fn call(
         &mut self,
         request: AutomationPluginRequest,
-    ) -> Result<AutomationPluginResponse, AppError>
-    {
+    ) -> Result<AutomationPluginResponse, AppError> {
         request.validate()?;
-        let params = serde_json::to_value(&request)
-            .map_err(|error| AppError::protocol(format!("automation plugin request encode failed: {error}")))?;
+        let params = serde_json::to_value(&request).map_err(|error| {
+            AppError::protocol(format!("automation plugin request encode failed: {error}"))
+        })?;
         let value = self.plugin.request("automation", params).await?;
-        let response: AutomationPluginResponse = serde_json::from_value(value)
-            .map_err(|error| AppError::protocol(format!("invalid automation plugin response: {error}")))?;
+        let response: AutomationPluginResponse =
+            serde_json::from_value(value).map_err(|error| {
+                AppError::protocol(format!("invalid automation plugin response: {error}"))
+            })?;
         response.validate()?;
         Ok(response)
     }
 }
-struct PluginRuntime
-{
+struct PluginRuntime {
     registry: PluginRegistry,
     processes: Vec<ManagedPlugin>,
 }
 
-struct ManagedPlugin
-{
+struct ManagedPlugin {
     id: String,
     process: StdioPlugin,
 }
 
-impl PluginRuntime
-{
+impl PluginRuntime {
     fn spawn_health_refresh(
         self,
         health_snapshot: Arc<RwLock<Vec<ComponentHealth>>>,
-    ) -> Option<tokio::task::JoinHandle<()>>
-    {
-        if self.processes.is_empty()
-        {
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        if self.processes.is_empty() {
             return None;
         }
-        Some(tokio::spawn(async move
-        {
+        Some(tokio::spawn(async move {
             let mut runtime = self;
-            loop
-            {
+            loop {
                 tokio::time::sleep(Duration::from_secs(15)).await;
-                for plugin in &mut runtime.processes
-                {
-                    let health = match plugin.process.try_wait()
-                    {
+                for plugin in &mut runtime.processes {
+                    let health = match plugin.process.try_wait() {
                         Ok(Some(status)) => PluginHealth {
                             ready: false,
                             detail: format!("process exited: {status}"),
@@ -915,8 +823,7 @@ impl PluginRuntime
                             },
                         },
                     };
-                    if let Err(error) = runtime.registry.update_health(&plugin.id, health)
-                    {
+                    if let Err(error) = runtime.registry.update_health(&plugin.id, health) {
                         tracing::warn!(plugin = %plugin.id, %error, "plugin health refresh rejected");
                     }
                 }
@@ -924,8 +831,7 @@ impl PluginRuntime
                 let plugin_health = runtime.registry.component_health();
                 let mut snapshot = health_snapshot.write().await;
                 snapshot.retain(|item| {
-                    item.component != "plugin-registry"
-                        && !item.component.starts_with("plugin:")
+                    item.component != "plugin-registry" && !item.component.starts_with("plugin:")
                 });
                 snapshot.push(registry_health);
                 snapshot.extend(plugin_health);
@@ -933,67 +839,51 @@ impl PluginRuntime
         }))
     }
 }
-async fn connect_plugins(config: &PluginConfig) -> PluginRuntime
-{
+async fn connect_plugins(config: &PluginConfig) -> PluginRuntime {
     let mut registry = PluginRegistry::new();
     let mut processes = Vec::new();
-    if !config.enabled
-    {
+    if !config.enabled {
         return PluginRuntime {
             registry,
             processes,
         };
     }
-    for command in &config.commands
-    {
-        let mut plugin = match StdioPlugin::spawn(&command.program, &command.args)
-        {
+    for command in &config.commands {
+        let mut plugin = match StdioPlugin::spawn(&command.program, &command.args) {
             Ok(plugin) => plugin,
-            Err(error) =>
-            {
+            Err(error) => {
                 tracing::warn!(plugin = %command.id, %error, "plugin process unavailable");
                 let _ignored = registry.register_unavailable(&command.id, error.to_string());
                 continue;
             }
         };
-        let manifest = match tokio::time::timeout(
-            Duration::from_secs(5),
-            plugin.manifest(),
-        )
-        .await
-        {
+        let manifest = match tokio::time::timeout(Duration::from_secs(5), plugin.manifest()).await {
             Ok(result) => result,
             Err(_) => Err(AppError::connectivity("plugin manifest request timed out")),
         };
-        let manifest = match manifest
-        {
+        let manifest = match manifest {
             Ok(manifest) if manifest.id == command.id => manifest,
-            Ok(manifest) =>
-            {
+            Ok(manifest) => {
                 let detail = format!(
                     "manifest id mismatch: configured={}, reported={}",
-                    command.id,
-                    manifest.id,
+                    command.id, manifest.id,
                 );
                 tracing::warn!(plugin = %command.id, "plugin manifest rejected");
                 let _ignored = registry.register_unavailable(&command.id, detail);
                 continue;
             }
-            Err(error) =>
-            {
+            Err(error) => {
                 tracing::warn!(plugin = %command.id, %error, "plugin manifest unavailable");
                 let _ignored = registry.register_unavailable(&command.id, error.to_string());
                 continue;
             }
         };
-        if let Err(error) = registry.register(manifest)
-        {
+        if let Err(error) = registry.register(manifest) {
             tracing::warn!(plugin = %command.id, %error, "plugin registration rejected");
             let _ignored = registry.register_unavailable(&command.id, error.to_string());
             continue;
         }
-        let health = match tokio::time::timeout(Duration::from_secs(5), plugin.health()).await
-        {
+        let health = match tokio::time::timeout(Duration::from_secs(5), plugin.health()).await {
             Ok(Ok(health)) => health,
             Ok(Err(error)) => PluginHealth {
                 ready: false,
@@ -1004,19 +894,20 @@ async fn connect_plugins(config: &PluginConfig) -> PluginRuntime
                 detail: "plugin health request timed out".to_owned(),
             },
         };
-        if let Err(error) = registry.update_health(&command.id, health)
-        {
+        if let Err(error) = registry.update_health(&command.id, health) {
             tracing::warn!(plugin = %command.id, %error, "plugin health update rejected");
         }
-        processes.push(ManagedPlugin { id: command.id.clone(), process: plugin });
+        processes.push(ManagedPlugin {
+            id: command.id.clone(),
+            process: plugin,
+        });
     }
     PluginRuntime {
         registry,
         processes,
     }
 }
-struct HealthContext<'a>
-{
+struct HealthContext<'a> {
     model: &'a ConfiguredModel,
     vts: &'a VtsClient,
     obs: &'a ComponentHealth,
@@ -1031,13 +922,14 @@ struct HealthContext<'a>
     config: &'a AppConfig,
 }
 
-async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
-{
+async fn run_check(context: HealthContext<'_>) -> Result<(), AppError> {
     let health = collect_health(context).await;
-    println!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&health).unwrap_or_default()
+    );
     let failed: Vec<&ComponentHealth> = health.iter().filter(|item| !item.ready).collect();
-    if !failed.is_empty()
-    {
+    if !failed.is_empty() {
         return Err(AppError::unavailable(format!(
             "{} component(s) unavailable",
             failed.len()
@@ -1046,8 +938,7 @@ async fn run_check(context: HealthContext<'_>) -> Result<(), AppError>
     Ok(())
 }
 
-async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
-{
+async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth> {
     let mut health = vec![
         context.model.health().await,
         context.vts.health().clone(),
@@ -1056,42 +947,32 @@ async fn collect_health(context: HealthContext<'_>) -> Vec<ComponentHealth>
         context.memory.health().await,
         context.safety.health(),
     ];
-    if let Some(tts) = context.tts
-    {
+    if let Some(tts) = context.tts {
         health.push(tts.health().await);
         health.push(context.player.health().await);
     }
-    if context.config.duplex.enabled
-    {
-        match build_asr(context.config)
-        {
+    if context.config.duplex.enabled {
+        match build_asr(context.config) {
             Ok(asr) => health.push(asr.health().await),
-            Err(error) => health.push(ComponentHealth::unavailable(
-                "asr",
-                error.to_string(),
-            )),
+            Err(error) => health.push(ComponentHealth::unavailable("asr", error.to_string())),
         }
         health.push(capture_health(context.config));
     }
-    if context.config.control.enabled
-    {
+    if context.config.control.enabled {
         health.push(control_health(context.config).await);
     }
-    if let Some(audit) = context.audit
-    {
+    if let Some(audit) = context.audit {
         health.push(audit.health());
     }
     health.push(context.plugins.health());
     health.extend(context.plugins.component_health());
-    if let Some(vision) = context.vision
-    {
+    if let Some(vision) = context.vision {
         health.push(vision.health().await);
     }
     health
 }
 
-fn obs_stage_health() -> ComponentHealth
-{
+fn obs_stage_health() -> ComponentHealth {
     ComponentHealth {
         component: "obs-dry-run".to_owned(),
         ready: true,
@@ -1104,30 +985,25 @@ async fn run_speech_worker(
     tts: Option<GptSovitsClient>,
     player: AudioPlayer,
     events: EventHub,
-)
-{
-    while let Some(job) = receiver.receive().await
-    {
-        let Some(tts) = &tts else
-        {
+) {
+    while let Some(job) = receiver.receive().await {
+        let Some(tts) = &tts else {
             tracing::debug!(turn_id = ?job.turn_id, "TTS disabled; speech job skipped");
             continue;
         };
-        let synthesis = tokio::select!
-        {
+        let synthesis = tokio::select! {
             biased;
             _ = player.wait_for_cancellation(&job) => continue,
             result = tts.synthesize(&job.text) => result,
         };
-        match synthesis
-        {
-            Ok(audio) =>
-            {
+        match synthesis {
+            Ok(audio) => {
                 let playback_events = playback::PlaybackPublisher::new(events.clone());
-                if let Err(error) = player.play_wav_observed(&job, audio.bytes, move |playback|
-                {
-                    playback_events.observe(playback);
-                }).await
+                if let Err(error) = player
+                    .play_wav_observed(&job, audio.bytes, move |playback| {
+                        playback_events.observe(playback);
+                    })
+                    .await
                 {
                     tracing::error!(%error, "audio playback failed");
                 }
@@ -1137,10 +1013,8 @@ async fn run_speech_worker(
     }
 }
 
-async fn build_tts(config: &AppConfig) -> Result<Option<GptSovitsClient>, AppError>
-{
-    if !config.tts.enabled
-    {
+async fn build_tts(config: &AppConfig) -> Result<Option<GptSovitsClient>, AppError> {
+    if !config.tts.enabled {
         return Ok(None);
     }
     let reference = tokio::fs::canonicalize(&config.tts.ref_audio_path)
@@ -1162,8 +1036,7 @@ async fn build_tts(config: &AppConfig) -> Result<Option<GptSovitsClient>, AppErr
     Ok(Some(GptSovitsClient::new(settings)?))
 }
 
-fn build_safety(config: &AppConfig) -> Result<SafetyGate, AppError>
-{
+fn build_safety(config: &AppConfig) -> Result<SafetyGate, AppError> {
     let capabilities = config
         .safety
         .allowed_capabilities
@@ -1184,19 +1057,15 @@ fn build_safety(config: &AppConfig) -> Result<SafetyGate, AppError>
     }))
 }
 
-async fn build_audit(config: &AppConfig) -> Result<Option<JsonlAuditLog>, AppError>
-{
-    if !config.safety.automation_enabled
-    {
+async fn build_audit(config: &AppConfig) -> Result<Option<JsonlAuditLog>, AppError> {
+    if !config.safety.automation_enabled {
         return Ok(None);
     }
     Ok(Some(JsonlAuditLog::open(&config.safety.audit_path).await?))
 }
 
-fn build_vision(config: &AppConfig) -> Result<Option<OllamaVisionClient>, AppError>
-{
-    if !config.vision.enabled
-    {
+fn build_vision(config: &AppConfig) -> Result<Option<OllamaVisionClient>, AppError> {
+    if !config.vision.enabled {
         return Ok(None);
     }
     Ok(Some(OllamaVisionClient::new(OllamaVisionSettings {
@@ -1206,17 +1075,14 @@ fn build_vision(config: &AppConfig) -> Result<Option<OllamaVisionClient>, AppErr
     })?))
 }
 
-fn build_model(config: &AppConfig) -> Result<ConfiguredModel, AppError>
-{
-    match config.model.backend
-    {
+fn build_model(config: &AppConfig) -> Result<ConfiguredModel, AppError> {
+    match config.model.backend {
         ModelBackend::Ollama => Ok(ConfiguredModel::Ollama(OllamaClient::new(
             &config.ollama.base_url,
             &config.ollama.model,
             Duration::from_secs(config.ollama.timeout_seconds),
         )?)),
-        ModelBackend::DeepSeek =>
-        {
+        ModelBackend::DeepSeek => {
             let api_key = std::env::var(&config.deepseek.api_key_env).map_err(|_| {
                 AppError::configuration(format!(
                     "DeepSeek API key environment variable {} is not set",
@@ -1234,24 +1100,20 @@ fn build_model(config: &AppConfig) -> Result<ConfiguredModel, AppError>
                 },
             )?))
         }
-        ModelBackend::KoboldCpp => {
-            Ok(ConfiguredModel::KoboldCpp(KoboldCppClient::new(
-                KoboldCppSettings {
-                    base_url: config.koboldcpp.base_url.clone(),
-                    timeout: Duration::from_secs(config.koboldcpp.timeout_seconds),
-                    max_context_length: config.koboldcpp.max_context_length,
-                    max_length: config.koboldcpp.max_length,
-                    temperature: config.koboldcpp.temperature,
-                },
-            )?))
-        }
+        ModelBackend::KoboldCpp => Ok(ConfiguredModel::KoboldCpp(KoboldCppClient::new(
+            KoboldCppSettings {
+                base_url: config.koboldcpp.base_url.clone(),
+                timeout: Duration::from_secs(config.koboldcpp.timeout_seconds),
+                max_context_length: config.koboldcpp.max_context_length,
+                max_length: config.koboldcpp.max_length,
+                temperature: config.koboldcpp.temperature,
+            },
+        )?)),
     }
 }
 
-fn build_asr(config: &AppConfig) -> Result<WhisperHttpTranscriber, AppError>
-{
-    let language = match config.duplex.asr.language.trim()
-    {
+fn build_asr(config: &AppConfig) -> Result<WhisperHttpTranscriber, AppError> {
+    let language = match config.duplex.asr.language.trim() {
         "" => None,
         language => Some(language.to_owned()),
     };
@@ -1264,8 +1126,7 @@ fn build_asr(config: &AppConfig) -> Result<WhisperHttpTranscriber, AppError>
 }
 
 #[derive(Clone)]
-struct ServiceControl
-{
+struct ServiceControl {
     runtime: RuntimeHandle,
     events: EventHub,
     safety: Arc<SafetyGate>,
@@ -1275,47 +1136,39 @@ struct ServiceControl
 }
 
 #[async_trait::async_trait]
-impl ControlBackend for ServiceControl
-{
-    async fn execute(&self, command: ControlCommand) -> Result<ControlPayload, AppError>
-    {
-        match command
-        {
-            ControlCommand::Submit { text } =>
-            {
+impl ControlBackend for ServiceControl {
+    async fn execute(&self, command: ControlCommand) -> Result<ControlPayload, AppError> {
+        match command {
+            ControlCommand::Submit { text } => {
                 let text = text.trim();
-                if text.is_empty()
-                {
-                    return Err(AppError::configuration("control submit text must not be empty"));
+                if text.is_empty() {
+                    return Err(AppError::configuration(
+                        "control submit text must not be empty",
+                    ));
                 }
                 let runtime = self.runtime.clone();
                 let text = text.to_owned();
-                tokio::spawn(async move
-                {
-                    if let Err(error) = runtime.submit(text).await
-                    {
+                tokio::spawn(async move {
+                    if let Err(error) = runtime.submit(text).await {
                         tracing::error!(%error, "control turn failed");
                     }
                 });
                 Ok(ControlPayload::Accepted)
             }
-            ControlCommand::Interrupt { reason } =>
-            {
-                let reason = if reason.trim().is_empty()
-                {
+            ControlCommand::Interrupt { reason } => {
+                let reason = if reason.trim().is_empty() {
                     "control interrupt"
-                }
-                else
-                {
+                } else {
                     reason.trim()
                 };
                 self.runtime.interrupt(reason).await?;
                 Ok(ControlPayload::Accepted)
             }
             ControlCommand::Status => Ok(ControlPayload::Snapshot(self.events.current())),
-            ControlCommand::Persona => Ok(ControlPayload::Persona(self.persona.read().await.clone())),
-            ControlCommand::SetPersona { profile } =>
-            {
+            ControlCommand::Persona => {
+                Ok(ControlPayload::Persona(self.persona.read().await.clone()))
+            }
+            ControlCommand::SetPersona { profile } => {
                 profile.validate()?;
                 // Serialize identity updates and snapshots across the actor acknowledgement.
                 let mut current = self.persona.write().await;
@@ -1326,23 +1179,25 @@ impl ControlBackend for ServiceControl
                 let revision = profile.revision;
                 *current = profile;
                 tracing::info!(%profile_id, revision, "persona changed");
-                self.events.publish_now(SystemEvent::PersonaChanged { profile_id, revision });
+                self.events.publish_now(SystemEvent::PersonaChanged {
+                    profile_id,
+                    revision,
+                });
                 Ok(ControlPayload::Accepted)
-            },
+            }
             ControlCommand::Stage => Ok(ControlPayload::Stage(self.stage.snapshot())),
             ControlCommand::Health => Ok(ControlPayload::Health(self.health.read().await.clone())),
-            ControlCommand::Events { after, limit } =>
-            {
-                if limit == 0 || limit > 1_000
-                {
+            ControlCommand::Events { after, limit } => {
+                if limit == 0 || limit > 1_000 {
                     return Err(AppError::configuration(
                         "control event limit must be between 1 and 1000",
                     ));
                 }
-                Ok(ControlPayload::Events(self.events.events_since(after, limit)))
+                Ok(ControlPayload::Events(
+                    self.events.events_since(after, limit),
+                ))
             }
-            ControlCommand::EmergencyStop =>
-            {
+            ControlCommand::EmergencyStop => {
                 self.safety.trigger_emergency_stop();
                 if let Err(error) = self.runtime.interrupt("emergency stop").await
                     && error.kind != ErrorKind::InvalidTransition
@@ -1362,10 +1217,8 @@ async fn spawn_control(
     safety: Arc<SafetyGate>,
     health: Arc<RwLock<Vec<ComponentHealth>>>,
     stage: StageJournal,
-) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
-{
-    if !config.control.enabled
-    {
+) -> Result<Option<tokio::task::JoinHandle<()>>, AppError> {
+    if !config.control.enabled {
         return Ok(None);
     }
     let token = tokio::fs::read_to_string(&config.control.token_path)
@@ -1402,24 +1255,22 @@ async fn spawn_control(
         stage,
     });
     tracing::info!(%address, "local control server ready");
-    Ok(Some(tokio::spawn(async move
-    {
-        if let Err(error) = server.serve(backend).await
-        {
+    Ok(Some(tokio::spawn(async move {
+        if let Err(error) = server.serve(backend).await {
             tracing::error!(%error, "control server stopped");
         }
     })))
 }
 
-async fn control_health(config: &AppConfig) -> ComponentHealth
-{
-    let token = match tokio::fs::read_to_string(&config.control.token_path).await
-    {
+async fn control_health(config: &AppConfig) -> ComponentHealth {
+    let token = match tokio::fs::read_to_string(&config.control.token_path).await {
         Ok(token) => token,
-        Err(error) => return ComponentHealth::unavailable(
-            "control",
-            format!("cannot read token file: {error}"),
-        ),
+        Err(error) => {
+            return ComponentHealth::unavailable(
+                "control",
+                format!("cannot read token file: {error}"),
+            );
+        }
     };
     match ControlServer::bind(
         &config.control.bind,
@@ -1428,8 +1279,7 @@ async fn control_health(config: &AppConfig) -> ComponentHealth
     )
     .await
     {
-        Ok(server) => match server.local_addr()
-        {
+        Ok(server) => match server.local_addr() {
             Ok(address) => ComponentHealth {
                 component: "control".to_owned(),
                 ready: true,
@@ -1442,8 +1292,7 @@ async fn control_health(config: &AppConfig) -> ComponentHealth
 }
 
 #[cfg(not(feature = "native-capture"))]
-fn capture_health(_config: &AppConfig) -> ComponentHealth
-{
+fn capture_health(_config: &AppConfig) -> ComponentHealth {
     ComponentHealth::unavailable(
         "audio-input",
         "binary was built without the native-capture feature",
@@ -1451,10 +1300,8 @@ fn capture_health(_config: &AppConfig) -> ComponentHealth
 }
 
 #[cfg(feature = "native-capture")]
-fn capture_health(config: &AppConfig) -> ComponentHealth
-{
-    let device_name = match config.duplex.input_device.trim()
-    {
+fn capture_health(config: &AppConfig) -> ComponentHealth {
+    let device_name = match config.duplex.input_device.trim() {
         "" => None,
         name => Some(name.to_owned()),
     };
@@ -1462,8 +1309,7 @@ fn capture_health(config: &AppConfig) -> ComponentHealth
         device_name,
         queue_capacity: config.duplex.capture_queue_capacity,
     };
-    match NativeAudioSource::open(settings)
-    {
+    match NativeAudioSource::open(settings) {
         Ok(_source) => ComponentHealth::ready("audio-input"),
         Err(error) => ComponentHealth::unavailable("audio-input", error.to_string()),
     }
@@ -1473,10 +1319,8 @@ fn capture_health(config: &AppConfig) -> ComponentHealth
 fn spawn_duplex(
     config: &AppConfig,
     _runtime: RuntimeHandle,
-) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
-{
-    if config.duplex.enabled
-    {
+) -> Result<Option<tokio::task::JoinHandle<()>>, AppError> {
+    if config.duplex.enabled {
         return Err(AppError::configuration(
             "duplex is enabled but this binary lacks the native-capture feature",
         ));
@@ -1488,14 +1332,11 @@ fn spawn_duplex(
 fn spawn_duplex(
     config: &AppConfig,
     runtime: RuntimeHandle,
-) -> Result<Option<tokio::task::JoinHandle<()>>, AppError>
-{
-    if !config.duplex.enabled
-    {
+) -> Result<Option<tokio::task::JoinHandle<()>>, AppError> {
+    if !config.duplex.enabled {
         return Ok(None);
     }
-    let device_name = match config.duplex.input_device.trim()
-    {
+    let device_name = match config.duplex.input_device.trim() {
         "" => None,
         name => Some(name.to_owned()),
     };
@@ -1512,10 +1353,8 @@ fn spawn_duplex(
         max_utterance_frames: config.duplex.max_utterance_frames,
     })?;
     let controller = DuplexController::new(vad, transcriber);
-    Ok(Some(tokio::spawn(async move
-    {
-        if let Err(error) = run_duplex(source, controller, runtime).await
-        {
+    Ok(Some(tokio::spawn(async move {
+        if let Err(error) = run_duplex(source, controller, runtime).await {
             tracing::error!(%error, "full-duplex input stopped");
         }
     })))
@@ -1526,31 +1365,23 @@ async fn run_duplex(
     mut source: NativeAudioSource,
     mut controller: DuplexController<WhisperHttpTranscriber>,
     runtime: RuntimeHandle,
-) -> Result<(), AppError>
-{
-    while let Some(frame) = source.next_frame().await?
-    {
-        let Some(directive) = controller.process_frame(frame).await? else
-        {
+) -> Result<(), AppError> {
+    while let Some(frame) = source.next_frame().await? {
+        let Some(directive) = controller.process_frame(frame).await? else {
             continue;
         };
-        match directive
-        {
-            DuplexDirective::InterruptCurrentTurn =>
-            {
+        match directive {
+            DuplexDirective::InterruptCurrentTurn => {
                 if let Err(error) = runtime.interrupt("voice barge-in").await
                     && error.kind != ErrorKind::InvalidTransition
                 {
                     return Err(error);
                 }
             }
-            DuplexDirective::SubmitTranscript(transcript) =>
-            {
+            DuplexDirective::SubmitTranscript(transcript) => {
                 let runtime = runtime.clone();
-                tokio::spawn(async move
-                {
-                    if let Err(error) = runtime.submit(transcript).await
-                    {
+                tokio::spawn(async move {
+                    if let Err(error) = runtime.submit(transcript).await {
                         tracing::error!(%error, "transcribed turn failed");
                     }
                 });
@@ -1560,14 +1391,12 @@ async fn run_duplex(
     Ok(())
 }
 #[cfg(test)]
-mod tests
-{
-    use super::{reaction_allowed, replace_component_health, LiveResponseMode};
+mod tests {
+    use super::{LiveResponseMode, reaction_allowed, replace_component_health};
     use ai_ex_domain::ComponentHealth;
 
     #[test]
-    fn replaces_obs_health_without_duplicate_entries()
-    {
+    fn replaces_obs_health_without_duplicate_entries() {
         let mut snapshot = vec![
             ComponentHealth::ready("model"),
             ComponentHealth::ready("obs-websocket"),
@@ -1576,7 +1405,13 @@ mod tests
             &mut snapshot,
             ComponentHealth::unavailable("obs-websocket", "socket closed"),
         );
-        assert_eq!(snapshot.iter().filter(|item| item.component == "obs-websocket").count(), 1);
+        assert_eq!(
+            snapshot
+                .iter()
+                .filter(|item| item.component == "obs-websocket")
+                .count(),
+            1
+        );
         let obs = snapshot
             .iter()
             .find(|item| item.component == "obs-websocket")
@@ -1585,12 +1420,41 @@ mod tests
         assert_eq!(obs.detail, "socket closed");
     }
     #[test]
-    fn reaction_policy_requires_opt_in_and_cooldown()
-    {
-        assert!(!reaction_allowed(LiveResponseMode::Suggest, false, None, 10, 5));
-        assert!(!reaction_allowed(LiveResponseMode::Automatic, true, None, 10, 5));
-        assert!(reaction_allowed(LiveResponseMode::Automatic, false, None, 10, 5));
-        assert!(!reaction_allowed(LiveResponseMode::Automatic, false, Some(8), 10, 5));
-        assert!(reaction_allowed(LiveResponseMode::Automatic, false, Some(4), 10, 5));
+    fn reaction_policy_requires_opt_in_and_cooldown() {
+        assert!(!reaction_allowed(
+            LiveResponseMode::Suggest,
+            false,
+            None,
+            10,
+            5
+        ));
+        assert!(!reaction_allowed(
+            LiveResponseMode::Automatic,
+            true,
+            None,
+            10,
+            5
+        ));
+        assert!(reaction_allowed(
+            LiveResponseMode::Automatic,
+            false,
+            None,
+            10,
+            5
+        ));
+        assert!(!reaction_allowed(
+            LiveResponseMode::Automatic,
+            false,
+            Some(8),
+            10,
+            5
+        ));
+        assert!(reaction_allowed(
+            LiveResponseMode::Automatic,
+            false,
+            Some(4),
+            10,
+            5
+        ));
     }
 }

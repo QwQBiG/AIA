@@ -1,12 +1,7 @@
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-pub fn authentication(
-    token: &str,
-    plugin_name: &str,
-    developer: &str,
-) -> Value
-{
+pub fn authentication(token: &str, plugin_name: &str, developer: &str) -> Value {
     envelope(
         "AuthenticationRequest",
         json!({
@@ -17,8 +12,7 @@ pub fn authentication(
     )
 }
 
-pub fn mouth_open(value: f64) -> Value
-{
+pub fn mouth_open(value: f64) -> Value {
     envelope(
         "InjectParameterDataRequest",
         json!({
@@ -33,16 +27,11 @@ pub fn mouth_open(value: f64) -> Value
     )
 }
 
-pub fn trigger_hotkey(hotkey_id: &str) -> Value
-{
-    envelope(
-        "HotkeyTriggerRequest",
-        json!({ "hotkeyID": hotkey_id }),
-    )
+pub fn trigger_hotkey(hotkey_id: &str) -> Value {
+    envelope("HotkeyTriggerRequest", json!({ "hotkeyID": hotkey_id }))
 }
 
-pub fn authenticated(response: &Value) -> bool
-{
+pub fn authenticated(response: &Value) -> bool {
     response
         .get("data")
         .and_then(|data| data.get("authenticated"))
@@ -50,8 +39,7 @@ pub fn authenticated(response: &Value) -> bool
         .unwrap_or(false)
 }
 
-fn envelope(message_type: &str, data: Value) -> Value
-{
+fn envelope(message_type: &str, data: Value) -> Value {
     json!({
         "apiName": "VTubeStudioPublicAPI",
         "apiVersion": "1.0",
@@ -62,15 +50,12 @@ fn envelope(message_type: &str, data: Value) -> Value
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn clamps_mouth_parameter()
-    {
+    fn clamps_mouth_parameter() {
         let request = mouth_open(2.0);
         assert_eq!(request["data"]["parameterValues"][0]["value"], 1.0);
     }
 }
-

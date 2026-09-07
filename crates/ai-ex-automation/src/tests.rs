@@ -7,45 +7,36 @@ use async_trait::async_trait;
 
 use super::*;
 
-struct MockPort
-{
+struct MockPort {
     calls: Arc<Mutex<usize>>,
     fail: bool,
 }
 
 #[async_trait]
-impl AutomationPort for MockPort
-{
+impl AutomationPort for MockPort {
     async fn execute(
         &mut self,
         permit: &Permit,
         _action: &AutomationAction,
-    ) -> Result<ActionResult, AppError>
-    {
+    ) -> Result<ActionResult, AppError> {
         permit.ensure_active()?;
         *self.calls.lock().unwrap() += 1;
-        if self.fail
-        {
+        if self.fail {
             Err(AppError::unavailable("adapter failed"))
-        }
-        else
-        {
+        } else {
             Ok(ActionResult::Completed)
         }
     }
 }
 
-struct RecordingAudit
-{
+struct RecordingAudit {
     records: Arc<Mutex<Vec<AuditRecord>>>,
     stop_after_authorize: Option<Arc<SafetyGate>>,
 }
 
 #[async_trait]
-impl AuditSink for RecordingAudit
-{
-    async fn record(&mut self, record: AuditRecord) -> Result<(), AppError>
-    {
+impl AuditSink for RecordingAudit {
+    async fn record(&mut self, record: AuditRecord) -> Result<(), AppError> {
         if record.stage == AuditStage::Authorized
             && let Some(gate) = &self.stop_after_authorize
         {
@@ -56,31 +47,21 @@ impl AuditSink for RecordingAudit
     }
 }
 
-fn gate() -> Arc<SafetyGate>
-{
+fn gate() -> Arc<SafetyGate> {
     Arc::new(SafetyGate::new(SafetyPolicy {
         automation_enabled: true,
-        allowed_capabilities: BTreeSet::from([
-            Capability::KeyboardInput,
-            Capability::ScreenRead,
-        ]),
+        allowed_capabilities: BTreeSet::from([Capability::KeyboardInput, Capability::ScreenRead]),
         allowed_targets: vec!["game".to_owned()],
     }))
 }
 
-struct Harness
-{
+struct Harness {
     coordinator: AutomationCoordinator<MockPort, RecordingAudit>,
     calls: Arc<Mutex<usize>>,
     records: Arc<Mutex<Vec<AuditRecord>>>,
 }
 
-fn coordinator(
-    gate: Arc<SafetyGate>,
-    fail: bool,
-    stop_after_authorize: bool,
-) -> Harness
-{
+fn coordinator(gate: Arc<SafetyGate>, fail: bool, stop_after_authorize: bool) -> Harness {
     let calls = Arc::new(Mutex::new(0));
     let records = Arc::new(Mutex::new(Vec::new()));
     let coordinator = AutomationCoordinator::new(
@@ -102,8 +83,7 @@ fn coordinator(
 }
 
 #[tokio::test]
-async fn executes_with_durable_pre_audit_and_redacts_typed_text()
-{
+async fn executes_with_durable_pre_audit_and_redacts_typed_text() {
     let mut harness = coordinator(gate(), false, false);
     let receipt = harness
         .coordinator
@@ -124,12 +104,15 @@ async fn executes_with_durable_pre_audit_and_redacts_typed_text()
     assert_eq!(records[0].stage, AuditStage::Requested);
     assert_eq!(records[1].stage, AuditStage::Authorized);
     assert_eq!(records[2].stage, AuditStage::Completed);
-    assert!(records.iter().all(|record| !record.action.contains("private message")));
+    assert!(
+        records
+            .iter()
+            .all(|record| !record.action.contains("private message"))
+    );
 }
 
 #[tokio::test]
-async fn emergency_stop_between_authorization_and_execution_is_fail_closed()
-{
+async fn emergency_stop_between_authorization_and_execution_is_fail_closed() {
     let gate = gate();
     let mut harness = coordinator(gate, false, true);
     let failure = harness
@@ -147,8 +130,7 @@ async fn emergency_stop_between_authorization_and_execution_is_fail_closed()
 }
 
 #[tokio::test]
-async fn adapter_failure_is_not_marked_safe_to_retry()
-{
+async fn adapter_failure_is_not_marked_safe_to_retry() {
     let mut harness = coordinator(gate(), true, false);
     let failure = harness
         .coordinator

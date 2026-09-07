@@ -10,7 +10,6 @@ pub use ollama::{OllamaVisionClient, OllamaVisionSettings};
 pub use types::{ImageMediaType, VisionObservation, VisionRequest, VisualFrame};
 
 #[async_trait]
-pub trait VisionAnalyzerPort: Send
-{
+pub trait VisionAnalyzerPort: Send {
     async fn analyze(&mut self, request: VisionRequest) -> Result<VisionObservation, AppError>;
 }

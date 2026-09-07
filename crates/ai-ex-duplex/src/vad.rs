@@ -3,14 +3,12 @@ use ai_ex_domain::AppError;
 use crate::{AudioFrame, Utterance, VadConfig, VadEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State
-{
+enum State {
     Silent,
     Speaking,
 }
 
-pub struct EnergyVad
-{
+pub struct EnergyVad {
     config: VadConfig,
     state: State,
     hot_frames: usize,
@@ -22,10 +20,8 @@ pub struct EnergyVad
     channels: u16,
 }
 
-impl EnergyVad
-{
-    pub fn new(config: VadConfig) -> Result<Self, AppError>
-    {
+impl EnergyVad {
+    pub fn new(config: VadConfig) -> Result<Self, AppError> {
         config.validate()?;
         Ok(Self {
             config,
@@ -40,8 +36,7 @@ impl EnergyVad
         })
     }
 
-    pub fn process(&mut self, frame: AudioFrame) -> Result<Option<VadEvent>, AppError>
-    {
+    pub fn process(&mut self, frame: AudioFrame) -> Result<Option<VadEvent>, AppError> {
         if self.sample_rate != 0
             && (frame.sample_rate != self.sample_rate || frame.channels != self.channels)
         {
@@ -50,17 +45,14 @@ impl EnergyVad
             ));
         }
         let rms = frame.rms();
-        match self.state
-        {
+        match self.state {
             State::Silent => self.process_silence(frame, rms),
             State::Speaking => Ok(Some(self.process_speech(frame, rms))),
         }
     }
 
-    pub fn flush(&mut self) -> Option<VadEvent>
-    {
-        if self.state == State::Speaking && !self.utterance.is_empty()
-        {
+    pub fn flush(&mut self) -> Option<VadEvent> {
+        if self.state == State::Speaking && !self.utterance.is_empty() {
             return Some(VadEvent::SpeechEnded(self.take_utterance()));
         }
         self.reset();
@@ -71,25 +63,21 @@ impl EnergyVad
         &mut self,
         frame: AudioFrame,
         rms: f32,
-    ) -> Result<Option<VadEvent>, AppError>
-    {
-        if rms < self.config.start_threshold
-        {
+    ) -> Result<Option<VadEvent>, AppError> {
+        if rms < self.config.start_threshold {
             self.hot_frames = 0;
             self.candidate.clear();
             self.sample_rate = 0;
             self.channels = 0;
             return Ok(None);
         }
-        if self.hot_frames == 0
-        {
+        if self.hot_frames == 0 {
             self.sample_rate = frame.sample_rate;
             self.channels = frame.channels;
         }
         self.hot_frames += 1;
         self.candidate.extend(frame.samples);
-        if self.hot_frames < self.config.start_frames
-        {
+        if self.hot_frames < self.config.start_frames {
             return Ok(None);
         }
         self.state = State::Speaking;
@@ -98,31 +86,24 @@ impl EnergyVad
         Ok(Some(VadEvent::SpeechStarted))
     }
 
-    fn process_speech(&mut self, frame: AudioFrame, rms: f32) -> VadEvent
-    {
+    fn process_speech(&mut self, frame: AudioFrame, rms: f32) -> VadEvent {
         self.utterance.extend(frame.samples);
         self.speech_frames += 1;
-        if rms < self.config.continue_threshold
-        {
+        if rms < self.config.continue_threshold {
             self.silence_frames += 1;
-        }
-        else
-        {
+        } else {
             self.silence_frames = 0;
         }
         if self.silence_frames >= self.config.end_silence_frames
             || self.speech_frames >= self.config.max_utterance_frames
         {
             VadEvent::SpeechEnded(self.take_utterance())
-        }
-        else
-        {
+        } else {
             VadEvent::SpeechContinued
         }
     }
 
-    fn take_utterance(&mut self) -> Utterance
-    {
+    fn take_utterance(&mut self) -> Utterance {
         let utterance = Utterance {
             samples: std::mem::take(&mut self.utterance),
             sample_rate: self.sample_rate,
@@ -132,8 +113,7 @@ impl EnergyVad
         utterance
     }
 
-    fn reset(&mut self)
-    {
+    fn reset(&mut self) {
         self.state = State::Silent;
         self.hot_frames = 0;
         self.silence_frames = 0;

@@ -9,20 +9,16 @@ use crate::{LanguageModelPort, ModelRequest};
 ///
 /// This keeps existing providers usable while new providers can implement
 /// `ai_ex_protocol::ModelBackend` directly without changing the runtime.
-pub struct LegacyModelBackend<M>
-{
+pub struct LegacyModelBackend<M> {
     inner: M,
 }
 
-impl<M> LegacyModelBackend<M>
-{
-    pub fn new(inner: M) -> Self
-    {
+impl<M> LegacyModelBackend<M> {
+    pub fn new(inner: M) -> Self {
         Self { inner }
     }
 
-    pub fn into_inner(self) -> M
-    {
+    pub fn into_inner(self) -> M {
         self.inner
     }
 }
@@ -32,24 +28,21 @@ impl<M> ModelBackend for LegacyModelBackend<M>
 where
     M: LanguageModelPort + Send + Sync,
 {
-    fn capabilities(&self) -> CapabilitySet
-    {
+    fn capabilities(&self) -> CapabilitySet {
         CapabilitySet {
             cancellation: true,
             ..CapabilitySet::text_only()
         }
     }
 
-    async fn health(&self) -> ComponentHealth
-    {
+    async fn health(&self) -> ComponentHealth {
         ComponentHealth::ready("legacy-model-adapter")
     }
 
     async fn stream(
         &mut self,
         request: VersionedModelRequest,
-    ) -> Result<ai_ex_protocol::ModelStream, AppError>
-    {
+    ) -> Result<ai_ex_protocol::ModelStream, AppError> {
         let turn_id = request.turn_id;
         let legacy_request = ModelRequest {
             turn_id,
@@ -57,14 +50,10 @@ where
         };
         let mut source = self.inner.stream(legacy_request).await?;
         let (sender, receiver) = mpsc::channel(32);
-        tokio::spawn(async move
-        {
-            while let Some(item) = source.recv().await
-            {
-                match item
-                {
-                    Ok(text) =>
-                    {
+        tokio::spawn(async move {
+            while let Some(item) = source.recv().await {
+                match item {
+                    Ok(text) => {
                         if sender
                             .send(Ok(ai_ex_protocol::ModelStreamEvent::TextDelta {
                                 turn_id,
@@ -76,8 +65,7 @@ where
                             return;
                         }
                     }
-                    Err(error) =>
-                    {
+                    Err(error) => {
                         let _ignored = sender
                             .send(Ok(ai_ex_protocol::ModelStreamEvent::Failed {
                                 turn_id,
@@ -98,14 +86,12 @@ where
         Ok(receiver)
     }
 
-    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError>
-    {
+    async fn cancel(&mut self, turn_id: TurnId) -> Result<(), AppError> {
         self.inner.cancel(turn_id).await
     }
 }
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use ai_ex_domain::{Message, Role};
     use ai_ex_protocol::{ModelBackend, ModelStreamEvent};
@@ -113,13 +99,11 @@ mod tests
     struct MockModel;
 
     #[async_trait]
-    impl LanguageModelPort for MockModel
-    {
+    impl LanguageModelPort for MockModel {
         async fn stream(
             &mut self,
             _request: ModelRequest,
-        ) -> Result<mpsc::Receiver<Result<String, AppError>>, AppError>
-        {
+        ) -> Result<mpsc::Receiver<Result<String, AppError>>, AppError> {
             let (sender, receiver) = mpsc::channel(4);
             sender
                 .send(Ok("hello".to_owned()))
@@ -128,21 +112,16 @@ mod tests
             Ok(receiver)
         }
 
-        async fn cancel(&mut self, _turn_id: TurnId) -> Result<(), AppError>
-        {
+        async fn cancel(&mut self, _turn_id: TurnId) -> Result<(), AppError> {
             Ok(())
         }
     }
 
     #[tokio::test]
-    async fn converts_legacy_text_stream_to_versioned_events()
-    {
+    async fn converts_legacy_text_stream_to_versioned_events() {
         let turn_id = TurnId::new();
         let mut adapter = LegacyModelBackend::new(MockModel);
-        let request = VersionedModelRequest::new(
-            turn_id,
-            vec![Message::new(Role::User, "hello")],
-        );
+        let request = VersionedModelRequest::new(turn_id, vec![Message::new(Role::User, "hello")]);
         let mut stream = adapter.stream(request).await.expect("adapter starts");
         let first = stream
             .recv()

@@ -1,6 +1,6 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use ai_ex_control::{ControlClient, ControlCommand, ControlPayload};
 use ai_ex_domain::{AppError, ComponentHealth, PersonaSnapshot, StageSnapshot};
@@ -13,23 +13,20 @@ const HEALTH_REFRESH_TICKS: u8 = 40;
 #[path = "worker_tests.rs"]
 mod tests;
 
-pub struct WorkerSettings
-{
+pub struct WorkerSettings {
     pub address: String,
     pub token: String,
     pub max_message_bytes: usize,
 }
 
-pub enum WorkerCommand
-{
+pub enum WorkerCommand {
     Submit(String),
     Interrupt,
     EmergencyStop,
     SetPersona(PersonaSnapshot),
 }
 
-pub enum WorkerEvent
-{
+pub enum WorkerEvent {
     Connection(bool),
     Snapshot(RuntimeSnapshot),
     Health(Vec<ComponentHealth>),
@@ -42,14 +39,12 @@ pub enum WorkerEvent
     Failure(String),
 }
 
-pub struct WorkerHandle
-{
+pub struct WorkerHandle {
     pub commands: UnboundedSender<WorkerCommand>,
     pub events: Receiver<WorkerEvent>,
 }
 
-pub fn spawn_worker(settings: WorkerSettings) -> Result<WorkerHandle, AppError>
-{
+pub fn spawn_worker(settings: WorkerSettings) -> Result<WorkerHandle, AppError> {
     let client = ControlClient::new(
         &settings.address,
         settings.token,
@@ -59,16 +54,13 @@ pub fn spawn_worker(settings: WorkerSettings) -> Result<WorkerHandle, AppError>
     let (event_sender, events) = mpsc::channel();
     std::thread::Builder::new()
         .name("ai-ex-desktop-network".to_owned())
-        .spawn(move ||
-        {
+        .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
-            match runtime
-            {
+            match runtime {
                 Ok(runtime) => runtime.block_on(run_worker(client, command_receiver, event_sender)),
-                Err(error) =>
-                {
+                Err(error) => {
                     let _ignored = event_sender.send(WorkerEvent::Failure(format!(
                         "cannot start desktop network runtime: {error}",
                     )));
@@ -83,13 +75,11 @@ async fn run_worker(
     client: ControlClient,
     commands: UnboundedReceiver<WorkerCommand>,
     events: Sender<WorkerEvent>,
-)
-{
+) {
     // Read-only polling must not hold up user commands. Dropping either future
     // also cancels pending network I/O when the desktop channels close.
     let persona_epoch = AtomicU64::new(0);
-    tokio::select!
-    {
+    tokio::select! {
         _ = run_commands(&client, commands, &events, &persona_epoch) => {}
         _ = run_polling(client.clone(), events.clone(), &persona_epoch) => {}
     }
@@ -100,45 +90,39 @@ async fn run_commands(
     mut commands: UnboundedReceiver<WorkerCommand>,
     events: &Sender<WorkerEvent>,
     persona_epoch: &AtomicU64,
-)
-{
-    while let Some(command) = commands.recv().await
-    {
+) {
+    while let Some(command) = commands.recv().await {
         let persona_command = matches!(&command, WorkerCommand::SetPersona(_));
-        if persona_command
-        {
+        if persona_command {
             persona_epoch.fetch_add(1, Ordering::AcqRel);
         }
         let result = send_command(client, command).await;
-        if persona_command
-        {
+        if persona_command {
             persona_epoch.fetch_add(1, Ordering::AcqRel);
         }
-        match result
-        {
-            Ok(Some(profile)) =>
-            {
+        match result {
+            Ok(Some(profile)) => {
                 if !emit(events, WorkerEvent::PersonaApplied(profile))
-                    || !emit(events, WorkerEvent::Log("persona apply accepted".to_owned()))
+                    || !emit(
+                        events,
+                        WorkerEvent::Log("persona apply accepted".to_owned()),
+                    )
                 {
                     return;
                 }
             }
-            Ok(None) =>
-            {
-                if !emit(events, WorkerEvent::Log("control command sent".to_owned()))
-                {
+            Ok(None) => {
+                if !emit(events, WorkerEvent::Log("control command sent".to_owned())) {
                     return;
                 }
             }
-            Err(error) =>
-            {
-                if persona_command && !emit(events, WorkerEvent::PersonaApplyFailed(error.to_string()))
+            Err(error) => {
+                if persona_command
+                    && !emit(events, WorkerEvent::PersonaApplyFailed(error.to_string()))
                 {
                     return;
                 }
-                if !emit(events, WorkerEvent::Failure(error.to_string()))
-                {
+                if !emit(events, WorkerEvent::Failure(error.to_string())) {
                     return;
                 }
             }
@@ -150,18 +134,15 @@ async fn run_polling(
     client: ControlClient,
     events: Sender<WorkerEvent>,
     persona_epoch: &AtomicU64,
-)
-{
+) {
     let mut interval = tokio::time::interval(Duration::from_millis(50));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut connected = false;
     let mut cursor = 0;
     let mut ticks = 0_u8;
     let mut failure_reported = false;
-    loop
-    {
-        tokio::select!
-        {
+    loop {
+        tokio::select! {
             _ = interval.tick() =>
             {
                 if !connected
@@ -348,14 +329,15 @@ async fn run_polling(
 async fn send_command(
     client: &ControlClient,
     command: WorkerCommand,
-) -> Result<Option<PersonaSnapshot>, AppError>
-{
-    let (command, persona) = match command
-    {
+) -> Result<Option<PersonaSnapshot>, AppError> {
+    let (command, persona) = match command {
         WorkerCommand::Submit(text) => (ControlCommand::Submit { text }, None),
-        WorkerCommand::Interrupt => (ControlCommand::Interrupt {
-            reason: "desktop user interrupt".to_owned(),
-        }, None),
+        WorkerCommand::Interrupt => (
+            ControlCommand::Interrupt {
+                reason: "desktop user interrupt".to_owned(),
+            },
+            None,
+        ),
         WorkerCommand::EmergencyStop => (ControlCommand::EmergencyStop, None),
         WorkerCommand::SetPersona(profile) => (
             ControlCommand::SetPersona {
@@ -364,67 +346,57 @@ async fn send_command(
             Some(profile),
         ),
     };
-    match client.send(command).await?
-    {
+    match client.send(command).await? {
         ControlPayload::Accepted => Ok(persona),
-        _ => Err(AppError::protocol("control command returned an unexpected payload")),
+        _ => Err(AppError::protocol(
+            "control command returned an unexpected payload",
+        )),
     }
 }
 
-async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppError>
-{
-    match client.send(ControlCommand::Persona).await?
-    {
+async fn fetch_persona(client: &ControlClient) -> Result<PersonaSnapshot, AppError> {
+    match client.send(ControlCommand::Persona).await? {
         ControlPayload::Persona(profile) => Ok(profile),
         _ => Err(AppError::protocol("persona returned an unexpected payload")),
     }
 }
 
-async fn fetch_persona_current(client: &ControlClient, epoch: &AtomicU64) -> Result<Option<PersonaSnapshot>, AppError>
-{
+async fn fetch_persona_current(
+    client: &ControlClient,
+    epoch: &AtomicU64,
+) -> Result<Option<PersonaSnapshot>, AppError> {
     let before = epoch.load(Ordering::Acquire);
-    if !before.is_multiple_of(2)
-    {
+    if !before.is_multiple_of(2) {
         return Ok(None);
     }
     let profile = fetch_persona(client).await?;
     Ok((epoch.load(Ordering::Acquire) == before).then_some(profile))
 }
 
-async fn fetch_stage(client: &ControlClient) -> Result<StageSnapshot, AppError>
-{
-    match client.send(ControlCommand::Stage).await?
-    {
+async fn fetch_stage(client: &ControlClient) -> Result<StageSnapshot, AppError> {
+    match client.send(ControlCommand::Stage).await? {
         ControlPayload::Stage(snapshot) => Ok(snapshot),
         _ => Err(AppError::protocol("stage returned an unexpected payload")),
     }
 }
 
-async fn fetch_snapshot(client: &ControlClient) -> Result<RuntimeSnapshot, AppError>
-{
-    match client.send(ControlCommand::Status).await?
-    {
+async fn fetch_snapshot(client: &ControlClient) -> Result<RuntimeSnapshot, AppError> {
+    match client.send(ControlCommand::Status).await? {
         ControlPayload::Snapshot(snapshot) => Ok(snapshot),
         _ => Err(AppError::protocol("status returned an unexpected payload")),
     }
 }
 
-async fn fetch_health(client: &ControlClient) -> Result<Vec<ComponentHealth>, AppError>
-{
-    match client.send(ControlCommand::Health).await?
-    {
+async fn fetch_health(client: &ControlClient) -> Result<Vec<ComponentHealth>, AppError> {
+    match client.send(ControlCommand::Health).await? {
         ControlPayload::Health(health) => Ok(health),
         _ => Err(AppError::protocol("health returned an unexpected payload")),
     }
 }
 
-async fn poll(client: &ControlClient, after: u64) -> Result<Vec<SequencedEvent>, AppError>
-{
+async fn poll(client: &ControlClient, after: u64) -> Result<Vec<SequencedEvent>, AppError> {
     match client
-        .send(ControlCommand::Events {
-            after,
-            limit: 256,
-        })
+        .send(ControlCommand::Events { after, limit: 256 })
         .await?
     {
         ControlPayload::Events(events) => Ok(events),
@@ -432,7 +404,6 @@ async fn poll(client: &ControlClient, after: u64) -> Result<Vec<SequencedEvent>,
     }
 }
 
-fn emit(sender: &Sender<WorkerEvent>, event: WorkerEvent) -> bool
-{
+fn emit(sender: &Sender<WorkerEvent>, event: WorkerEvent) -> bool {
     sender.send(event).is_ok()
 }

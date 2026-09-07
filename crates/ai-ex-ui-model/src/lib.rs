@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ConnectionState
-{
+pub enum ConnectionState {
     Disconnected,
     Connecting,
     Connected,
@@ -18,8 +17,7 @@ pub enum ConnectionState
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TurnStatus
-{
+pub enum TurnStatus {
     Streaming,
     Completed,
     Interrupted,
@@ -27,8 +25,7 @@ pub enum TurnStatus
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UiTurn
-{
+pub struct UiTurn {
     pub turn_id: TurnId,
     pub user_text: String,
     pub assistant_text: String,
@@ -36,15 +33,13 @@ pub struct UiTurn
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApplyOutcome
-{
+pub enum ApplyOutcome {
     Applied,
     Duplicate,
     GapDetected,
 }
 
-pub struct UiState
-{
+pub struct UiState {
     pub connection: ConnectionState,
     pub runtime: RuntimeSnapshot,
     pub turns: Vec<UiTurn>,
@@ -52,12 +47,9 @@ pub struct UiState
     max_turns: usize,
 }
 
-impl UiState
-{
-    pub fn new(max_turns: usize) -> Result<Self, AppError>
-    {
-        if max_turns == 0
-        {
+impl UiState {
+    pub fn new(max_turns: usize) -> Result<Self, AppError> {
+        if max_turns == 0 {
             return Err(AppError::configuration("UI turn capacity must be positive"));
         }
         Ok(Self {
@@ -69,22 +61,18 @@ impl UiState
         })
     }
 
-    pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot)
-    {
+    pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot) {
         self.runtime = snapshot;
         self.needs_resync = false;
     }
 
-    pub fn apply_event(&mut self, item: SequencedEvent) -> ApplyOutcome
-    {
-        if item.sequence <= self.runtime.last_sequence
-        {
+    pub fn apply_event(&mut self, item: SequencedEvent) -> ApplyOutcome {
+        if item.sequence <= self.runtime.last_sequence {
             return ApplyOutcome::Duplicate;
         }
         let gap = self.runtime.last_sequence != 0
             && item.sequence != self.runtime.last_sequence.saturating_add(1);
-        if gap
-        {
+        if gap {
             self.needs_resync = true;
             return ApplyOutcome::GapDetected;
         }
@@ -93,13 +81,10 @@ impl UiState
         ApplyOutcome::Applied
     }
 
-    fn reduce(&mut self, event: SystemEvent)
-    {
+    fn reduce(&mut self, event: SystemEvent) {
         self.runtime.observe_speech_event(&event);
-        match event
-        {
-            SystemEvent::TurnStarted { turn_id, user_text } =>
-            {
+        match event {
+            SystemEvent::TurnStarted { turn_id, user_text } => {
                 self.runtime.active_turn = Some(turn_id);
                 self.runtime.turns_started += 1;
                 self.turns.push(UiTurn {
@@ -108,105 +93,87 @@ impl UiState
                     assistant_text: String::new(),
                     status: TurnStatus::Streaming,
                 });
-                if self.turns.len() > self.max_turns
-                {
+                if self.turns.len() > self.max_turns {
                     self.turns.remove(0);
                 }
             }
-            SystemEvent::ModelChunk { turn_id, text } =>
-            {
-                if let Some(turn) = self.find_turn(turn_id)
-                {
+            SystemEvent::ModelChunk { turn_id, text } => {
+                if let Some(turn) = self.find_turn(turn_id) {
                     turn.assistant_text.push_str(&text);
-                }
-                else
-                {
+                } else {
                     self.needs_resync = true;
                 }
             }
             SystemEvent::SentenceReady { .. } => self.runtime.sentences_ready += 1,
-            SystemEvent::SpeechPlayback { .. } | SystemEvent::SpeechProgress { .. } | SystemEvent::SpeechCancelled => {},
-            SystemEvent::EmotionChanged { emotion, .. } =>
-            {
+            SystemEvent::SpeechPlayback { .. }
+            | SystemEvent::SpeechProgress { .. }
+            | SystemEvent::SpeechCancelled => {}
+            SystemEvent::EmotionChanged { emotion, .. } => {
                 self.runtime.current_emotion = Some(emotion);
             }
-            SystemEvent::TurnFinished { turn_id, full_text } =>
-            {
+            SystemEvent::TurnFinished { turn_id, full_text } => {
                 self.runtime.active_turn = None;
                 self.runtime.current_emotion = None;
                 self.runtime.turns_completed += 1;
                 self.finish_turn(turn_id, full_text, TurnStatus::Completed);
             }
-            SystemEvent::TurnInterrupted { turn_id, .. } =>
-            {
+            SystemEvent::TurnInterrupted { turn_id, .. } => {
                 self.runtime.active_turn = None;
                 self.runtime.current_emotion = None;
                 self.runtime.turns_interrupted += 1;
                 self.set_status(turn_id, TurnStatus::Interrupted);
             }
             SystemEvent::StateChanged { to, .. } => self.runtime.state = to,
-            SystemEvent::Fault { message } =>
-            {
+            SystemEvent::Fault { message } => {
                 self.runtime.state = ConversationState::Failed;
                 self.runtime.faults += 1;
                 self.runtime.last_fault = Some(message);
-                if let Some(turn) = self.turns.last_mut()
-                {
+                if let Some(turn) = self.turns.last_mut() {
                     turn.status = TurnStatus::Failed;
                 }
             }
-            SystemEvent::LiveEventReceived { .. } | SystemEvent::LiveResponseSuggested { .. }
-                | SystemEvent::PersonaChanged { .. }
-                | SystemEvent::ComponentHealthChanged { .. } =>
-            {
-            }
+            SystemEvent::LiveEventReceived { .. }
+            | SystemEvent::LiveResponseSuggested { .. }
+            | SystemEvent::PersonaChanged { .. }
+            | SystemEvent::ComponentHealthChanged { .. } => {}
         }
     }
 
-    fn find_turn(&mut self, turn_id: TurnId) -> Option<&mut UiTurn>
-    {
-        self.turns.iter_mut().rev().find(|turn| turn.turn_id == turn_id)
+    fn find_turn(&mut self, turn_id: TurnId) -> Option<&mut UiTurn> {
+        self.turns
+            .iter_mut()
+            .rev()
+            .find(|turn| turn.turn_id == turn_id)
     }
 
-    fn finish_turn(&mut self, turn_id: TurnId, text: String, status: TurnStatus)
-    {
-        if let Some(turn) = self.find_turn(turn_id)
-        {
+    fn finish_turn(&mut self, turn_id: TurnId, text: String, status: TurnStatus) {
+        if let Some(turn) = self.find_turn(turn_id) {
             turn.assistant_text = text;
             turn.status = status;
-        }
-        else
-        {
+        } else {
             self.needs_resync = true;
         }
     }
 
-    fn set_status(&mut self, turn_id: TurnId, status: TurnStatus)
-    {
-        if let Some(turn) = self.find_turn(turn_id)
-        {
+    fn set_status(&mut self, turn_id: TurnId, status: TurnStatus) {
+        if let Some(turn) = self.find_turn(turn_id) {
             turn.status = status;
-        }
-        else
-        {
+        } else {
             self.needs_resync = true;
         }
     }
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
-    fn item(sequence: u64, event: SystemEvent) -> SequencedEvent
-    {
+    fn item(sequence: u64, event: SystemEvent) -> SequencedEvent {
         SequencedEvent { sequence, event }
     }
 
     #[test]
-    fn assembles_a_streaming_turn_and_ignores_duplicates()
-    {
+    fn assembles_a_streaming_turn_and_ignores_duplicates() {
         let mut state = UiState::new(10).expect("UI state");
         let turn_id = TurnId::new();
         state.apply_event(item(
@@ -239,8 +206,7 @@ mod tests
     }
 
     #[test]
-    fn detects_a_sequence_gap()
-    {
+    fn detects_a_sequence_gap() {
         let mut state = UiState::new(10).expect("UI state");
         state.apply_event(item(
             1,
@@ -266,12 +232,10 @@ mod tests
     }
 
     #[test]
-    fn bounds_conversation_history()
-    {
+    fn bounds_conversation_history() {
         let mut state = UiState::new(2).expect("UI state");
         let mut ids = Vec::new();
-        for sequence in 1..=3
-        {
+        for sequence in 1..=3 {
             let turn_id = TurnId::new();
             ids.push(turn_id);
             state.apply_event(item(

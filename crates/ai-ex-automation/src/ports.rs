@@ -5,8 +5,7 @@ use async_trait::async_trait;
 use crate::{ActionResult, AuditRecord, AutomationAction};
 
 #[async_trait]
-pub trait AutomationPort: Send
-{
+pub trait AutomationPort: Send {
     async fn execute(
         &mut self,
         permit: &Permit,
@@ -15,7 +14,6 @@ pub trait AutomationPort: Send
 }
 
 #[async_trait]
-pub trait AuditSink: Send
-{
+pub trait AuditSink: Send {
     async fn record(&mut self, record: AuditRecord) -> Result<(), AppError>;
 }

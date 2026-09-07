@@ -4,36 +4,59 @@ use crate::{ConversationState, Emotion, TurnId};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LiveResponseMode
-{
+pub enum LiveResponseMode {
     #[default]
     Suggest,
     Automatic,
     Confirm,
 }
 
-impl LiveResponseMode
-{
-    pub const fn allows_automatic(self) -> bool
-    {
+impl LiveResponseMode {
+    pub const fn allows_automatic(self) -> bool {
         matches!(self, Self::Automatic)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SystemEvent
-{
-    TurnStarted { turn_id: TurnId, user_text: String },
-    ModelChunk { turn_id: TurnId, text: String },
-    EmotionChanged { turn_id: TurnId, emotion: Emotion },
-    SentenceReady { turn_id: TurnId, text: String },
-    SpeechPlayback { playback: crate::SpeechPlaybackSnapshot },
-    SpeechProgress { sentence_id: uuid::Uuid, position_ms: u64, mouth_level: u16 },
+pub enum SystemEvent {
+    TurnStarted {
+        turn_id: TurnId,
+        user_text: String,
+    },
+    ModelChunk {
+        turn_id: TurnId,
+        text: String,
+    },
+    EmotionChanged {
+        turn_id: TurnId,
+        emotion: Emotion,
+    },
+    SentenceReady {
+        turn_id: TurnId,
+        text: String,
+    },
+    SpeechPlayback {
+        playback: crate::SpeechPlaybackSnapshot,
+    },
+    SpeechProgress {
+        sentence_id: uuid::Uuid,
+        position_ms: u64,
+        mouth_level: u16,
+    },
     SpeechCancelled,
-    TurnFinished { turn_id: TurnId, full_text: String },
-    TurnInterrupted { turn_id: TurnId, reason: String },
-    StateChanged { from: ConversationState, to: ConversationState },
+    TurnFinished {
+        turn_id: TurnId,
+        full_text: String,
+    },
+    TurnInterrupted {
+        turn_id: TurnId,
+        reason: String,
+    },
+    StateChanged {
+        from: ConversationState,
+        to: ConversationState,
+    },
     LiveEventReceived {
         event_id: uuid::Uuid,
         source: String,
@@ -45,27 +68,29 @@ pub enum SystemEvent
         text: String,
         automatic: bool,
     },
-    PersonaChanged { profile_id: String, revision: u64 },
+    PersonaChanged {
+        profile_id: String,
+        revision: u64,
+    },
     ComponentHealthChanged {
         component: String,
         ready: bool,
         detail: String,
     },
-    Fault { message: String },
+    Fault {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ComponentHealth
-{
+pub struct ComponentHealth {
     pub component: String,
     pub ready: bool,
     pub detail: String,
 }
 
-impl ComponentHealth
-{
-    pub fn ready(component: impl Into<String>) -> Self
-    {
+impl ComponentHealth {
+    pub fn ready(component: impl Into<String>) -> Self {
         Self {
             component: component.into(),
             ready: true,
@@ -73,8 +98,7 @@ impl ComponentHealth
         }
     }
 
-    pub fn unavailable(component: impl Into<String>, detail: impl Into<String>) -> Self
-    {
+    pub fn unavailable(component: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             component: component.into(),
             ready: false,
