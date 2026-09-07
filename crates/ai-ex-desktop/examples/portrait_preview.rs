@@ -59,7 +59,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 portrait::draw(
                     ui.painter(),
                     rect,
-                    state,
                     state.animate(1.0, index == 5),
                     if index == 5 {
                         Color32::from_rgb(209, 142, 158)

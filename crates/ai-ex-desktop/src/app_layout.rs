@@ -7,6 +7,7 @@ pub(super) enum Page {
     Conversation,
     Character,
     Scenes,
+    Memory,
     Settings,
 }
 
@@ -58,6 +59,7 @@ impl DesktopApp {
                                 self.show_scene_panel(ui);
                             }
                             Page::Settings => self.show_settings_page(ui),
+                            Page::Memory => self.show_memory_page(ui),
                             Page::Conversation => unreachable!(),
                         });
                 });
@@ -100,6 +102,7 @@ impl DesktopApp {
                 (Page::Conversation, "聊天"),
                 (Page::Character, "角色与外形"),
                 (Page::Scenes, "场景组合"),
+                (Page::Memory, "记忆"),
                 (Page::Settings, "设置与诊断"),
             ] {
                 ui.selectable_value(&mut self.page, page, label);
@@ -132,6 +135,9 @@ impl DesktopApp {
     }
 
     fn activity_label(&self) -> &'static str {
+        if self.memory.mutation_pending() {
+            return "正在更新记忆";
+        }
         if self.state.connection != ConnectionState::Connected {
             return "正在连接，草稿可以先写";
         }
@@ -236,5 +242,31 @@ impl DesktopApp {
         }
         ui.add_space(12.0);
         ui.weak(format!("版本 {}", env!("CARGO_PKG_VERSION")));
+    }
+
+    fn show_memory_page(&mut self, ui: &mut egui::Ui) {
+        self.memory.set_profile(&self.active_persona.profile_id);
+        let connected = self.state.connection == ConnectionState::Connected
+            && self.persona_synced
+            && !self.state.needs_resync;
+        let idle = self.state.runtime.active_turn.is_none()
+            && !self.state.runtime.playback.active
+            && !self.persona_apply_pending
+            && !self.confirm_persona
+            && !self.scene_busy();
+        if let Some(request) = self
+            .memory
+            .show(ui, &self.active_persona.name, connected, idle)
+            && let Some(command) = self.memory.begin(request)
+            && let Err(error) = self.worker.commands.send(command)
+            && let WorkerCommand::Memory { request_id, .. } = error.0
+        {
+            self.memory.receive(
+                request_id,
+                Err(ai_ex_domain::AppError::unavailable(
+                    "桌面网络工作线程已停止。",
+                )),
+            );
+        }
     }
 }

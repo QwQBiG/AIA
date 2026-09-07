@@ -14,6 +14,9 @@ use crate::{
 #[path = "persona_tests.rs"]
 mod persona_tests;
 
+#[path = "runtime_memory_tests.rs"]
+mod memory_tests;
+
 #[path = "runtime_cancellation_tests.rs"]
 mod cancellation_tests;
 

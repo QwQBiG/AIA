@@ -12,6 +12,9 @@ static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 #[path = "support/persona_switch.rs"]
 mod persona_switch;
 
+#[path = "support/memory_management.rs"]
+mod memory_management;
+
 struct ServiceProcess {
     child: Child,
     directory: PathBuf,

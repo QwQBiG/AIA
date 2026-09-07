@@ -5,5 +5,5 @@ mod protocol;
 mod server;
 
 pub use client::ControlClient;
-pub use protocol::{ControlCommand, ControlPayload, ControlRequest, ControlResponse};
+pub use protocol::{ControlCommand, ControlPayload, ControlRequest, ControlResponse, MemoryReply};
 pub use server::{ControlBackend, ControlServer};

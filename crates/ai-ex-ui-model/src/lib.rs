@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod presentation;
-pub use presentation::{AnimationFrame, PresentationState};
+pub use presentation::{AnimationFrame, ExpressionFrame, PresentationAnimator, PresentationState};
 
 use ai_ex_domain::{AppError, ConversationState, SystemEvent, TurnId};
 use ai_ex_observability::{RuntimeSnapshot, SequencedEvent};

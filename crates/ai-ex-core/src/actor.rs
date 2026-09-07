@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use ai_ex_domain::AppError;
+use ai_ex_domain::{AppError, MemoryRequest, MemoryResponse};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -8,7 +8,14 @@ use crate::{
     TurnOutcome,
 };
 
+#[path = "actor_memory.rs"]
+mod memory_management;
+
 enum RuntimeCommand {
+    Memory {
+        request: MemoryRequest,
+        response: oneshot::Sender<Result<MemoryResponse, AppError>>,
+    },
     Submit {
         input: String,
         response: oneshot::Sender<Result<TurnOutcome, AppError>>,
@@ -49,6 +56,17 @@ impl PendingTurn {
 }
 
 impl RuntimeHandle {
+    pub async fn memory(&self, request: MemoryRequest) -> Result<MemoryResponse, AppError> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(RuntimeCommand::Memory { request, response })
+            .await
+            .map_err(|_| AppError::unavailable("runtime actor stopped"))?;
+        receiver
+            .await
+            .map_err(|_| AppError::unavailable("memory management response dropped"))?
+    }
+
     pub async fn submit(&self, input: impl Into<String>) -> Result<TurnOutcome, AppError> {
         self.enqueue(input).await?.wait().await
     }
@@ -209,6 +227,11 @@ async fn run_actor<M, S, A, N, E>(
                                             "cannot change persona during an active turn",
                                         )));
                                     }
+                                    Some(RuntimeCommand::Memory { response, .. }) => {
+                                        let _ignored = response.send(Err(AppError::invalid_transition(
+                                            "memory management is unavailable during an active turn; interrupt or wait for completion",
+                                        )));
+                                    }
                                     Some(RuntimeCommand::Shutdown { response }) =>
                                     {
                                         let result = signal_control(&control, RuntimeControl::Shutdown);
@@ -261,6 +284,10 @@ async fn run_actor<M, S, A, N, E>(
             }
             RuntimeCommand::Interrupt { reason, response } => {
                 let _ignored = response.send(runtime.interrupt(reason).await);
+            }
+            RuntimeCommand::Memory { request, response } => {
+                stopping =
+                    memory_management::manage(&mut runtime, &mut receiver, request, response).await;
             }
             RuntimeCommand::SetSystemPrompt { prompt, response } => {
                 let _ignored = response.send(runtime.set_system_prompt(prompt));

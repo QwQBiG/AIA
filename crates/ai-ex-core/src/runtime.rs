@@ -3,6 +3,8 @@ use ai_ex_text::ResponsePreamble;
 
 #[path = "runtime_control.rs"]
 mod control;
+#[path = "runtime_memory.rs"]
+mod memory_management;
 #[path = "runtime_persistence.rs"]
 mod persistence;
 use control::AvatarAction;

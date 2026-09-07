@@ -7,6 +7,7 @@ mod appearance_import;
 mod character_files;
 mod character_library;
 mod image_appearance;
+mod memory_panel;
 mod navigation;
 mod portable;
 mod preview;

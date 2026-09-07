@@ -1,4 +1,4 @@
-use ai_ex_ui_model::{AnimationFrame, PresentationState};
+use ai_ex_ui_model::AnimationFrame;
 use eframe::egui::{self, Color32, Painter, Pos2, Rect, Shape, Stroke, vec2};
 
 #[path = "portrait_body.rs"]
@@ -6,13 +6,7 @@ mod body;
 #[path = "portrait_face.rs"]
 mod face;
 
-pub fn draw(
-    painter: &Painter,
-    rect: Rect,
-    state: PresentationState,
-    frame: AnimationFrame,
-    accent: Color32,
-) {
+pub fn draw(painter: &Painter, rect: Rect, frame: AnimationFrame, accent: Color32) {
     let scale = (rect.height() / 300.0).min(rect.width() / 260.0);
     if !scale.is_finite() || scale <= 0.0 {
         return;
@@ -25,7 +19,7 @@ pub fn draw(
         accent,
     };
     body::draw(&portrait);
-    face::draw(&portrait, state.emotion, frame);
+    face::draw(&portrait, frame);
 }
 
 struct Portrait<'a> {

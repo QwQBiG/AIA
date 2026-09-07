@@ -24,14 +24,28 @@ pub enum WorkerCommand {
     Interrupt,
     EmergencyStop,
     SetPersona(PersonaSnapshot),
+    Memory {
+        request_id: u64,
+        request: ai_ex_domain::MemoryRequest,
+    },
 }
 
 pub enum WorkerEvent {
     Connection(bool),
     Snapshot(RuntimeSnapshot),
     HistoryGap(RuntimeSnapshot),
-    SubmitRejected { text: String, error: String },
-    SubmitUncertain { text: String, error: String },
+    Memory {
+        request_id: u64,
+        result: Result<Box<ai_ex_control::MemoryReply>, AppError>,
+    },
+    SubmitRejected {
+        text: String,
+        error: String,
+    },
+    SubmitUncertain {
+        text: String,
+        error: String,
+    },
     Health(Vec<ComponentHealth>),
     Stage(StageSnapshot),
     Persona(PersonaSnapshot),
@@ -128,6 +142,10 @@ fn reject_command(events: &Sender<WorkerEvent>, command: WorkerCommand, message:
             error: message.to_owned(),
         },
         WorkerCommand::SetPersona(_) => WorkerEvent::PersonaApplyFailed(message.to_owned()),
+        WorkerCommand::Memory { request_id, .. } => WorkerEvent::Memory {
+            request_id,
+            result: Err(AppError::unavailable(message)),
+        },
         _ => WorkerEvent::Failure(message.to_owned()),
     };
     emit(events, event)
@@ -233,6 +251,21 @@ async fn execute_commands(
             continue;
         }
         let command = queued.command;
+        if let WorkerCommand::Memory {
+            request_id,
+            request,
+        } = command
+        {
+            let result = match client.send(ControlCommand::Memory { request }).await {
+                Ok(ControlPayload::Memory(response)) => Ok(response),
+                Ok(_) => Err(AppError::protocol("memory returned an unexpected payload")),
+                Err(error) => Err(error),
+            };
+            if !emit(events, WorkerEvent::Memory { request_id, result }) {
+                return;
+            }
+            continue;
+        }
         let submitted_text = match &command {
             WorkerCommand::Submit(text) => Some(text.clone()),
             _ => None,
@@ -528,6 +561,9 @@ async fn send_command(
             None,
         ),
         WorkerCommand::EmergencyStop => (ControlCommand::EmergencyStop, None),
+        WorkerCommand::Memory { .. } => {
+            return Err(AppError::protocol("memory uses a dedicated reply channel"));
+        }
         WorkerCommand::SetPersona(profile) => (
             ControlCommand::SetPersona {
                 profile: profile.clone(),

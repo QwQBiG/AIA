@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "headless_snapshot.rs"]
 mod headless_snapshot;
+#[path = "app_memory_tests.rs"]
+mod memory_tests;
 
 fn app() -> (
     DesktopApp,

@@ -9,9 +9,10 @@
 | [Windows 便携版](PORTABLE_WINDOWS.md) | 解压双击、首次体验、数据位置与更新 |
 | [整体验收流程](MANUAL_TEST_PLAN.md) | 独立测试配置、操作顺序、预期结果、故障记录 |
 | [桌面使用](DESKTOP_USER_GUIDE.md) | 首次设置、托管/独立服务、诊断与重连 |
+| [记忆工作台](MEMORY_WORKSPACE.md) | 查看来源、确认笔记、更正与单条遗忘，以及实际边界 |
 | [模型后端](MODEL_BACKENDS.md) | 模型地址、凭据、配置与健康检查 |
 | [声音与表达](SPEECH_PRESENTATION.md) | 语音、字幕、口型、取消与已知限制 |
-| [当前版本说明](releases/0.4.0-alpha.1.md) | 交付范围与本地自动验收基线 |
+| [当前版本说明](releases/0.5.0-alpha.1.md) | 记忆工作台、连续表达、交付范围与自动验收 |
 
 ## 角色与自由组合
 
@@ -31,6 +32,6 @@
 
 ## 历史与迁移资料
 
-[技术基线](CORE_TECHNICAL_BASELINE.md)、[Python 退役计划](LEGACY_RETIREMENT.md)和[上一版工作室说明](releases/0.2.0-alpha.1.md)保留历史进展。
+[技术基线](CORE_TECHNICAL_BASELINE.md)、[Python 退役计划](LEGACY_RETIREMENT.md)、[上一版人物工作室](releases/0.4.0-alpha.1.md)和[早期工作室说明](releases/0.2.0-alpha.1.md)保留历史进展。
 
 [旧用户指南](ai_vtuber_user_guide_zh.md)、[旧安装说明](setup_guide.md)和[旧全双工指南](full_duplex_user_guide.md)主要针对 Python 路线，其中的 config.json、Python 启动方式及旧功能描述不能直接用于当前 Rust 验收。

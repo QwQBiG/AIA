@@ -1,7 +1,6 @@
 use super::{AnimationFrame, Color32, Portrait};
-use ai_ex_domain::Emotion;
 
-pub(super) fn draw(p: &Portrait<'_>, emotion: Emotion, frame: AnimationFrame) {
+pub(super) fn draw(p: &Portrait<'_>, frame: AnimationFrame) {
     let skin = Color32::from_rgb(250, 218, 200);
     let hair = p.tint(Color32::from_rgb(34, 36, 51), 0.12);
     let highlight = p.tint(Color32::from_rgb(65, 67, 87), 0.18);
@@ -80,17 +79,9 @@ pub(super) fn draw(p: &Portrait<'_>, emotion: Emotion, frame: AnimationFrame) {
     );
 
     for x in [-19.0_f32, 19.0] {
-        eye(p, x, emotion, frame, ink);
-        let slope = match emotion {
-            Emotion::Angry => x.signum() * -3.0,
-            Emotion::Sad => x.signum() * 3.0,
-            _ => 0.0,
-        };
-        let lift = if emotion == Emotion::Surprised {
-            -4.0
-        } else {
-            0.0
-        };
+        eye(p, x, frame, ink);
+        let slope = x.signum() * frame.expression.brow_slant * 3.0;
+        let lift = frame.expression.brow_raise * -4.0;
         p.line(
             &[
                 (x - 9.0, 80.0 - slope + lift),
@@ -106,13 +97,9 @@ pub(super) fn draw(p: &Portrait<'_>, emotion: Emotion, frame: AnimationFrame) {
         1.1,
         Color32::from_rgb(211, 161, 146),
     );
-    let mouth_open = frame.mouth_open.max(if emotion == Emotion::Surprised {
-        0.3
-    } else {
-        0.0
-    });
+    let mouth_open = frame.mouth_open.clamp(0.0, 1.0);
     if mouth_open > 0.05 {
-        let height = 2.0 + mouth_open * 5.0;
+        let height = mouth_open * 7.0;
         p.ellipse(
             0.0,
             126.0,
@@ -125,15 +112,16 @@ pub(super) fn draw(p: &Portrait<'_>, emotion: Emotion, frame: AnimationFrame) {
                 (-3.5, 125.0 - height),
                 (3.5, 127.0 - height),
                 0.5,
-                Color32::from_rgb(255, 238, 227),
+                Color32::from_rgba_unmultiplied(
+                    255,
+                    238,
+                    227,
+                    ((mouth_open - 0.35).min(0.25) * 1020.0).round() as u8,
+                ),
             );
         }
     } else {
-        let bend = match emotion {
-            Emotion::Happy => 3.5,
-            Emotion::Sad | Emotion::Angry => -2.0,
-            _ => 1.5,
-        };
+        let bend = frame.expression.mouth_curve * 3.5;
         p.line(
             &[
                 (-7.0, 126.0),
@@ -146,30 +134,31 @@ pub(super) fn draw(p: &Portrait<'_>, emotion: Emotion, frame: AnimationFrame) {
             Color32::from_rgb(155, 92, 93),
         );
     }
-    if emotion == Emotion::Happy {
+    if frame.expression.blush > 0.0 {
         for x in [-29.0, 29.0] {
             p.ellipse(
                 x,
                 111.0,
                 6.0,
                 2.8,
-                Color32::from_rgba_unmultiplied(222, 129, 131, 95),
+                Color32::from_rgba_unmultiplied(
+                    222,
+                    129,
+                    131,
+                    (95.0 * frame.expression.blush.clamp(0.0, 1.0)).round() as u8,
+                ),
             );
         }
     }
 }
 
-fn eye(p: &Portrait<'_>, x: f32, emotion: Emotion, frame: AnimationFrame, ink: Color32) {
+fn eye(p: &Portrait<'_>, x: f32, frame: AnimationFrame, ink: Color32) {
     let openness = frame.eyes_open.clamp(0.0, 1.0);
     if openness < 0.15 {
         p.line(&[(x - 10.0, 94.0), (x, 96.0), (x + 10.0, 94.0)], 1.8, ink);
         return;
     }
-    let height = (if emotion == Emotion::Surprised {
-        7.0
-    } else {
-        5.5
-    }) * openness;
+    let height = (5.5 + frame.expression.eye_widen * 1.5) * openness;
     p.ellipse(x, 95.0, 10.0, height, Color32::from_rgb(255, 249, 242));
     let gaze = frame.gaze_x.clamp(-1.0, 1.0) * 2.5;
     p.ellipse(

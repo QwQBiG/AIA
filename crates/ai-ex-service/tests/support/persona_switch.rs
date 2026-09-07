@@ -2,7 +2,7 @@ use super::*;
 use ai_ex_domain::{PersonaSnapshot, SystemEvent};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-async fn read_request(stream: &mut tokio::net::TcpStream) -> (bool, Vec<u8>) {
+pub(super) async fn read_request(stream: &mut tokio::net::TcpStream) -> (bool, Vec<u8>) {
     let mut bytes = Vec::new();
     let mut buffer = [0; 4096];
     let boundary = loop {
@@ -32,7 +32,7 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> (bool, Vec<u8>) {
     (chat, bytes[boundary..boundary + length].to_vec())
 }
 
-async fn complete_turn(service: &ServiceProcess, text: &str) {
+pub(super) async fn complete_turn(service: &ServiceProcess, text: &str) {
     let ControlPayload::Events(before) = service
         .client
         .send(ControlCommand::Events {

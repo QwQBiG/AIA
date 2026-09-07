@@ -1,4 +1,6 @@
-use ai_ex_domain::{AppError, Emotion, Message, SystemEvent, TurnId};
+use ai_ex_domain::{
+    AppError, Emotion, MemoryRequest, MemoryResponse, Message, SystemEvent, TurnId,
+};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
@@ -57,6 +59,12 @@ pub trait EventSink: Send {
 
 #[async_trait]
 pub trait MemoryPort: Send + Sync {
+    async fn manage(&mut self, _request: MemoryRequest) -> Result<MemoryResponse, AppError> {
+        Err(AppError::unavailable(
+            "memory adapter does not support memory management",
+        ))
+    }
+
     /// Switch all subsequent operations atomically, or leave the old scope unchanged.
     async fn select_profile(&mut self, _profile_id: &str) -> Result<(), AppError> {
         Err(AppError::unavailable(

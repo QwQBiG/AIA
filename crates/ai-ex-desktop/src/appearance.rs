@@ -1,4 +1,4 @@
-use ai_ex_ui_model::PresentationState;
+use ai_ex_ui_model::{PresentationAnimator, PresentationState};
 use eframe::egui::{self, Color32};
 
 #[path = "appearance_paint.rs"]
@@ -24,6 +24,7 @@ pub struct AppearancePanel {
     pub reduced_motion: bool,
     images: crate::appearance_import::AppearanceImport,
     image_scale: f32,
+    animation: PresentationAnimator,
 }
 
 impl Default for AppearancePanel {
@@ -34,6 +35,7 @@ impl Default for AppearancePanel {
             reduced_motion: false,
             images: Default::default(),
             image_scale: 0.95,
+            animation: PresentationAnimator::default(),
         }
     }
 }
@@ -139,14 +141,14 @@ impl AppearancePanel {
                 egui::Sense::hover(),
             );
             let time = ui.input(|input| input.time);
-            let frame = state.animate(time, self.reduced_motion);
+            let frame = self.animation.sample(state, time, self.reduced_motion);
             let accent = Color32::from_rgb(self.accent[0], self.accent[1], self.accent[2]);
             if self.kind == AppearanceKind::Images
                 && let Some(pack) = &self.images.current
             {
                 pack.draw(ui.painter(), rect, state, frame, self.image_scale);
             } else {
-                paint::draw(ui.painter(), rect, state, frame, accent);
+                paint::draw(ui.painter(), rect, frame, accent);
             }
             if !self.reduced_motion && state.connected && state.synchronized {
                 ui.ctx()

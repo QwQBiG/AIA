@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionState, UiState};
 
+#[path = "presentation_motion.rs"]
+mod motion;
+pub use motion::{ExpressionFrame, PresentationAnimator};
+
 #[cfg(test)]
 #[path = "speech_tests.rs"]
 mod speech_tests;
@@ -98,47 +102,58 @@ impl PresentationState {
     }
 
     pub fn animate(self, elapsed_seconds: f64, reduced_motion: bool) -> AnimationFrame {
-        let active = self.connected
-            && self.synchronized
-            && !matches!(
-                self.activity,
-                ConversationState::Stopped
-                    | ConversationState::Failed
-                    | ConversationState::Interrupted,
-            );
+        let active = self.motion_allowed();
+        let expression = ExpressionFrame::from_emotion(if active {
+            self.emotion
+        } else {
+            Emotion::Neutral
+        });
         if !active || reduced_motion || !elapsed_seconds.is_finite() {
             return AnimationFrame {
                 breath: 0.0,
                 eyes_open: 1.0,
                 mouth_open: 0.0,
                 gaze_x: 0.0,
+                expression,
             };
         }
-        let time = elapsed_seconds.rem_euclid(120.0) as f32;
-        let blink = time.rem_euclid(4.7);
+        let wave = |frequency: f64| {
+            ((elapsed_seconds.rem_euclid(std::f64::consts::TAU / frequency) * frequency) as f32)
+                .sin()
+        };
+        let blink = elapsed_seconds.rem_euclid(4.7) as f32;
         AnimationFrame {
-            breath: (time * 1.6).sin(),
+            breath: wave(1.6),
             eyes_open: if blink < 0.16 {
                 (blink / 0.08 - 1.0).abs()
             } else {
                 1.0
             },
-            mouth_open: self
-                .mouth_level
-                .map(|level| level.min(1000) as f32 / 1000.0)
-                .unwrap_or_else(|| {
-                    if self.activity == ConversationState::Speaking {
-                        0.2 + 0.6 * (time * 9.0).sin().abs()
-                    } else {
-                        0.0
-                    }
-                }),
+            mouth_open: if self.activity == ConversationState::Speaking {
+                self.mouth_level
+                    .map(|level| level.min(1000) as f32 / 1000.0)
+                    .unwrap_or_else(|| 0.2 + 0.6 * wave(9.0).abs())
+            } else {
+                0.0
+            },
             gaze_x: if self.activity == ConversationState::Thinking {
                 0.6
             } else {
-                (time * 0.4).sin() * 0.18
+                wave(0.4) * 0.18
             },
+            expression,
         }
+    }
+
+    fn motion_allowed(self) -> bool {
+        self.connected
+            && self.synchronized
+            && !matches!(
+                self.activity,
+                ConversationState::Stopped
+                    | ConversationState::Failed
+                    | ConversationState::Interrupted,
+            )
     }
 }
 
@@ -148,6 +163,7 @@ pub struct AnimationFrame {
     pub eyes_open: f32,
     pub mouth_open: f32,
     pub gaze_x: f32,
+    pub expression: ExpressionFrame,
 }
 
 #[cfg(test)]

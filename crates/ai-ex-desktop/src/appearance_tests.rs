@@ -132,6 +132,57 @@ fn legacy_body_preferences_migrate_without_losing_customization() {
 }
 
 #[test]
+fn portrait_render_closes_surprised_mouth_on_silence_stop_and_reduced_motion() {
+    let mouth_fill = Color32::from_rgb(112, 58, 66);
+    for stop in 0..8 {
+        let context = egui::Context::default();
+        let mut panel = AppearancePanel::default();
+        let mut state = PresentationState {
+            connected: true,
+            synchronized: true,
+            activity: ConversationState::Speaking,
+            emotion: Emotion::Surprised,
+            mouth_level: Some(900),
+        };
+        let render = |panel: &mut AppearancePanel, state, time| {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320.0, 360.0),
+                    )),
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| panel.show_portrait(ui, state, "Companion", 300.0),
+            );
+            let mouth_visible = output.shapes.iter().any(
+                |shape| matches!(&shape.shape, egui::Shape::Path(path) if path.fill == mouth_fill),
+            );
+            for primitive in context.tessellate(output.shapes, output.pixels_per_point) {
+                if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
+                    assert!(mesh.is_valid());
+                }
+            }
+            mouth_visible
+        };
+        assert!(render(&mut panel, state, 1.0));
+        match stop {
+            0 => state.mouth_level = Some(0),
+            1 => state.connected = false,
+            2 => state.synchronized = false,
+            3 => state.activity = ConversationState::Interrupted,
+            4 => state.activity = ConversationState::Stopped,
+            5 => state.activity = ConversationState::Listening,
+            6 => state.activity = ConversationState::Failed,
+            7 => panel.reduced_motion = true,
+            _ => unreachable!(),
+        }
+        assert!(!render(&mut panel, state, 1.016), "stop case {stop}");
+    }
+}
+
+#[test]
 fn image_pack_preference_restores_loaded_body_after_restart() {
     let root = std::env::temp_dir().join(format!("aiex-body-restore-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();

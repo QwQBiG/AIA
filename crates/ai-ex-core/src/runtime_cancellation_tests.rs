@@ -347,6 +347,17 @@ async fn repeated_interrupts_and_shutdown_preserve_in_flight_memory_write() {
         .await
         .unwrap();
     state.speech_interrupted.store(false, Ordering::Release);
+    assert_eq!(
+        handle
+            .memory(ai_ex_domain::MemoryRequest::Remember {
+                profile_id: "default".to_owned(),
+                text: "must wait for commit".to_owned(),
+            })
+            .await
+            .unwrap_err()
+            .kind,
+        ai_ex_domain::ErrorKind::InvalidTransition,
+    );
     tokio::time::timeout(Duration::from_secs(2), async {
         for _ in 0..32 {
             handle.interrupt("stop").await.unwrap();

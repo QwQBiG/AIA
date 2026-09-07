@@ -1,0 +1,377 @@
+use super::*;
+use ai_ex_domain::{
+    ErrorKind, MemoryEntry, MemoryPage, MemoryRequest, MemoryResponse, MemorySource,
+    PersonaSnapshot,
+};
+use std::sync::{Arc, atomic::AtomicBool};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::{Notify, mpsc};
+
+struct ModelServer {
+    url: String,
+    captured: mpsc::Receiver<serde_json::Value>,
+    hold_next: Arc<AtomicBool>,
+    release: Arc<Notify>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ModelServer {
+    async fn start() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (sent, captured) = mpsc::channel(32);
+        let hold_next = Arc::new(AtomicBool::new(false));
+        let hold = hold_next.clone();
+        let release = Arc::new(Notify::new());
+        let gate = release.clone();
+        let task = tokio::spawn(async move {
+            let mut handlers = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    connection = listener.accept() => {
+                        let (mut stream, _) = connection.unwrap();
+                        let sent = sent.clone();
+                        let hold = hold.clone();
+                        let gate = gate.clone();
+                        handlers.spawn(async move {
+                            let (chat, request) = persona_switch::read_request(&mut stream).await;
+                            let body = if chat {
+                                sent.send(serde_json::from_slice(&request).unwrap()).await.unwrap();
+                                if hold.swap(false, Ordering::AcqRel) { gate.notified().await; }
+                                "{\"message\":{\"role\":\"assistant\",\"content\":\"acknowledged.\"},\"done\":true}\n"
+                            } else { "{\"models\":[]}" };
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len(),
+                            );
+                            let _ignored = stream.write_all(response.as_bytes()).await;
+                        });
+                    }
+                    result = handlers.join_next(), if !handlers.is_empty() => {
+                        result.unwrap().unwrap();
+                    }
+                }
+            }
+        });
+        Self {
+            url,
+            captured,
+            hold_next,
+            release,
+            task,
+        }
+    }
+
+    async fn next(&mut self) -> String {
+        tokio::time::timeout(Duration::from_secs(3), self.captured.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn turn(&mut self, service: &ServiceProcess, text: &str) -> String {
+        persona_switch::complete_turn(service, text).await;
+        self.next().await
+    }
+}
+
+impl Drop for ModelServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn manage(
+    service: &ServiceProcess,
+    request: MemoryRequest,
+) -> Result<MemoryResponse, ai_ex_domain::AppError> {
+    match service
+        .client
+        .send(ControlCommand::Memory { request })
+        .await?
+    {
+        ControlPayload::Memory(reply) => {
+            assert!(reply.snapshot.instance_id.is_some());
+            Ok(reply.response)
+        }
+        response => panic!("unexpected memory response: {response:?}"),
+    }
+}
+
+async fn list(service: &ServiceProcess, profile: &str) -> MemoryPage {
+    let MemoryResponse::Page(page) = manage(
+        service,
+        MemoryRequest::List {
+            profile_id: profile.to_owned(),
+            query: String::new(),
+            kind: None,
+            offset: 0,
+            limit: 100,
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("memory page expected");
+    };
+    page
+}
+
+fn remember(text: &str) -> MemoryRequest {
+    MemoryRequest::Remember {
+        profile_id: "default".to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+fn correct(entry: &MemoryEntry, text: &str) -> MemoryRequest {
+    MemoryRequest::Correct {
+        profile_id: entry.profile_id.clone(),
+        id: entry.id,
+        expected_revision: entry.revision,
+        text: text.to_owned(),
+    }
+}
+
+fn forget(entry: &MemoryEntry) -> MemoryRequest {
+    MemoryRequest::Forget {
+        profile_id: entry.profile_id.clone(),
+        id: entry.id,
+        expected_revision: entry.revision,
+    }
+}
+
+async fn restart(service: &mut ServiceProcess) {
+    drop(service.child.stdin.take());
+    service.exited().await;
+    service.child = Command::new(env!("CARGO_BIN_EXE_ai-ex-service"))
+        .current_dir(&service.directory)
+        .args(["--config", "service.toml", "--managed"])
+        .stdin(Stdio::piped())
+        .stdout(File::create(service.directory.join("stdout.log")).unwrap())
+        .stderr(File::create(service.directory.join("stderr.log")).unwrap())
+        .spawn()
+        .unwrap();
+    service.ready().await;
+}
+
+#[tokio::test]
+async fn memory_edits_change_actual_model_context_and_survive_restart() {
+    let mut model = ModelServer::start().await;
+    let mut service = ServiceProcess::with_memory("--managed", true, &model.url, true);
+    service.ready().await;
+    manage(&service, remember("饮品偏好：茉莉茶"))
+        .await
+        .unwrap();
+    let request = model.turn(&service, "早上好").await;
+    assert!(
+        request.contains("茉莉茶"),
+        "explicit notes must survive unrelated wording"
+    );
+    let note = list(&service, "default")
+        .await
+        .entries
+        .into_iter()
+        .find(|entry| entry.source == MemorySource::UserNote)
+        .unwrap();
+    manage(&service, forget(&note)).await.unwrap();
+    assert!(!model.turn(&service, "今日安排").await.contains("茉莉茶"));
+
+    model.turn(&service, "My-home-OLD-731").await;
+    let original = list(&service, "default")
+        .await
+        .entries
+        .into_iter()
+        .find(|entry| entry.user_text == "My-home-OLD-731")
+        .unwrap();
+    manage(&service, correct(&original, "My-home-NEW-842"))
+        .await
+        .unwrap();
+    let request = model.turn(&service, "全新话题").await;
+    assert!(request.contains("My-home-NEW-842"));
+    assert!(
+        !request.contains("My-home-OLD-731"),
+        "old short-term history must be cleared"
+    );
+    assert_eq!(
+        manage(&service, correct(&original, "stale edit"))
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidTransition
+    );
+    assert_eq!(
+        manage(&service, forget(&original)).await.unwrap_err().kind,
+        ErrorKind::InvalidTransition
+    );
+    restart(&mut service).await;
+    let request = model.turn(&service, "喝水").await;
+    assert!(request.contains("My-home-NEW-842"));
+    assert!(!request.contains("My-home-OLD-731"));
+    let corrected = list(&service, "default")
+        .await
+        .entries
+        .into_iter()
+        .find(|entry| entry.id == original.id)
+        .unwrap();
+    assert_eq!(corrected.revision, original.revision + 1);
+    assert_eq!(corrected.source, MemorySource::UserCorrection);
+    manage(&service, forget(&corrected)).await.unwrap();
+    let request = model.turn(&service, "休息").await;
+    assert!(!request.contains("My-home-OLD-731") && !request.contains("My-home-NEW-842"));
+    restart(&mut service).await;
+    let request = model.turn(&service, "星星").await;
+    assert!(!request.contains("My-home-OLD-731") && !request.contains("My-home-NEW-842"));
+    assert!(!request.contains("茉莉茶"));
+    assert!(
+        !list(&service, "default")
+            .await
+            .entries
+            .iter()
+            .any(|entry| entry.id == original.id)
+    );
+    model.turn(&service, "scratch-value-901").await;
+    let scratch = list(&service, "default")
+        .await
+        .entries
+        .into_iter()
+        .find(|entry| entry.user_text == "scratch-value-901")
+        .unwrap();
+    manage(&service, forget(&scratch)).await.unwrap();
+    assert!(
+        !model
+            .turn(&service, "最后一个话题")
+            .await
+            .contains("scratch-value-901")
+    );
+    drop(service.child.stdin.take());
+    service.exited().await;
+}
+
+#[tokio::test]
+async fn memory_profile_checks_prevent_cross_character_edits_and_recall() {
+    let mut model = ModelServer::start().await;
+    let mut service = ServiceProcess::with_memory("--managed", true, &model.url, true);
+    service.ready().await;
+    manage(&service, remember("default-private-582"))
+        .await
+        .unwrap();
+    let original = list(&service, "default").await.entries.remove(0);
+    service
+        .client
+        .send(ControlCommand::SetPersona {
+            profile: PersonaSnapshot {
+                profile_id: "host".to_owned(),
+                name: "Host".to_owned(),
+                ..Default::default()
+            },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        manage(&service, remember("must not write old identity"))
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidTransition
+    );
+    assert_eq!(
+        manage(&service, forget(&original)).await.unwrap_err().kind,
+        ErrorKind::InvalidTransition
+    );
+    assert!(list(&service, "host").await.entries.is_empty());
+    let request = model.turn(&service, "unrelated greeting").await;
+    assert!(!request.contains("default-private-582"));
+    service
+        .client
+        .send(ControlCommand::SetPersona {
+            profile: PersonaSnapshot::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        model
+            .turn(&service, "another greeting")
+            .await
+            .contains("default-private-582")
+    );
+    drop(service.child.stdin.take());
+    service.exited().await;
+}
+
+#[tokio::test]
+async fn generating_service_rejects_memory_edits_and_accepts_them_after_interrupt() {
+    let mut model = ModelServer::start().await;
+    let mut service = ServiceProcess::with_memory("--managed", true, &model.url, true);
+    service.ready().await;
+    model.hold_next.store(true, Ordering::Release);
+    service
+        .client
+        .send(ControlCommand::Submit {
+            text: "hold this reply".to_owned(),
+        })
+        .await
+        .unwrap();
+    model.next().await;
+    assert_eq!(
+        manage(&service, remember("not yet"))
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::InvalidTransition
+    );
+    service
+        .client
+        .send(ControlCommand::Interrupt {
+            reason: "change memory".to_owned(),
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match manage(&service, remember("available after interrupt")).await {
+                Ok(MemoryResponse::Changed) => break,
+                Err(error) if error.kind == ErrorKind::InvalidTransition => {
+                    tokio::task::yield_now().await
+                }
+                response => panic!("unexpected response: {response:?}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    model.release.notify_one();
+    assert!(
+        model
+            .turn(&service, "new message")
+            .await
+            .contains("available after interrupt")
+    );
+    assert!(
+        !list(&service, "default")
+            .await
+            .entries
+            .iter()
+            .any(|entry| entry.user_text == "not yet")
+    );
+    drop(service.child.stdin.take());
+    service.exited().await;
+}
+
+#[tokio::test]
+async fn disabled_memory_reports_unavailable_without_creating_a_store() {
+    let mut service = ServiceProcess::start("--managed", true);
+    service.ready().await;
+    let page = list(&service, "default").await;
+    assert!(!page.enabled);
+    assert!(page.entries.is_empty());
+    assert_eq!(
+        manage(&service, remember("cannot persist"))
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Unavailable
+    );
+    assert!(!service.directory.join("memory.jsonl").exists());
+    drop(service.child.stdin.take());
+    service.exited().await;
+}

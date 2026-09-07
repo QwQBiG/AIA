@@ -83,6 +83,7 @@ pub struct DesktopApp {
     notice: Option<String>,
     retained_messages: VecDeque<navigation::RetainedMessage>,
     show_retained: bool,
+    memory: crate::memory_panel::MemoryPanel,
 }
 
 impl DesktopApp {
@@ -142,6 +143,7 @@ impl DesktopApp {
             notice: None,
             retained_messages: VecDeque::new(),
             show_retained: false,
+            memory: Default::default(),
         }
     }
 
@@ -205,8 +207,48 @@ impl DesktopApp {
                         ConnectionState::Disconnected
                     };
                 }
-                WorkerEvent::Snapshot(snapshot) => self.state.apply_snapshot(snapshot),
+                WorkerEvent::Snapshot(snapshot) => {
+                    if (self.state.runtime.instance_id.is_none()
+                        || snapshot.instance_id == self.state.runtime.instance_id)
+                        && snapshot.last_sequence >= self.state.runtime.last_sequence
+                    {
+                        self.state.apply_snapshot(snapshot);
+                    }
+                }
+                WorkerEvent::Memory { request_id, result } => {
+                    self.memory.set_profile(&self.active_persona.profile_id);
+                    let (result, snapshot) = match result {
+                        Ok(reply)
+                            if reply.snapshot.instance_id == self.state.runtime.instance_id =>
+                        {
+                            (Ok(reply.response), Some(reply.snapshot))
+                        }
+                        Ok(_) => (
+                            Err(ai_ex_domain::AppError::connectivity(
+                                "服务实例已变化，请刷新记忆后核对。",
+                            )),
+                            None,
+                        ),
+                        Err(error) => (Err(error), None),
+                    };
+                    if self.memory.receive(request_id, result) {
+                        self.state.turns.clear();
+                        let snapshot = snapshot
+                            .filter(|snapshot| {
+                                snapshot.last_sequence >= self.state.runtime.last_sequence
+                            })
+                            .unwrap_or_else(|| self.state.runtime.clone());
+                        self.state.recover_snapshot(snapshot);
+                        self.notice =
+                            Some("记忆已更新，已开始新的对话上下文；输入草稿保留。".to_owned());
+                    }
+                }
                 WorkerEvent::HistoryGap(snapshot) => {
+                    if snapshot.instance_id == self.state.runtime.instance_id
+                        && snapshot.last_sequence < self.state.runtime.last_sequence
+                    {
+                        continue;
+                    }
                     self.state.recover_snapshot(snapshot);
                     let message = "连接已恢复，部分历史无法补齐；可以继续对话。";
                     self.notice = Some(message.to_owned());
@@ -387,6 +429,7 @@ impl DesktopApp {
             self.state.runtime.playback = Default::default();
         }
         self.active_persona = profile.clone();
+        self.memory.set_profile(&profile.profile_id);
     }
 
     fn can_submit(&self) -> bool {
@@ -395,6 +438,7 @@ impl DesktopApp {
             && self.persona_synced
             && !self.persona_apply_pending
             && !self.confirm_persona
+            && !self.memory.mutation_pending()
             && self.resume.phase == crate::scene_resume::ResumePhase::Idle
     }
 
@@ -763,6 +807,10 @@ impl DesktopApp {
     }
 
     fn apply_pending_persona(&mut self, profile: PersonaSnapshot) {
+        if self.memory.mutation_pending() {
+            self.last_error = Some("记忆正在保存，请等操作结束后再切换角色。".to_owned());
+            return;
+        }
         if self.state.connection != ConnectionState::Connected {
             self.last_error = Some("服务未连接，无法应用角色。".to_owned());
             return;

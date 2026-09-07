@@ -2,6 +2,7 @@
 
 mod args;
 mod automation_replay;
+mod control_snapshot;
 mod events;
 mod lifecycle;
 mod playback;
@@ -26,7 +27,7 @@ use ai_ex_automation::{
 };
 use ai_ex_bilibili::{BilibiliConnector, BilibiliSettings};
 use ai_ex_config::{AppConfig, BilibiliConfig, ModelBackend, PluginConfig};
-use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer};
+use ai_ex_control::{ControlBackend, ControlCommand, ControlPayload, ControlServer, MemoryReply};
 use ai_ex_core::{
     ConversationPolicy, EventSink, LanguageModelPort, ModelRequest, Runtime, RuntimeHandle,
     StageJournal, StageOutput, spawn_runtime,
@@ -1168,7 +1169,16 @@ impl ControlBackend for ServiceControl {
                 self.runtime.interrupt(reason).await?;
                 Ok(ControlPayload::Accepted)
             }
-            ControlCommand::Status => Ok(ControlPayload::Snapshot(self.events.current())),
+            ControlCommand::Status => Ok(ControlPayload::Snapshot(control_snapshot::bounded(
+                self.events.current(),
+            ))),
+            ControlCommand::Memory { request } => {
+                let response = self.runtime.memory(request).await?;
+                Ok(ControlPayload::Memory(Box::new(MemoryReply {
+                    response,
+                    snapshot: control_snapshot::bounded(self.events.current()),
+                })))
+            }
             ControlCommand::Persona => {
                 Ok(ControlPayload::Persona(self.persona.read().await.clone()))
             }

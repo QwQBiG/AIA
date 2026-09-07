@@ -70,6 +70,7 @@ struct SetupApp {
     endpoint: String,
     api_key: String,
     persona_name: String,
+    memory_enabled: bool,
     bilibili_enabled: bool,
     bilibili_room_id: String,
     bilibili_cookie_env: String,
@@ -129,6 +130,7 @@ impl SetupApp {
             endpoint: "https://api.deepseek.com".to_owned(),
             api_key: String::new(),
             persona_name: "AIex".to_owned(),
+            memory_enabled: true,
             bilibili_enabled: false,
             bilibili_room_id: String::new(),
             bilibili_cookie_env: "BILIBILI_COOKIE".to_owned(),
@@ -157,6 +159,7 @@ impl SetupApp {
             app.endpoint = endpoint;
             app.model = model;
             app.persona_name = config.persona.name;
+            app.memory_enabled = config.memory.enabled;
             app.bilibili_enabled = config.bilibili.enabled;
             app.bilibili_room_id = config.bilibili.room_id.to_string();
             app.bilibili_cookie_env = config.bilibili.cookie_env.unwrap_or_default();
@@ -317,9 +320,9 @@ impl SetupApp {
                 .to_string_lossy()
                 .into_owned();
             config.vts.enabled = false;
-            config.memory.enabled = false;
         }
         config.control.enabled = true;
+        config.memory.enabled = self.memory_enabled;
         config.desktop.auto_start_service = self.start_service;
         if self.original.is_some() && config.persona.name != self.persona_name.trim() {
             config.persona.revision = config
@@ -522,6 +525,9 @@ impl eframe::App for SetupApp {
                 ui.label("角色名称");
                 ui.text_edit_singleline(&mut self.persona_name);
             });
+            ui.checkbox(&mut self.memory_enabled, "启用长期记忆");
+            ui.small("记录保存在本机；参与对话的记忆会发送给你选择的模型。");
+            ui.small("保存后重启服务生效；关闭不会删除已有记录。");
             if self.provider == ProviderChoice::DeepSeek {
                 ui.horizontal(|ui| {
                     ui.label("DeepSeek API Key");

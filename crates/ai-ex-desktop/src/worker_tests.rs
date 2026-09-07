@@ -3,6 +3,9 @@ use ai_ex_control::{ControlRequest, ControlResponse};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
+#[path = "worker_memory_tests.rs"]
+mod memory_tests;
+
 async fn scripted_client(
     exchanges: Vec<(ControlCommand, ControlPayload)>,
 ) -> (ControlClient, tokio::task::JoinHandle<()>) {

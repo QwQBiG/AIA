@@ -40,6 +40,7 @@ max_message_bytes = 65536
 {"type":"status"}
 {"type":"stage"}
 {"type":"persona"}
+{"type":"memory","request":{"type":"list","profile_id":"default","query":"","kind":null,"offset":0,"limit":12}}
 {"type":"set_persona","profile":{"profile_id":"default","revision":2,"name":"AIex","system_prompt":"","tone":"warm, concise, and curious","taboos":[],"live_mode":"controlled"}}
 {"type":"events","after":42,"limit":256}
 {"type":"emergency_stop"}
@@ -55,6 +56,51 @@ max_message_bytes = 65536
 桌面的[启动组合](SCENE_PACKS.md)通过同一协议在服务连通、人格读取完成后恢复角色；服务本身仍先加载初始档案。新启动服务可自动恢复已选组合，已有服务先由用户确认。资源已准备且对应切换应答成功后，桌面才提交外形；拒绝或结果不明时不会反复自动重试。
 
 `stage` 返回最近的舞台动作摘要，包含遥测 schema、单调序号、动作类型和受限 detail；它只读，不会触发 OBS 或桌面副作用。
+
+## 记忆管理（0.5）
+
+`memory` 命令包装领域层的 `MemoryRequest`，仍使用相同请求 UUID 和令牌。四种请求形式如下，每行都是独立命令：
+
+```json
+{"type":"memory","request":{"type":"list","profile_id":"default","query":"偏好","kind":"persona","offset":0,"limit":12}}
+{"type":"memory","request":{"type":"remember","profile_id":"default","text":"请叫我小林。"}}
+{"type":"memory","request":{"type":"correct","profile_id":"default","id":"00000000-0000-0000-0000-000000000002","expected_revision":1,"text":"请叫我小禾。"}}
+{"type":"memory","request":{"type":"forget","profile_id":"default","id":"00000000-0000-0000-0000-000000000002","expected_revision":2}}
+```
+
+| 字段与操作 | 契约 |
+| --- | --- |
+| `profile_id` | 必须与服务当前角色精确匹配；非空且最多 128 个字符 |
+| `list` | `query` 最多 512 个字符，内容子串查找；`kind` 可为空或指定分类，`offset` 与 `limit` 指定分页，`limit` 为 1–100 |
+| `remember` / `correct` | `text` 非空、最多 4096 个字符；新建与更正均进入 `persona` 分类，分别标记 `user_note` / `user_correction` |
+| `correct` / `forget` | 校验记录 ID 与正整数 `expected_revision`；记录不属于当前角色、已删除或版本冲突时拒绝 |
+
+记忆记录版本与角色设定版本分别维护。活动回合期间拒绝记忆管理；桌面另外等待播放结束。成功修改在持久写入后清空当前短期上下文并停止旧输出；更正替换该条输入并移除旧回复，遗忘仅删除所选记录。它不会自动处理其他记录、角色设定或派生信息中的重复内容。
+
+成功 payload 的 `type` 为 `memory`，其 `data` 对应 `MemoryReply`，包含两个字段：
+
+- `response`：`{"type":"changed"}`，或 `{"type":"page","data":{...}}`。
+- `snapshot`：操作完成后取得的完整 `RuntimeSnapshot` 结构，含 `instance_id` 与 `last_sequence`；文字字段受下述预算限制。
+
+Rust 内部使用 `Box<MemoryReply>`，JSON 不增加额外包装层。`page.data` 包含 `profile_id`、`enabled`、`total`、`offset`、`entries`、`truncated_ids`。记录携带 ID、角色 ID、回合 ID、分类、输入/回复、来源、记录版本及创建/更新时间；缺少来源和版本的旧记录默认 `automatic` / `1`。毫秒时间戳通常是 JSON 整数，超出 `u64` 范围时使用十进制字符串。
+
+### 确认修改与聊天游标
+
+客户端应先匹配请求与当前角色，并确认应答来自当前服务实例。只有确认修改成功的 `changed` 应答才用于清空聊天显示；随附快照的序号给出旧对话清理边界，边界以内迟到的文字事件不得重新构造已清空的聊天，较早的快照也不得倒退当前事件序号。服务实例已变化的应答需要重新刷新核对。
+
+**`list` 的快照不得推进聊天游标或替代尚未收到的正文事件。** 列表只读，不能因为附带的快照序号较新就跳过聊天。常规快照同步仍先补齐事件，缺口按既有恢复规则处理。
+
+超时或结果不明不代表未写入；客户端保留草稿、要求成功刷新后核对，不自动重发修改。明确版本冲突时也应刷新重新选择记录，不能覆盖较新版本。
+
+### 响应大小
+
+记忆页使用 **48 KiB 序列化 JSON 预算**，因此实际返回条数可能少于请求的 `limit`。下一页应从 `offset + entries.len()` 请求，不能固定跳过 `limit` 条；`total` 表示全部匹配记录数。
+
+单条记录过长且无法完整放进空页时，返回片段并将 ID 加入 `truncated_ids`。客户端必须标明“查看片段 / 复制片段”，不能把片段当作完整原文；更正应重新输入完整事实。分页和查看不会截断原始存储。
+
+`status` 与 `MemoryReply.snapshot` 共用 **8 KiB 序列化 JSON 预算**，必要时裁剪 `last_fault` 与 `playback.text` 并用省略号标记，保留事件实例、序号和行为状态。这为默认 65536 字节控制消息中的页、快照与外层封装留出空间；自行调小传输上限时仍需核对能否容纳应答。
+
+事件数组仍受单条控制消息字节上限约束，`events.limit` 只限制事件条数，尚未按序列化字节自动分页。不保证任意长错误、单条正文或一次请求中的全部历史都能完整传输；快照也不是完整聊天记录备份。
 
 ## 响应
 

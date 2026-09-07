@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod management;
 mod record;
 
 #[cfg(test)]
 mod persistence_tests;
 
+#[cfg(test)]
+mod management_tests;
 #[cfg(test)]
 mod profile_tests;
 
@@ -15,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ai_ex_core::MemoryPort;
 use ai_ex_domain::{
-    AppError, ComponentHealth, MemoryKind, MemoryProjection, Message, Role, TurnId,
+    AppError, ComponentHealth, MemoryKind, MemoryProjection, MemorySource, Message, Role, TurnId,
 };
 use async_trait::async_trait;
 use record::MemoryRecord;
@@ -136,11 +139,15 @@ impl MemoryStore {
         let records = self.inner.records.read().await;
         let mut ranked: Vec<_> = records
             .iter()
-            .filter(|record| record.profile_id == *profile_id)
-            .filter(|record| kind.is_none_or(|expected| record.kind == expected))
-            .filter_map(|record| {
-                let score = record.relevance(query);
-                (score > 0).then_some((score, record))
+            .enumerate()
+            .filter(|(_, record)| record.profile_id == *profile_id)
+            .filter(|(_, record)| kind.is_none_or(|expected| record.kind == expected))
+            .filter_map(|(index, record)| {
+                let score = record::relevance(record, query);
+                (score > 0).then_some((
+                    (score, record.updated_ms.unwrap_or(record.created_ms), index),
+                    record,
+                ))
             })
             .collect();
         ranked.sort_by_key(|item| std::cmp::Reverse(item.0));
@@ -174,11 +181,25 @@ impl MemoryStore {
         let records = self.inner.records.read().await;
         let mut ranked: Vec<_> = records
             .iter()
-            .filter(|record| record.profile_id == *profile_id)
-            .filter(|record| kinds.contains(&record.kind))
-            .filter_map(|record| {
-                let score = record.relevance(query);
-                (score > 0).then_some((score, record))
+            .enumerate()
+            .filter(|(_, record)| record.profile_id == *profile_id)
+            .filter(|(_, record)| kinds.contains(&record.kind))
+            .filter_map(|(index, record)| {
+                let confirmed = record.source != MemorySource::Automatic;
+                let score = if confirmed {
+                    0
+                } else {
+                    record::relevance(record, query)
+                };
+                (confirmed || score > 0).then_some((
+                    (
+                        confirmed,
+                        score,
+                        record.updated_ms.unwrap_or(record.created_ms),
+                        index,
+                    ),
+                    record,
+                ))
             })
             .collect();
         ranked.sort_by_key(|item| std::cmp::Reverse(item.0));
@@ -189,8 +210,9 @@ impl MemoryStore {
                 Message::new(
                     Role::System,
                     format!(
-                        "Relevant context memory [{}] — User: {} Assistant: {}",
+                        "Relevant context memory [{}; source={:?}] — User: {} Assistant: {}",
                         record.kind.as_str(),
+                        record.source,
                         record.user_text,
                         record.assistant_text
                     ),
@@ -227,6 +249,9 @@ impl MemoryStore {
             kind,
             user_text,
             assistant_text,
+            updated_ms: None,
+            source: MemorySource::Automatic,
+            revision: 1,
         };
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
@@ -307,26 +332,20 @@ impl MemoryStore {
         if removed == 0 {
             return Ok(0);
         }
-        let content = serialize_records(&retained)?;
-        let temporary = self
-            .inner
-            .path
-            .with_extension(format!("{}.tmp", Uuid::new_v4()));
-        write_new_synced(&temporary, content.as_bytes())
-            .await
-            .map_err(|error| AppError::unavailable(error.to_string()))?;
-        // Replace directly: deleting the original first loses data if rename fails.
-        if let Err(error) = tokio::fs::rename(&temporary, &self.inner.path).await {
-            let _ = tokio::fs::remove_file(&temporary).await;
-            return Err(AppError::unavailable(error.to_string()));
-        }
-        *self.inner.records.write().await = retained;
+        self.replace_records(retained).await?;
         Ok(removed)
     }
 }
 
 #[async_trait]
 impl MemoryPort for MemoryStore {
+    async fn manage(
+        &mut self,
+        request: ai_ex_domain::MemoryRequest,
+    ) -> Result<ai_ex_domain::MemoryResponse, AppError> {
+        MemoryStore::manage(self, request).await
+    }
+
     async fn select_profile(&mut self, profile_id: &str) -> Result<(), AppError> {
         MemoryStore::select_profile(self, profile_id).await
     }
