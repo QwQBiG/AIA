@@ -52,12 +52,21 @@ pub(crate) fn export(label: &str, size: [u32; 2], mut draw: impl FnMut(&mut egui
     crate::app::configure_appearance(&context);
     let mut output = render(&context, size, Vec::new(), &mut draw);
     output.append(render(&context, size, Vec::new(), &mut draw));
+    export_output(label, size, &context, output);
+}
+
+pub(crate) fn export_output(
+    label: &str,
+    size: [u32; 2],
+    context: &egui::Context,
+    output: egui::FullOutput,
+) {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")
         .join(format!("onboarding-review-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&directory).unwrap();
     let path = directory.join(format!("{label}-{}x{}.png", size[0], size[1]));
-    snapshot::save(&context, output, size, &path).unwrap();
+    snapshot::save(context, output, size, &path).unwrap();
     println!("{}", path.display());
 }
 

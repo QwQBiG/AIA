@@ -60,7 +60,7 @@ impl DesktopApp {
                             Ok((appearance, source)) =>
                             {
                                 let manifest = SceneManifest {
-                                    schema_version: 1, id: self.scene_files.id.trim().to_owned(), name: self.scene_files.name.trim().to_owned(),
+                                    schema_version: appearance.schema_version(), id: self.scene_files.id.trim().to_owned(), name: self.scene_files.name.trim().to_owned(),
                                     character: self.active_character.clone(), appearance,
                                 };
                                 self.scene_files.begin(ui.ctx(), SceneAction::Export(path, Box::new(manifest), source));

@@ -14,6 +14,8 @@ fn example() -> SceneManifest {
             reduced_motion: true,
             scale: 0.8,
             package: None,
+            builtin_id: None,
+            framing: BuiltinFraming::Portrait,
         },
     }
 }
@@ -61,7 +63,7 @@ fn scene_round_trip_and_strict_nested_validation() {
     }
     scene.appearance.package = Some("appearance/appearance.toml".to_owned());
     assert!(scene.validate().is_ok());
-    scene.schema_version = 2;
+    scene.schema_version = 3;
     assert!(scene.validate().is_err());
 }
 
@@ -78,6 +80,78 @@ fn legacy_body_imports_as_a_character_and_exports_canonical_body() {
     assert!(exported.contains("body = \"companion\""));
     assert!(!exported.contains("body = \"orb\""));
     assert_eq!(SceneManifest::parse(&exported).unwrap(), original);
+}
+
+#[test]
+fn scene_versions_preserve_builtin_selection_and_omit_legacy_defaults() {
+    let legacy = example();
+    let text = legacy.to_toml().unwrap();
+    assert!(!text.contains("builtin_id"));
+    assert!(!text.contains("framing"));
+    assert_eq!(legacy.appearance.schema_version(), 1);
+    let explicit = text.replace("[appearance]", "[appearance]\nframing = 'portrait'");
+    assert_eq!(SceneManifest::parse(&explicit).unwrap(), legacy);
+    for (id, framing) in [
+        (Some("oc-01"), BuiltinFraming::Portrait),
+        (Some("oc-01"), BuiltinFraming::FullBody),
+        (None, BuiltinFraming::FullBody),
+    ] {
+        let mut scene = example();
+        scene.appearance.builtin_id = id.map(str::to_owned);
+        scene.appearance.framing = framing;
+        assert_eq!(scene.appearance.schema_version(), 2);
+        assert!(scene.to_toml().is_err());
+        let invalid_v1 = toml::to_string(&scene).unwrap();
+        assert!(SceneManifest::parse(&invalid_v1).is_err());
+        scene.schema_version = scene.appearance.schema_version();
+        let text = scene.to_toml().unwrap();
+        assert_eq!(SceneManifest::parse(&text).unwrap(), scene);
+        assert_eq!(text.contains("builtin_id"), id.is_some());
+        assert_eq!(
+            text.contains("framing"),
+            framing == BuiltinFraming::FullBody
+        );
+        if framing == BuiltinFraming::FullBody {
+            assert!(text.contains("framing = \"full_body\""));
+        }
+    }
+    let mut compatible_v2 = legacy;
+    compatible_v2.schema_version = 2;
+    assert!(compatible_v2.validate().is_ok());
+}
+
+#[test]
+fn builtin_scene_fields_reject_other_bodies_and_unsafe_identifiers() {
+    for body in [SceneBody::Images, SceneBody::Hidden] {
+        let mut scene = example();
+        scene.schema_version = 2;
+        scene.appearance.body = body;
+        scene.appearance.package =
+            (body == SceneBody::Images).then(|| "appearance/appearance.toml".to_owned());
+        assert!(scene.validate().is_ok());
+        scene.appearance.builtin_id = Some("oc-01".to_owned());
+        assert!(scene.validate().is_err());
+        scene.appearance.builtin_id = None;
+        scene.appearance.framing = BuiltinFraming::FullBody;
+        assert!(scene.validate().is_err());
+    }
+    let mut scene = example();
+    scene.schema_version = 2;
+    for id in [
+        "", "../oc-01", "oc/01", "oc\\01", "oc:01", "oc 01", "人物", "oc\0",
+    ] {
+        scene.appearance.builtin_id = Some(id.to_owned());
+        assert!(scene.validate().is_err(), "invalid builtin_id: {id:?}");
+    }
+    scene.appearance.builtin_id = Some("a".repeat(129));
+    assert!(scene.validate().is_err());
+    for id in ["a".repeat(128), "future_OC.02".to_owned()] {
+        scene.appearance.builtin_id = Some(id);
+        assert!(scene.validate().is_ok());
+    }
+    let text = scene.to_toml().unwrap();
+    let invalid = text.replace("[appearance]", "[appearance]\nframing = 'panorama'");
+    assert!(SceneManifest::parse(&invalid).is_err());
 }
 
 #[test]

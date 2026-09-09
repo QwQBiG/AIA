@@ -22,6 +22,8 @@ fn scene_export_copies_validated_image_bytes_and_rejects_corrupt_images() {
             reduced_motion: true,
             scale: 0.7,
             package: Some("appearance/appearance.toml".to_owned()),
+            builtin_id: None,
+            framing: Default::default(),
         },
     };
     let target = root.join("exported");

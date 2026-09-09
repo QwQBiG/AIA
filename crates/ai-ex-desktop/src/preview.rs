@@ -6,6 +6,9 @@ use crate::app::theme;
 use crate::appearance::AppearancePanel;
 use crate::navigation::{Destination, Navigation};
 
+#[path = "oc_gallery.rs"]
+mod gallery;
+
 pub fn run(package: Option<std::path::PathBuf>) -> Result<Option<Destination>, AppError> {
     let decoded = package
         .as_deref()
@@ -26,6 +29,7 @@ pub fn run(package: Option<std::path::PathBuf>) -> Result<Option<Destination>, A
             Ok(Box::new(PreviewApp {
                 navigation,
                 appearance,
+                gallery: gallery::OcGallery::load(context.storage),
                 name: "AIex".to_owned(),
                 state: PresentationState {
                     connected: true,
@@ -44,6 +48,7 @@ pub fn run(package: Option<std::path::PathBuf>) -> Result<Option<Destination>, A
 struct PreviewApp {
     navigation: Navigation,
     appearance: AppearancePanel,
+    gallery: gallery::OcGallery,
     name: String,
     state: PresentationState,
 }
@@ -116,6 +121,15 @@ impl PreviewApp {
                 .show(ui, |ui| self.appearance.show_controls(ui));
             ui.weak("外形选择会自动保存，并沿用到对话中。");
         });
+        if self.appearance.builtin_character() == crate::builtin_character::BuiltinCharacter::Oc01 {
+            ui.add_space(12.0);
+            theme::card().show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                egui::CollapsingHeader::new("OC 素材册")
+                    .id_salt("preview_oc_gallery")
+                    .show(ui, |ui| self.gallery.show(ui));
+            });
+        }
         ui.add_space(8.0);
         egui::CollapsingHeader::new("关于预览")
             .id_salt("preview_help")
@@ -182,6 +196,7 @@ impl eframe::App for PreviewApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.appearance.save(storage);
+        self.gallery.save(storage);
     }
 }
 
@@ -194,6 +209,7 @@ mod tests {
         PreviewApp {
             navigation: Navigation::default(),
             appearance: AppearancePanel::default(),
+            gallery: gallery::OcGallery::default(),
             name: "AIex".to_owned(),
             state: PresentationState {
                 connected: true,
@@ -241,6 +257,87 @@ mod tests {
     }
 
     #[test]
+    fn oc_gallery_is_reachable_without_changing_the_stage_or_hiding_navigation() {
+        use eframe::App;
+
+        fn find(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == label => {
+                    let center = text.pos + text.galley.size() * 0.5;
+                    shape.clip_rect.contains(center).then_some(center)
+                }
+                _ => None,
+            })
+        }
+
+        for size in [[640, 520], [480, 520]] {
+            let context = egui::Context::default();
+            crate::app::configure_appearance(&context);
+            context.global_style_mut(|style| style.animation_time = 0.0);
+            let mut app = app();
+            app.appearance.builtin = crate::builtin_character::BuiltinCharacter::Oc01;
+            app.state.activity = ConversationState::Speaking;
+            app.state.emotion = Emotion::Happy;
+            app.name = "预览称呼".to_owned();
+            let mut frame = eframe::Frame::_new_kittest();
+            let mut draw = |ui: &mut egui::Ui| app.ui(ui, &mut frame);
+            for label in ["OC 素材册", "完成庆祝"] {
+                let mut output = review::render(&context, size, Vec::new(), &mut draw);
+                for _ in 0..16 {
+                    if find(&output, label).is_some() {
+                        break;
+                    }
+                    output = review::render(
+                        &context,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(egui::pos2(size[0] as f32 - 60.0, 300.0)),
+                            egui::Event::MouseWheel {
+                                unit: egui::MouseWheelUnit::Point,
+                                delta: egui::vec2(0.0, -100.0),
+                                phase: egui::TouchPhase::Move,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                        &mut draw,
+                    );
+                }
+                let target = review::position(&output, label);
+                for pressed in [true, false] {
+                    review::render(&context, size, review::pointer(target, pressed), &mut draw);
+                }
+            }
+            let output = review::render(&context, size, Vec::new(), &mut draw);
+            review::position(&output, "返回首页");
+            let target = review::position(&output, "开始对话");
+            for pressed in [true, false] {
+                review::render(&context, size, review::pointer(target, pressed), &mut draw);
+            }
+            assert_eq!(app.state.activity, ConversationState::Speaking);
+            assert_eq!(app.state.emotion, Emotion::Happy);
+            assert_eq!(app.gallery.selected_id(), "success");
+            assert_eq!(app.name, "预览称呼");
+            assert_eq!(
+                app.appearance.builtin_character(),
+                crate::builtin_character::BuiltinCharacter::Oc01
+            );
+            assert_eq!(app.navigation.take(), Some(Destination::Connect));
+        }
+    }
+
+    #[test]
+    fn original_character_does_not_offer_the_oc_gallery() {
+        let mut app = app();
+        app.appearance.builtin = crate::builtin_character::BuiltinCharacter::Original;
+        let context = egui::Context::default();
+        let output = context.run_ui(Default::default(), |ui| app.show_editor(ui));
+        assert!(!output.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text)
+                if text.galley.job.text == "OC 素材册")
+        }));
+    }
+
+    #[test]
     #[ignore = "exports studio screenshots without opening a native window"]
     fn export_preview_review() {
         use eframe::App;
@@ -248,6 +345,63 @@ mod tests {
             let mut app = app();
             let mut frame = eframe::Frame::_new_kittest();
             review::export("preview", size, |ui| app.ui(ui, &mut frame));
+        }
+    }
+
+    #[test]
+    #[ignore = "exports the expanded OC gallery without opening a native window"]
+    fn export_oc_gallery_review() {
+        use eframe::App;
+        for size in [[640, 520], [980, 720]] {
+            let context = egui::Context::default();
+            crate::app::configure_appearance(&context);
+            context.global_style_mut(|style| style.animation_time = 0.0);
+            let mut app = app();
+            app.appearance.builtin = crate::builtin_character::BuiltinCharacter::Oc01;
+            let mut frame = eframe::Frame::_new_kittest();
+            let mut draw = |ui: &mut egui::Ui| app.ui(ui, &mut frame);
+            let mut output = review::render(&context, size, Vec::new(), &mut draw);
+            output.append(review::render(&context, size, Vec::new(), &mut draw));
+            let scroll = |delta| {
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(size[0] as f32 - 60.0, 300.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, delta),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            };
+            for label in ["OC 素材册", "表情参考"] {
+                for _ in 0..16 {
+                    if output.shapes.iter().any(|shape| {
+                        matches!(&shape.shape, egui::Shape::Text(text)
+                            if text.galley.job.text == label && shape.clip_rect.contains(
+                                text.pos + text.galley.size() * 0.5))
+                    }) {
+                        break;
+                    }
+                    output.append(review::render(&context, size, scroll(-100.0), &mut draw));
+                }
+                let target = review::position(&output, label);
+                for pressed in [true, false] {
+                    output.append(review::render(
+                        &context,
+                        size,
+                        review::pointer(target, pressed),
+                        &mut draw,
+                    ));
+                }
+                output.append(review::render(&context, size, Vec::new(), &mut draw));
+            }
+            output.append(review::render(&context, size, scroll(-2000.0), &mut draw));
+            for _ in 0..20 {
+                output.append(review::render(&context, size, Vec::new(), &mut draw));
+            }
+            assert_eq!(app.gallery.selected_id(), "expressions");
+            review::position(&output, "开始对话");
+            review::export_output("preview-oc-gallery", size, &context, output);
         }
     }
 
@@ -261,6 +415,7 @@ mod tests {
             let app = PreviewApp {
                 navigation: Navigation::default(),
                 appearance: AppearancePanel::default(),
+                gallery: gallery::OcGallery::default(),
                 name: "伙伴".to_owned(),
                 state: PresentationState {
                     connected: true,

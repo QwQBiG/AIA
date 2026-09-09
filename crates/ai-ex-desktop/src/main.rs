@@ -4,6 +4,7 @@
 mod app;
 mod appearance;
 mod appearance_import;
+mod builtin_character;
 mod character_files;
 mod character_library;
 #[cfg(test)]

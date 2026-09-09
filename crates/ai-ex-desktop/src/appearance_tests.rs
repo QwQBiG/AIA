@@ -26,6 +26,7 @@ fn appearance_preferences_round_trip_and_invalid_color_falls_back() {
     let mut storage = Storage::default();
     let panel = AppearancePanel {
         kind: AppearanceKind::Companion,
+        builtin: BuiltinCharacter::Original,
         accent: [12, 34, 56],
         reduced_motion: true,
         ..Default::default()
@@ -33,6 +34,7 @@ fn appearance_preferences_round_trip_and_invalid_color_falls_back() {
     panel.save(&mut storage);
     let restored = AppearancePanel::load(Some(&storage));
     assert_eq!(restored.kind, AppearanceKind::Companion);
+    assert_eq!(restored.builtin, BuiltinCharacter::Original);
     assert_eq!(restored.accent, [12, 34, 56]);
     assert!(restored.reduced_motion);
     storage
@@ -72,6 +74,7 @@ fn portrait_and_image_fallback_tessellate_all_expressions_at_compact_and_large_s
                 let context = egui::Context::default();
                 let mut panel = AppearancePanel {
                     kind,
+                    builtin: BuiltinCharacter::Original,
                     ..Default::default()
                 };
                 let state = PresentationState {
@@ -135,7 +138,10 @@ fn legacy_body_preferences_migrate_without_losing_customization() {
 fn portrait_render_closes_surprised_mouth_on_silence_stop_and_reduced_motion() {
     for stop in 0..8 {
         let context = egui::Context::default();
-        let mut panel = AppearancePanel::default();
+        let mut panel = AppearancePanel {
+            builtin: BuiltinCharacter::Original,
+            ..Default::default()
+        };
         let mut state = PresentationState {
             connected: true,
             synchronized: true,
@@ -214,4 +220,107 @@ fn image_pack_preference_restores_loaded_body_after_restart() {
     std::fs::remove_file(root.join("face.png")).unwrap();
     std::fs::remove_file(root.join("appearance.toml")).unwrap();
     std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn fresh_local_preferences_choose_oc_and_both_characters_restore_in_every_body_mode() {
+    let fresh = AppearancePanel::load(None);
+    assert_eq!(fresh.builtin_character(), BuiltinCharacter::Oc01);
+    assert_eq!(fresh.framing, BuiltinFraming::Portrait);
+    for builtin in BuiltinCharacter::ALL {
+        assert_eq!(BuiltinCharacter::from_id(builtin.id()), Some(builtin));
+        for kind in [
+            AppearanceKind::Companion,
+            AppearanceKind::Images,
+            AppearanceKind::Hidden,
+        ] {
+            let mut storage = Storage::default();
+            AppearancePanel {
+                builtin,
+                kind,
+                framing: BuiltinFraming::FullBody,
+                ..Default::default()
+            }
+            .save(&mut storage);
+            let restored = AppearancePanel::load(Some(&storage));
+            assert_eq!(restored.builtin_character(), builtin);
+            assert_eq!(restored.kind, kind);
+            assert_eq!(restored.framing, BuiltinFraming::FullBody);
+            assert!(!restored.unknown_builtin);
+        }
+    }
+}
+
+#[test]
+fn unavailable_saved_builtin_falls_back_visibly_and_preserves_other_preferences() {
+    let mut storage = Storage::default();
+    storage.set_string("appearance.builtin_id", "unavailable-character".to_owned());
+    storage.set_string("appearance.accent", "12,34,56".to_owned());
+    storage.set_string("appearance.reduced_motion", "true".to_owned());
+    let mut panel = AppearancePanel::load(Some(&storage));
+    assert_eq!(panel.builtin_character(), BuiltinCharacter::Oc01);
+    assert!(panel.unknown_builtin);
+    assert_eq!(panel.accent, [12, 34, 56]);
+    assert!(panel.reduced_motion);
+    let context = egui::Context::default();
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        panel.show_portrait(
+            ui,
+            PresentationState {
+                connected: false,
+                synchronized: false,
+                activity: ConversationState::Idle,
+                emotion: Emotion::Neutral,
+                mouth_level: Some(0),
+            },
+            "Companion",
+            100.0,
+        );
+    });
+    assert!(output.shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text.contains("保存的内置人物暂不可用"))
+    }));
+}
+
+#[test]
+fn switching_builtin_resets_expression_history_and_uses_only_the_selected_renderer() {
+    let context = egui::Context::default();
+    let mut panel = AppearancePanel::default();
+    let state = PresentationState {
+        connected: true,
+        synchronized: true,
+        activity: ConversationState::Speaking,
+        emotion: Emotion::Happy,
+        mouth_level: Some(900),
+    };
+    for builtin in [
+        BuiltinCharacter::Original,
+        BuiltinCharacter::Oc01,
+        BuiltinCharacter::Original,
+    ] {
+        panel.builtin = builtin;
+        let _ = context.run_ui(
+            egui::RawInput {
+                time: Some(1.0),
+                ..Default::default()
+            },
+            |ui| {
+                panel.show_portrait(ui, state, "Companion", 300.0);
+            },
+        );
+        assert_eq!(panel.rendered_builtin, Some(builtin));
+        match builtin {
+            BuiltinCharacter::Original => {
+                assert_eq!(
+                    panel.portrait.selected,
+                    Some(anime::PortraitFrame::Speaking)
+                );
+                assert_eq!(panel.oc_portrait.visible_layers, [false, false]);
+            }
+            BuiltinCharacter::Oc01 => {
+                assert_eq!(panel.portrait.selected, None);
+                assert!(panel.oc_portrait.visible_layers[1]);
+            }
+        }
+    }
 }

@@ -267,6 +267,61 @@ fn broken_startup_images_do_not_change_identity_or_erase_the_saved_choice() {
 }
 
 #[test]
+fn pinned_builtin_scenes_restore_their_version_character_and_framing_after_ack() {
+    use crate::builtin_character::BuiltinCharacter;
+    use ai_ex_config::scene::BuiltinFraming;
+
+    for (builtin, framing, version) in [
+        (BuiltinCharacter::Original, BuiltinFraming::Portrait, 1),
+        (BuiltinCharacter::Oc01, BuiltinFraming::FullBody, 2),
+    ] {
+        let mut rig = Rig::new(true);
+        rig.app.resume.phase = ResumePhase::Idle;
+        rig.connect();
+        rig.app.appearance.builtin = builtin;
+        rig.app.appearance.framing = framing;
+        rig.app.pin_startup_scene();
+        let expected = rig.app.resume.snapshot.as_ref().unwrap().scene.clone();
+        assert_eq!(expected.schema_version, version);
+        assert_eq!(expected.appearance.framing, framing);
+        assert_eq!(
+            expected.appearance.builtin_id.as_deref(),
+            (builtin == BuiltinCharacter::Oc01).then_some("oc-01")
+        );
+        rig.app.save_resume(&mut rig.storage);
+        rig.app.resume = SceneResume::load(
+            Some(&rig.storage),
+            ResumeLaunch {
+                scope: "test".to_owned(),
+                automatic: true,
+            },
+        );
+        assert_eq!(rig.app.resume.snapshot.as_ref().unwrap().scene, expected);
+        let current = if builtin == BuiltinCharacter::Original {
+            BuiltinCharacter::Oc01
+        } else {
+            BuiltinCharacter::Original
+        };
+        rig.app.appearance.builtin = current;
+        rig.finish_loading(&egui::Context::default());
+        let WorkerCommand::SetPersona(profile) = rig.commands.try_recv().unwrap() else {
+            panic!("expected startup scene restore");
+        };
+        assert_eq!(rig.app.appearance.builtin, current);
+        rig.events
+            .send(WorkerEvent::PersonaApplied(profile))
+            .unwrap();
+        rig.app.drain_events();
+        assert_eq!(rig.app.appearance.builtin, builtin);
+        assert_eq!(rig.app.appearance.framing, framing);
+        assert_eq!(
+            rig.app.appearance.scene_snapshot().unwrap().0,
+            expected.appearance
+        );
+    }
+}
+
+#[test]
 fn startup_image_scene_round_trips_its_source_and_commits_only_after_confirmation() {
     let root = std::env::temp_dir().join(format!("aiex-startup-images-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();

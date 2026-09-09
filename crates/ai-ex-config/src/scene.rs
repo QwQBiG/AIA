@@ -20,6 +20,20 @@ pub enum SceneBody {
     Hidden,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuiltinFraming {
+    #[default]
+    Portrait,
+    FullBody,
+}
+
+impl BuiltinFraming {
+    fn is_portrait(&self) -> bool {
+        *self == Self::Portrait
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SceneAppearance {
@@ -29,6 +43,20 @@ pub struct SceneAppearance {
     pub scale: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin_id: Option<String>,
+    #[serde(default, skip_serializing_if = "BuiltinFraming::is_portrait")]
+    pub framing: BuiltinFraming,
+}
+
+impl SceneAppearance {
+    pub fn schema_version(&self) -> u16 {
+        if self.builtin_id.is_some() || !self.framing.is_portrait() {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,18 +71,33 @@ pub struct SceneManifest {
 
 impl SceneManifest {
     pub fn validate(&self) -> Result<(), AppError> {
-        if self.schema_version != 1
-            || self.id.is_empty()
-            || self.id.len() > 128
-            || !self
-                .id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        if !matches!(self.schema_version, 1 | 2)
+            || !valid_identifier(&self.id)
             || self.name.trim().is_empty()
             || self.name.chars().count() > 128
         {
             return Err(AppError::configuration(
-                "invalid scene identity or unsupported schema_version; expected 1",
+                "invalid scene identity or unsupported schema_version; expected 1 or 2",
+            ));
+        }
+        if self.schema_version < self.appearance.schema_version() {
+            return Err(AppError::configuration(
+                "builtin_id and non-default framing require scene schema_version 2",
+            ));
+        }
+        if self.appearance.schema_version() == 2 && self.appearance.body != SceneBody::Companion {
+            return Err(AppError::configuration(
+                "only companion scenes may select a builtin character or framing",
+            ));
+        }
+        if self
+            .appearance
+            .builtin_id
+            .as_ref()
+            .is_some_and(|id| !valid_identifier(id))
+        {
+            return Err(AppError::configuration(
+                "scene builtin_id must contain 1 to 128 ASCII letters, digits, dots, underscores or hyphens",
             ));
         }
         self.character.to_toml()?;
@@ -101,6 +144,14 @@ impl SceneManifest {
         }
         Ok(text)
     }
+}
+
+fn valid_identifier(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
 fn valid_relative(path: &str) -> bool {

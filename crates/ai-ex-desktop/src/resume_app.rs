@@ -25,7 +25,7 @@ impl DesktopApp {
             .and_then(|(appearance, source)| {
                 let snapshot = ResumeSnapshot {
                     scene: SceneManifest {
-                        schema_version: 1,
+                        schema_version: appearance.schema_version(),
                         id: self.scene_files.id.trim().to_owned(),
                         name: self.scene_files.name.trim().to_owned(),
                         character: self.active_character.clone(),

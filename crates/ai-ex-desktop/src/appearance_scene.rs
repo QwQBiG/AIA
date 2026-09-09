@@ -1,9 +1,14 @@
 use super::{AppearanceKind, AppearancePanel};
+use crate::builtin_character::BuiltinCharacter;
 use crate::image_appearance::DecodedAppearance;
-use ai_ex_config::scene::{SceneAppearance, SceneBody};
+use ai_ex_config::scene::{BuiltinFraming, SceneAppearance, SceneBody};
 use ai_ex_domain::AppError;
 use eframe::egui;
 use std::path::PathBuf;
+
+#[cfg(test)]
+#[path = "appearance_scene_tests.rs"]
+mod tests;
 
 impl AppearancePanel {
     pub fn is_loading(&self) -> bool {
@@ -46,6 +51,16 @@ impl AppearancePanel {
                 package: source
                     .as_ref()
                     .map(|_| "appearance/appearance.toml".to_owned()),
+                builtin_id: (body == SceneBody::Companion
+                    && self.builtin != BuiltinCharacter::Original)
+                    .then(|| self.builtin.id().to_owned()),
+                framing: if body == SceneBody::Companion
+                    && self.builtin != BuiltinCharacter::Original
+                {
+                    self.framing
+                } else {
+                    BuiltinFraming::Portrait
+                },
             },
             source,
         ))
@@ -64,8 +79,16 @@ impl AppearancePanel {
             SceneBody::Images => AppearanceKind::Images,
             SceneBody::Hidden => AppearanceKind::Hidden,
         };
+        let builtin = match preset.builtin_id.as_deref() {
+            None => BuiltinCharacter::Original,
+            Some(id) => BuiltinCharacter::from_id(id).ok_or_else(|| {
+                AppError::configuration(format!("unknown built-in scene character: {id}"))
+            })?,
+        };
         let mut panel = Self {
             kind,
+            builtin,
+            framing: preset.framing,
             accent: preset.accent,
             reduced_motion: preset.reduced_motion,
             image_scale: preset.scale,

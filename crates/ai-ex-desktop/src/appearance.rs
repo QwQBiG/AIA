@@ -1,3 +1,5 @@
+use crate::builtin_character::BuiltinCharacter;
+use ai_ex_config::scene::BuiltinFraming;
 use ai_ex_ui_model::{PresentationAnimator, PresentationState};
 use eframe::egui::{self, Color32};
 
@@ -6,6 +8,9 @@ mod paint;
 
 #[path = "anime_portrait.rs"]
 mod anime;
+
+#[path = "oc_portrait.rs"]
+mod oc;
 
 #[path = "appearance_scene.rs"]
 mod scene;
@@ -25,10 +30,15 @@ pub struct AppearancePanel {
     pub kind: AppearanceKind,
     pub accent: [u8; 3],
     pub reduced_motion: bool,
+    pub builtin: BuiltinCharacter,
+    pub framing: BuiltinFraming,
     images: crate::appearance_import::AppearanceImport,
     image_scale: f32,
     animation: PresentationAnimator,
     portrait: anime::AnimePortrait,
+    oc_portrait: oc::OcPortrait,
+    rendered_builtin: Option<BuiltinCharacter>,
+    unknown_builtin: bool,
 }
 
 impl Default for AppearancePanel {
@@ -37,10 +47,15 @@ impl Default for AppearancePanel {
             kind: AppearanceKind::Companion,
             accent: [154, 133, 184],
             reduced_motion: false,
+            builtin: BuiltinCharacter::default(),
+            framing: BuiltinFraming::default(),
             images: Default::default(),
             image_scale: 0.95,
             animation: PresentationAnimator::default(),
             portrait: anime::AnimePortrait::default(),
+            oc_portrait: oc::OcPortrait::default(),
+            rendered_builtin: None,
+            unknown_builtin: false,
         }
     }
 }
@@ -52,6 +67,16 @@ impl AppearancePanel {
             ..Default::default()
         };
         if let Some(storage) = storage {
+            if let Some(id) = storage.get_string("appearance.builtin_id") {
+                match BuiltinCharacter::from_id(&id) {
+                    Some(builtin) => result.builtin = builtin,
+                    None => result.unknown_builtin = true,
+                }
+            }
+            result.framing = match storage.get_string("appearance.framing").as_deref() {
+                Some("full_body") => BuiltinFraming::FullBody,
+                _ => BuiltinFraming::Portrait,
+            };
             result.kind = match storage.get_string("appearance.kind").as_deref() {
                 Some("images") => AppearanceKind::Images,
                 Some("hidden") => AppearanceKind::Hidden,
@@ -85,6 +110,15 @@ impl AppearancePanel {
             AppearanceKind::Hidden => "hidden",
         };
         storage.set_string("appearance.kind", kind.to_owned());
+        storage.set_string("appearance.builtin_id", self.builtin.id().to_owned());
+        storage.set_string(
+            "appearance.framing",
+            match self.framing {
+                BuiltinFraming::Portrait => "portrait",
+                BuiltinFraming::FullBody => "full_body",
+            }
+            .to_owned(),
+        );
         storage.set_string("appearance.reduced_motion", self.reduced_motion.to_string());
         storage.set_string(
             "appearance.accent",
@@ -101,6 +135,19 @@ impl AppearancePanel {
     ) {
         self.images.install(context, decoded);
         self.kind = AppearanceKind::Images;
+    }
+
+    pub(crate) fn builtin_character(&self) -> BuiltinCharacter {
+        self.builtin
+    }
+
+    fn synchronize_builtin(&mut self) {
+        if self.rendered_builtin != Some(self.builtin) {
+            self.portrait = anime::AnimePortrait::default();
+            self.oc_portrait = oc::OcPortrait::default();
+            self.animation = PresentationAnimator::default();
+            self.rendered_builtin = Some(self.builtin);
+        }
     }
 
     #[cfg(test)]
@@ -123,7 +170,38 @@ impl AppearancePanel {
         ui.add_space(8.0);
         match self.kind {
             AppearanceKind::Companion => {
-                ui.weak("已经为你准备好，可以直接开始陪伴。");
+                let previous = self.builtin;
+                ui.horizontal_wrapped(|ui| {
+                    for builtin in BuiltinCharacter::ALL {
+                        if ui
+                            .selectable_value(&mut self.builtin, builtin, builtin.label())
+                            .clicked()
+                        {
+                            self.unknown_builtin = false;
+                        }
+                    }
+                });
+                if previous != self.builtin {
+                    self.unknown_builtin = false;
+                    self.synchronize_builtin();
+                }
+                if self.builtin == BuiltinCharacter::Oc01 {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.selectable_value(
+                            &mut self.framing,
+                            BuiltinFraming::Portrait,
+                            "半身近景",
+                        );
+                        ui.selectable_value(
+                            &mut self.framing,
+                            BuiltinFraming::FullBody,
+                            "全身立绘",
+                        );
+                    });
+                    ui.weak("一号人物已准备好；可以选择更近的陪伴视角或完整立绘。");
+                } else {
+                    ui.weak("保留初始伙伴的表情与配色，可以随时切换回来。");
+                }
             }
             AppearanceKind::Images => {
                 self.images.controls(ui);
@@ -155,6 +233,7 @@ impl AppearancePanel {
         name: &str,
         height: f32,
     ) {
+        self.synchronize_builtin();
         if self.kind != AppearanceKind::Hidden {
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), height),
@@ -167,21 +246,59 @@ impl AppearancePanel {
                 && let Some(pack) = &self.images.current
             {
                 pack.draw(ui.painter(), rect, state, frame, self.image_scale);
-            } else if self
-                .portrait
-                .draw(
-                    ui.painter(),
-                    rect,
-                    state,
-                    frame,
-                    self.reduced_motion,
-                    accent,
-                )
-                .is_err()
-            {
-                paint::draw(ui.painter(), rect, frame, accent);
+            } else {
+                match self.builtin {
+                    BuiltinCharacter::Original => {
+                        if self
+                            .portrait
+                            .draw(
+                                ui.painter(),
+                                rect,
+                                state,
+                                frame,
+                                self.reduced_motion,
+                                accent,
+                            )
+                            .is_err()
+                        {
+                            paint::draw(ui.painter(), rect, frame, accent);
+                        }
+                    }
+                    BuiltinCharacter::Oc01 => {
+                        if self
+                            .oc_portrait
+                            .draw(
+                                ui.painter(),
+                                rect,
+                                state,
+                                frame,
+                                oc::Options {
+                                    framing: self.framing,
+                                    reduced_motion: self.reduced_motion,
+                                    accent,
+                                },
+                            )
+                            .is_err()
+                        {
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "一号人物暂时无法显示",
+                                egui::FontId::proportional(16.0),
+                                ui.visuals().weak_text_color(),
+                            );
+                        }
+                    }
+                }
             }
-            if anime::motion_allowed(state, self.reduced_motion) {
+            let motion_allowed = if self.kind == AppearanceKind::Companion
+                && self.builtin == BuiltinCharacter::Oc01
+            {
+                oc::motion_allowed(state, self.reduced_motion)
+            } else {
+                anime::motion_allowed(state, self.reduced_motion)
+            };
+            if motion_allowed {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(33));
             }
@@ -196,7 +313,25 @@ impl AppearancePanel {
                     "·",
                 );
                 ui.weak(state.label());
+                if self.kind == AppearanceKind::Companion
+                    && self.builtin == BuiltinCharacter::Oc01
+                    && anime::motion_allowed(state, false)
+                {
+                    let emotion = match state.emotion {
+                        ai_ex_domain::Emotion::Neutral => None,
+                        ai_ex_domain::Emotion::Happy => Some("开心"),
+                        ai_ex_domain::Emotion::Sad => Some("低落"),
+                        ai_ex_domain::Emotion::Angry => Some("生气"),
+                        ai_ex_domain::Emotion::Surprised => Some("惊讶"),
+                    };
+                    if let Some(emotion) = emotion {
+                        ui.weak(format!("· {emotion}"));
+                    }
+                }
             },
         );
+        if self.unknown_builtin && self.kind == AppearanceKind::Companion {
+            ui.weak("保存的内置人物暂不可用，已显示一号人物。请重新选择人物。");
+        }
     }
 }

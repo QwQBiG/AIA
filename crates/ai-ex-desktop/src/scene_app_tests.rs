@@ -23,6 +23,8 @@ fn ready() -> ReadyScene {
                 scale: 0.5,
                 reduced_motion: true,
                 package: None,
+                builtin_id: None,
+                framing: Default::default(),
             },
         },
         appearance: None,
@@ -121,6 +123,46 @@ fn scene_cancel_rejection_and_disconnection_preserve_the_original_combo() {
     assert!(app.pending_scene.is_some());
     app.cancel_pending_persona();
     assert_eq!(app.appearance.scene_snapshot().unwrap().0, original);
+}
+
+#[test]
+fn unknown_builtin_scene_preserves_the_active_combo_and_unsent_draft() {
+    let (_events, receiver) = std::sync::mpsc::channel();
+    let (commands, mut sent) = tokio::sync::mpsc::unbounded_channel();
+    let mut app = DesktopApp::with_storage(
+        WorkerHandle {
+            commands,
+            events: receiver,
+        },
+        false,
+        None,
+    );
+    app.input = "Keep this draft".to_owned();
+    app.persona.name = "Unapplied character".to_owned();
+    app.persona_dirty = true;
+    let original = app.appearance.scene_snapshot().unwrap().0;
+    let original_character = app.active_character.clone();
+    let mut incoming = ready();
+    incoming.manifest.schema_version = 2;
+    incoming.manifest.appearance.builtin_id = Some("unavailable-character".to_owned());
+    assert!(incoming.manifest.validate().is_ok());
+    app.prepare_scene(&egui::Context::default(), incoming);
+    assert_eq!(app.appearance.scene_snapshot().unwrap().0, original);
+    assert_eq!(app.active_character, original_character);
+    assert_eq!(app.persona.name, "Unapplied character");
+    assert!(app.persona_dirty);
+    assert_eq!(app.input, "Keep this draft");
+    assert!(app.pending_scene.is_none());
+    assert!(app.pending_persona.is_none());
+    assert!(!app.confirm_persona);
+    assert!(sent.try_recv().is_err());
+    assert!(
+        app.scene_files
+            .feedback
+            .as_deref()
+            .unwrap()
+            .contains("unknown built-in scene character")
+    );
 }
 
 #[test]
