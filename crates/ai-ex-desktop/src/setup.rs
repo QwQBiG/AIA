@@ -16,6 +16,13 @@ use eframe::egui;
 #[path = "setup_config_tests.rs"]
 mod config_tests;
 
+#[cfg(test)]
+#[path = "setup_view_tests.rs"]
+mod view_tests;
+
+#[path = "setup_view.rs"]
+mod view;
+
 #[derive(Debug, Clone)]
 pub struct SetupResult {
     pub config_path: PathBuf,
@@ -450,122 +457,7 @@ fn default_port(scheme: &str) -> u16 {
 }
 impl eframe::App for SetupApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.poll_probe();
-        egui::Panel::bottom("setup_navigation")
-            .resizable(false)
-            .show(ui, |ui| {
-                if ui.button("返回首页（不保存修改）").clicked() {
-                    self.navigation
-                        .request(ui.ctx(), crate::navigation::Destination::Home);
-                }
-            });
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("连接设置");
-            ui.label(
-                "不需要命令行知识，按下面几步即可开始。密钥只在本次进程中使用，不会写入配置文件。",
-            );
-            ui.horizontal_wrapped(|ui| {
-                ui.strong("1 选择模型");
-                ui.label("→");
-                ui.strong("2 检查连接");
-                ui.label("→");
-                ui.strong("3 保存并开始对话");
-            });
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                ui.label("模型来源");
-                let before = self.provider;
-                egui::ComboBox::from_id_salt("provider")
-                    .selected_text(self.provider.label())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.provider,
-                            ProviderChoice::DeepSeek,
-                            ProviderChoice::DeepSeek.label(),
-                        );
-                        ui.selectable_value(
-                            &mut self.provider,
-                            ProviderChoice::KoboldCpp,
-                            ProviderChoice::KoboldCpp.label(),
-                        );
-                        ui.selectable_value(
-                            &mut self.provider,
-                            ProviderChoice::Ollama,
-                            ProviderChoice::Ollama.label(),
-                        );
-                    });
-                if before != self.provider {
-                    self.provider_changed();
-                }
-            });
-            ui.group(|ui| {
-                ui.strong(format!("当前 Provider：{}", self.provider.label()));
-                ui.label(self.provider.description());
-                ui.small(self.provider.model_hint());
-            });
-            let check_clicked = ui
-                .horizontal(|ui| {
-                    ui.label("模型地址");
-                    ui.text_edit_singleline(&mut self.endpoint);
-                    ui.add_enabled(!self.checking, egui::Button::new("检查连接"))
-                        .clicked()
-                })
-                .inner;
-            if check_clicked {
-                self.check_connection();
-            }
-            if self.checking {
-                ui.weak("正在检查；不会保存 API Key。");
-            }
-            ui.horizontal(|ui| {
-                ui.label("模型名称");
-                ui.text_edit_singleline(&mut self.model);
-            });
-            ui.horizontal(|ui| {
-                ui.label("角色名称");
-                ui.text_edit_singleline(&mut self.persona_name);
-            });
-            ui.checkbox(&mut self.memory_enabled, "启用长期记忆");
-            ui.small("记录保存在本机；参与对话的记忆会发送给你选择的模型。");
-            ui.small("保存后重启服务生效；关闭不会删除已有记录。");
-            if self.provider == ProviderChoice::DeepSeek {
-                ui.horizontal(|ui| {
-                    ui.label("DeepSeek API Key");
-                    ui.add(egui::TextEdit::singleline(&mut self.api_key).password(true));
-                });
-            }
-            ui.checkbox(
-                &mut self.bilibili_enabled,
-                "接收 Bilibili 直播事件（可稍后开启）",
-            );
-            if self.bilibili_enabled {
-                ui.horizontal(|ui| {
-                    ui.label("直播间号");
-                    ui.text_edit_singleline(&mut self.bilibili_room_id);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Cookie 环境变量名");
-                    ui.text_edit_singleline(&mut self.bilibili_cookie_env);
-                });
-                ui.label("只填写环境变量名，不要把 Cookie 粘贴到配置或聊天窗口。");
-            }
-            ui.checkbox(&mut self.start_service, "打开 AIex 时自动启动服务（推荐）");
-            ui.add_space(8.0);
-            ui.label(format!("配置文件：{}", self.config_path.display()));
-            ui.label("首次启动会自动准备本地连接，无需手工填写控制令牌。");
-            if !self.status.is_empty() {
-                let color = if self.status_error {
-                    egui::Color32::LIGHT_RED
-                } else {
-                    egui::Color32::LIGHT_GREEN
-                };
-                ui.colored_label(color, &self.status);
-            }
-            ui.add_space(12.0);
-            if ui.button("保存并进入 AIex").clicked() {
-                self.save(ui.ctx());
-            }
-        });
+        self.show_window(ui);
     }
 }
 #[cfg(test)]

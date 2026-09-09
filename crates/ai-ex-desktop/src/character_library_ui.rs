@@ -74,7 +74,7 @@ impl CharacterLibrary {
                     });
                 }
             });
-            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("搜索名称、档案 ID 或作者"));
+            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("搜索名称、档案 ID 或作者").desired_width(f32::INFINITY));
             let filter = self.filter.to_lowercase();
             let mut shown = 0;
             egui::ScrollArea::vertical().id_salt("character_library").max_height(220.0).show(ui, |ui|

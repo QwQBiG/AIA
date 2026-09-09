@@ -133,7 +133,6 @@ fn legacy_body_preferences_migrate_without_losing_customization() {
 
 #[test]
 fn portrait_render_closes_surprised_mouth_on_silence_stop_and_reduced_motion() {
-    let mouth_fill = Color32::from_rgb(112, 58, 66);
     for stop in 0..8 {
         let context = egui::Context::default();
         let mut panel = AppearancePanel::default();
@@ -156,9 +155,7 @@ fn portrait_render_closes_surprised_mouth_on_silence_stop_and_reduced_motion() {
                 },
                 |ui| panel.show_portrait(ui, state, "Companion", 300.0),
             );
-            let mouth_visible = output.shapes.iter().any(
-                |shape| matches!(&shape.shape, egui::Shape::Path(path) if path.fill == mouth_fill),
-            );
+            let mouth_visible = panel.portrait.selected == Some(anime::PortraitFrame::Speaking);
             for primitive in context.tessellate(output.shapes, output.pixels_per_point) {
                 if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
                     assert!(mesh.is_valid());

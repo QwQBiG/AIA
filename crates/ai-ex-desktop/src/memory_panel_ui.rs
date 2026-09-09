@@ -189,41 +189,12 @@ impl MemoryPanel {
         for entry in &page.entries {
             let truncated = page.truncated_ids.contains(&entry.id);
             ui.push_id(entry.id, |ui| {
-                ui.group(|ui| {
+                crate::app::theme::card().inner_margin(14).show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
                         ui.strong(source_name(entry.source));
                         ui.weak(kind_name(Some(entry.kind)));
                         ui.weak(age(entry.updated_ms.unwrap_or(entry.created_ms)));
-                    });
-                    let preview: String = entry
-                        .user_text
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .chars()
-                        .take(160)
-                        .collect();
-                    ui.add(egui::Label::new(preview).wrap());
-                    if truncated {
-                        ui.weak("较长记录，仅显示片段；更正时请重新写下准确的事实。");
-                    }
-                    egui::CollapsingHeader::new(if truncated {
-                        "查看片段"
-                    } else {
-                        "查看原文"
-                    })
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height(220.0)
-                            .show(ui, |ui| {
-                                ui.add(egui::Label::new(&entry.user_text).wrap());
-                                if !entry.assistant_text.is_empty() {
-                                    ui.separator();
-                                    ui.weak("当时的回复");
-                                    ui.add(egui::Label::new(&entry.assistant_text).wrap());
-                                }
-                            });
                     });
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -260,6 +231,35 @@ impl MemoryPanel {
                         {
                             self.forget = Some(entry.clone());
                         }
+                    });
+                    let preview: String = entry
+                        .user_text
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .chars()
+                        .take(160)
+                        .collect();
+                    ui.add(egui::Label::new(preview).wrap());
+                    if truncated {
+                        ui.weak("较长记录，仅显示片段；更正时请重新写下准确的事实。");
+                    }
+                    egui::CollapsingHeader::new(if truncated {
+                        "查看片段"
+                    } else {
+                        "查看原文"
+                    })
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(220.0)
+                            .show(ui, |ui| {
+                                ui.add(egui::Label::new(&entry.user_text).wrap());
+                                if !entry.assistant_text.is_empty() {
+                                    ui.separator();
+                                    ui.weak("当时的回复");
+                                    ui.add(egui::Label::new(&entry.assistant_text).wrap());
+                                }
+                            });
                     });
                 });
             });

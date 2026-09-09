@@ -141,7 +141,7 @@ impl AppearanceImport {
         }
         if let Some(error) = &self.error {
             ui.colored_label(
-                egui::Color32::LIGHT_RED,
+                ui.visuals().error_fg_color,
                 "外形导入失败，已保留原外形（悬停查看原因）",
             )
             .on_hover_text(error);

@@ -27,42 +27,44 @@ impl DesktopApp {
         self.appearance.poll(ui.ctx());
         egui::Panel::top("app_header")
             .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(super::theme::SURFACE)
+                    .inner_margin(egui::Margin::symmetric(24, 14))
+                    .stroke(egui::Stroke::new(1.0, super::theme::BORDER)),
+            )
             .show(ui, |ui| self.show_header(ui));
         match self.page {
             Page::Conversation => self.show_chat_page(ui),
             page => {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt(("app_page", page as u8))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| match page {
-                            Page::Character => {
-                                ui.heading("角色与外形");
-                                ui.weak(
-                                    "角色决定怎样相处，外形决定如何陪在你身边。两者可以自由组合。",
-                                );
-                                let state = PresentationState::from_ui(&self.state);
-                                ui.add_enabled_ui(!self.scene_busy(), |ui| {
-                                    self.appearance.show(
-                                        ui,
-                                        state,
-                                        &self.active_persona.name,
-                                        220.0,
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::new()
+                            .fill(super::theme::BACKGROUND)
+                            .inner_margin(20),
+                    )
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt(("app_page", page as u8))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| match page {
+                                Page::Character => self.show_character_workspace(ui),
+                                Page::Scenes => {
+                                    ui.heading("场景组合");
+                                    ui.weak(
+                                        "保存喜爱的角色与外形，下次一起恢复，也可以分享给别人。",
                                     );
-                                    ui.separator();
-                                    self.show_persona_panel(ui);
-                                });
-                            }
-                            Page::Scenes => {
-                                ui.heading("场景组合");
-                                ui.weak("保存喜爱的角色与外形，下次一起恢复，也可以分享给别人。");
-                                self.show_scene_panel(ui);
-                            }
-                            Page::Settings => self.show_settings_page(ui),
-                            Page::Memory => self.show_memory_page(ui),
-                            Page::Conversation => unreachable!(),
-                        });
-                });
+                                    ui.add_space(14.0);
+                                    super::theme::card().show(ui, |ui| {
+                                        ui.set_min_width(ui.available_width());
+                                        self.show_scene_panel(ui);
+                                    });
+                                }
+                                Page::Settings => self.show_settings_page(ui),
+                                Page::Memory => self.show_memory_page(ui),
+                                Page::Conversation => unreachable!(),
+                            });
+                    });
             }
         }
         self.show_persona_confirmation(ui.ctx());
@@ -73,9 +75,11 @@ impl DesktopApp {
 
     fn show_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("AIex");
-            ui.separator();
-            ui.colored_label(super::theme::ACCENT, self.activity_label());
+            ui.label(egui::RichText::new("AIex").size(26.0).strong());
+            if ui.available_width() > 600.0 {
+                ui.add_space(8.0);
+                ui.colored_label(super::theme::MUTED, "留一点时间，慢慢相处");
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button("急停")
@@ -97,7 +101,9 @@ impl DesktopApp {
                 }
             });
         });
+        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
             for (page, label) in [
                 (Page::Conversation, "聊天"),
                 (Page::Character, "角色与外形"),
@@ -105,7 +111,26 @@ impl DesktopApp {
                 (Page::Memory, "记忆"),
                 (Page::Settings, "设置与诊断"),
             ] {
-                ui.selectable_value(&mut self.page, page, label);
+                let selected = self.page == page;
+                let button = egui::Button::new(
+                    egui::RichText::new(label)
+                        .color(if selected {
+                            super::theme::ACCENT
+                        } else {
+                            super::theme::MUTED
+                        })
+                        .strong(),
+                )
+                .fill(if selected {
+                    super::theme::ACCENT_SOFT
+                } else {
+                    super::theme::SURFACE
+                })
+                .stroke(egui::Stroke::NONE)
+                .corner_radius(10);
+                if ui.add(button).clicked() {
+                    self.page = page;
+                }
             }
         });
         if let Some(error) = self.last_error.clone() {
@@ -114,8 +139,10 @@ impl DesktopApp {
                     self.last_error = None;
                 }
                 ui.add(
-                    egui::Label::new(egui::RichText::new(&error).color(egui::Color32::LIGHT_RED))
-                        .truncate(),
+                    egui::Label::new(
+                        egui::RichText::new(&error).color(ui.visuals().error_fg_color),
+                    )
+                    .truncate(),
                 )
                 .on_hover_text(error);
             });
@@ -132,6 +159,53 @@ impl DesktopApp {
                 }
             });
         }
+    }
+
+    fn show_character_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.heading("角色与外形");
+        ui.weak("把喜欢的样子与相处方式，组合成你的伙伴。");
+        ui.add_space(14.0);
+        ui.add_enabled_ui(!self.scene_busy(), |ui| {
+            if ui.available_width() >= 1020.0 {
+                ui.columns(2, |columns| {
+                    self.show_character_appearance(&mut columns[0]);
+                    self.show_character_persona(&mut columns[1]);
+                });
+            } else {
+                self.show_character_appearance(ui);
+                ui.add_space(14.0);
+                self.show_character_persona(ui);
+            }
+        });
+    }
+
+    fn show_character_appearance(&mut self, ui: &mut egui::Ui) {
+        super::theme::card().show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(egui::RichText::new("外形工作室").strong().size(18.0));
+            ui.weak("立绘、自己的图片，或只留下对话。随时都能更换。");
+            ui.add_space(10.0);
+            self.appearance.show_controls(ui);
+            ui.add_space(12.0);
+            egui::Frame::new()
+                .fill(super::theme::STAGE)
+                .corner_radius(14)
+                .inner_margin(14)
+                .show(ui, |ui| {
+                    let state = PresentationState::from_ui(&self.state);
+                    self.appearance
+                        .show_portrait(ui, state, &self.active_persona.name, 370.0);
+                });
+        });
+    }
+
+    fn show_character_persona(&mut self, ui: &mut egui::Ui) {
+        super::theme::card().show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(egui::RichText::new("怎样与你相处").strong().size(18.0));
+            ui.add_space(8.0);
+            self.show_persona_panel(ui);
+        });
     }
 
     fn activity_label(&self) -> &'static str {
@@ -156,49 +230,106 @@ impl DesktopApp {
     }
 
     fn show_chat_page(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("conversation_composer")
-            .exact_size(168.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(super::theme::SURFACE)
-                    .inner_margin(12),
-            )
-            .show(ui, |ui| self.show_composer(ui));
-        let wide = ui.available_width() >= 860.0;
+        let wide = ui.available_width() >= 940.0;
         if wide {
-            let width = (ui.available_width() * 0.29).clamp(250.0, 340.0);
+            let width = (ui.available_width() * 0.35).clamp(310.0, 430.0);
             egui::Panel::right("conversation_character")
                 .exact_size(width)
                 .resizable(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(super::theme::BACKGROUND)
+                        .inner_margin(egui::Margin {
+                            left: 0,
+                            right: 20,
+                            top: 20,
+                            bottom: 20,
+                        }),
+                )
                 .show(ui, |ui| {
-                    ui.add_space(12.0);
-                    let state = PresentationState::from_ui(&self.state);
-                    self.appearance.show_portrait(
-                        ui,
-                        state,
-                        &self.active_persona.name,
-                        (ui.available_height() - 112.0).max(100.0),
-                    );
-                    ui.add_space(8.0);
-                    if ui.button("自定义角色与外形").clicked() {
-                        self.page = Page::Character;
-                    }
+                    super::theme::card()
+                        .fill(super::theme::STAGE)
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.label(
+                                egui::RichText::new("陪在这里")
+                                    .color(super::theme::MUTED)
+                                    .size(12.0),
+                            );
+                            let state = PresentationState::from_ui(&self.state);
+                            self.appearance.show_portrait(
+                                ui,
+                                state,
+                                &self.active_persona.name,
+                                (ui.available_height() - 124.0).max(120.0),
+                            );
+                            ui.add_space(14.0);
+                            ui.vertical_centered(|ui| {
+                                if ui.button("自定义角色与外形").clicked() {
+                                    self.page = Page::Character;
+                                }
+                            });
+                        });
                 });
         }
-        egui::CentralPanel::default().show(ui, |ui| {
-            if !wide {
-                egui::CollapsingHeader::new("查看伙伴")
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        let state = PresentationState::from_ui(&self.state);
-                        self.appearance
-                            .show_portrait(ui, state, &self.active_persona.name, 100.0);
-                    });
-            }
-            crate::speech_panel::show(ui, &self.state);
-            self.show_conversation(ui);
-        });
+        let composer_height = if ui.available_height() < 540.0 {
+            140.0
+        } else {
+            168.0
+        };
+        let status_height = self.composer_status_height(ui, ui.available_width() - 70.0);
+        egui::Panel::bottom("conversation_composer")
+            .exact_size(composer_height + status_height)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(super::theme::BACKGROUND)
+                    .inner_margin(egui::Margin {
+                        left: 20,
+                        right: 20,
+                        top: 0,
+                        bottom: 16,
+                    }),
+            )
+            .show(ui, |ui| {
+                super::theme::card().inner_margin(14).show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    self.show_composer(ui);
+                });
+            });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(super::theme::BACKGROUND)
+                    .inner_margin(20),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("此刻的对话");
+                    ui.add_space(4.0);
+                    ui.colored_label(super::theme::MUTED, self.activity_label());
+                });
+                ui.add_space(8.0);
+                if !wide {
+                    egui::CollapsingHeader::new("查看伙伴")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            let state = PresentationState::from_ui(&self.state);
+                            self.appearance.show_portrait(
+                                ui,
+                                state,
+                                &self.active_persona.name,
+                                140.0,
+                            );
+                        });
+                }
+                crate::speech_panel::show(ui, &self.state);
+                super::theme::card().show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.set_min_height(ui.available_height());
+                    self.show_conversation(ui);
+                });
+            });
     }
 
     fn show_settings_page(&mut self, ui: &mut egui::Ui) {
@@ -217,7 +348,7 @@ impl DesktopApp {
             }
         });
         if let Some(error) = self.last_error.clone() {
-            ui.colored_label(egui::Color32::LIGHT_RED, &error);
+            ui.colored_label(ui.visuals().error_fg_color, &error);
             if ui.button("复制错误信息").clicked() {
                 ui.ctx().copy_text(error);
             }

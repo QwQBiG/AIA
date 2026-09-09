@@ -1,7 +1,6 @@
 use super::*;
 
-#[path = "headless_snapshot.rs"]
-mod headless_snapshot;
+use crate::headless_snapshot;
 #[path = "app_memory_tests.rs"]
 mod memory_tests;
 
@@ -128,6 +127,65 @@ fn long_messages_leave_send_visible_in_wide_and_small_windows() {
         for primitive in context.tessellate(output.shapes, output.pixels_per_point) {
             if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
                 assert!(mesh.is_valid());
+            }
+        }
+    }
+}
+
+#[test]
+fn composer_first_line_and_send_stay_inside_the_clip_when_resizing() {
+    for connected in [true, false] {
+        let (mut app, _events, _sent) = app();
+        app.input = "首行草稿必须完整可见".to_owned();
+        if !connected {
+            app.state.connection = ConnectionState::Disconnected;
+        }
+        let context = egui::Context::default();
+        configure_appearance(&context);
+        for size in [[1120.0, 720.0], [720.0, 600.0], [720.0, 520.0]] {
+            render(&mut app, &context, size, vec![]);
+            let output = render(&mut app, &context, size, vec![]);
+            for label in [app.input.as_str(), "发送"] {
+                let (clip, rect) = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.job.text == label => Some((
+                            shape.clip_rect,
+                            egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        )),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("visible composer text: {label}"));
+                assert!(
+                    clip.contains_rect(rect),
+                    "{label}: rect={rect:?}, clip={clip:?}, size={size:?}, connected={connected}"
+                );
+                assert!(
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, size.into()).contains_rect(rect)
+                );
+                let (frame_clip, frame) = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(frame)
+                            if frame.fill != egui::Color32::TRANSPARENT
+                                && frame.rect.contains_rect(rect) =>
+                        {
+                            Some((shape.clip_rect, frame.rect))
+                        }
+                        _ => None,
+                    })
+                    .min_by(|(_, left), (_, right)| left.area().total_cmp(&right.area()))
+                    .unwrap_or_else(|| panic!("visible composer frame: {label}"));
+                assert!(
+                    frame_clip.contains_rect(frame),
+                    "{label} frame={frame:?}, clip={frame_clip:?}, size={size:?}, connected={connected}"
+                );
+                assert!(
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, size.into()).contains_rect(frame),
+                    "{label} frame must fit the window: {frame:?}, size={size:?}, connected={connected}"
+                );
             }
         }
     }
@@ -352,8 +410,8 @@ fn write_chat_layout_snapshots() {
         let context = egui::Context::default();
         configure_appearance(&context);
         let points = [size[0] as f32, size[1] as f32];
-        render(&mut app, &context, points, vec![]);
-        let output = render(&mut app, &context, points, vec![]);
+        let mut output = render(&mut app, &context, points, vec![]);
+        output.append(render(&mut app, &context, points, vec![]));
         let path = directory.join(name);
         headless_snapshot::save(&context, output, size, &path).unwrap();
         println!("{}", path.display());

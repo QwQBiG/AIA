@@ -80,7 +80,7 @@ impl DesktopApp {
                                 ui.group(|ui| {
                                     let uncertain = message.state == DeliveryState::Uncertain;
                                     if uncertain {
-                                        ui.colored_label(egui::Color32::LIGHT_YELLOW,
+                                        ui.colored_label(ui.visuals().warn_fg_color,
                                             "结果待核对：服务可能已收到，请先检查聊天记录，避免重复发送。");
                                     } else {
                                         ui.weak("未送达，可以恢复后重新发送。");

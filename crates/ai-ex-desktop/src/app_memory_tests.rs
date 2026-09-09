@@ -280,8 +280,8 @@ fn write_memory_layout_snapshots() {
         let context = egui::Context::default();
         configure_appearance(&context);
         let points = [size[0] as f32, size[1] as f32];
-        render(&mut app, &context, points, vec![]);
-        let output = render(&mut app, &context, points, vec![]);
+        let mut output = render(&mut app, &context, points, vec![]);
+        output.append(render(&mut app, &context, points, vec![]));
         let path = directory.join(name);
         headless_snapshot::save(&context, output, size, &path).unwrap();
         println!("{}", path.display());

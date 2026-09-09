@@ -3,6 +3,13 @@ use std::sync::{Arc, Mutex};
 use ai_ex_domain::AppError;
 use eframe::egui;
 
+use crate::app::theme;
+use crate::appearance::AppearancePanel;
+
+#[cfg(test)]
+#[path = "onboarding_ui_tests.rs"]
+pub(crate) mod review;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
     Preview,
@@ -27,18 +34,14 @@ fn window(configured: bool, error: Option<String>) -> Result<Option<Choice>, App
     let result = choice.clone();
     eframe::run_native(
         "AIex 数字伙伴",
-        eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size([680.0, 460.0])
-                .with_min_inner_size([520.0, 380.0]),
-            ..Default::default()
-        },
+        crate::navigation::companion_window([860.0, 580.0], [520.0, 380.0]),
         Box::new(move |context| {
             crate::app::configure_appearance(&context.egui_ctx);
             Ok(Box::new(Welcome {
                 configured,
                 error,
                 choice,
+                appearance: AppearancePanel::load(context.storage),
             }))
         }),
     )
@@ -53,17 +56,70 @@ struct Welcome {
     configured: bool,
     error: Option<String>,
     choice: Arc<Mutex<Option<Choice>>>,
+    appearance: AppearancePanel,
 }
 
 impl Welcome {
     fn contents(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(16.0);
-        ui.heading("欢迎，先让伙伴来到身边");
-        ui.add_space(8.0);
+        self.appearance.poll(ui.ctx());
+        egui::Frame::new().inner_margin(24.0).show(ui, |ui| {
+            ui.label(
+                egui::RichText::new("AIex · 数字伙伴")
+                    .color(theme::ACCENT)
+                    .strong(),
+            );
+            ui.add_space(18.0);
+            if ui.available_width() >= 650.0
+                && self.error.is_none()
+                && self.appearance.kind != crate::appearance::AppearanceKind::Hidden
+            {
+                let stage_width = ui.available_width() * 0.42;
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(stage_width, 390.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            theme::card().fill(theme::SURFACE_ALT).show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                self.appearance.show_portrait(
+                                    ui,
+                                    ai_ex_ui_model::PresentationState {
+                                        connected: true,
+                                        synchronized: true,
+                                        activity: ai_ex_domain::ConversationState::Idle,
+                                        emotion: ai_ex_domain::Emotion::Neutral,
+                                        mouth_level: None,
+                                    },
+                                    "很高兴见到你",
+                                    340.0,
+                                );
+                            });
+                        },
+                    );
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| self.show_choices(ui));
+                });
+            } else {
+                self.show_choices(ui);
+            }
+            ui.add_space(14.0);
+            ui.small(format!("版本 {}", env!("CARGO_PKG_VERSION")));
+        });
+    }
+
+    fn show_choices(&mut self, ui: &mut egui::Ui) {
+        ui.heading("把陪伴，变成日常");
+        ui.add_space(6.0);
         if let Some(error) = &self.error {
-            ui.colored_label(egui::Color32::LIGHT_RED, "暂时无法启动");
-            ui.label(error);
-            ui.label("连接信息有误时可修改设置再试，也可以先离线体验人物。若提示文件缺失或损坏，请按错误说明修复，或在新目录完整解压程序包。");
+            theme::card().show(ui, |ui| {
+                ui.strong("暂时无法启动");
+                egui::ScrollArea::vertical()
+                    .max_height(130.0)
+                    .show(ui, |ui| {
+                        ui.label(error);
+                    });
+            });
+            ui.label("可以修改连接设置，或先离线体验外形。文件缺失时，请在新目录完整解压程序包。");
             if ui.button("复制错误信息").clicked() {
                 ui.ctx().copy_text(error.clone());
             }
@@ -74,37 +130,49 @@ impl Welcome {
             }
             return;
         }
-        ui.label("先认识你的伙伴，再按自己的节奏连接模型、组装角色。");
-        ui.add_space(18.0);
-        self.button(ui, "先体验外形", Choice::Preview);
-        ui.label("无需账号或模型，立即体验人物表情、配色和自定义图片外形。");
+        ui.weak("认识一个角色，留下一段对话。\n从你喜欢的样子开始。");
+        ui.add_space(16.0);
+        theme::card().show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            self.button(ui, "先体验外形", Choice::Preview);
+            ui.small("立即认识伙伴，试试表情与自定义外形。");
+        });
         ui.add_space(12.0);
-        self.button(
-            ui,
-            if self.configured {
-                "开始对话"
-            } else {
-                "连接模型并开始对话"
-            },
-            if self.configured {
-                Choice::Connect
-            } else {
-                Choice::Setup
-            },
-        );
-        ui.label("连接你选择的模型服务，使用角色、记忆和场景组合。");
+        theme::card().show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            self.button(
+                ui,
+                if self.configured {
+                    "开始对话"
+                } else {
+                    "连接模型并开始对话"
+                },
+                if self.configured {
+                    Choice::Connect
+                } else {
+                    Choice::Setup
+                },
+            );
+            ui.small("连接你选择的模型，开启对话与记忆。");
+        });
         ui.add_space(12.0);
         if self.configured {
             self.button(ui, "连接设置", Choice::Setup);
         }
-        ui.add_space(16.0);
-        ui.weak("真实对话需要模型服务；语音和麦克风可以稍后配置。");
-        ui.weak(format!("版本 {}", env!("CARGO_PKG_VERSION")));
+        ui.add_space(8.0);
+        ui.small("外形预览可以离线使用。语音可稍后配置。");
     }
 
     fn button(&self, ui: &mut egui::Ui, label: &str, choice: Choice) {
         if ui
-            .add_sized([240.0, 42.0], egui::Button::new(label))
+            .add_sized(
+                [ui.available_width().min(320.0), 40.0],
+                if choice == Choice::Preview {
+                    theme::primary_button(label)
+                } else {
+                    egui::Button::new(label)
+                },
+            )
             .clicked()
         {
             if let Ok(mut selected) = self.choice.lock() {
@@ -139,6 +207,7 @@ mod tests {
                 configured,
                 error: None,
                 choice: choice.clone(),
+                appearance: AppearancePanel::default(),
             };
             let output = context.run_ui(egui::RawInput::default(), |ui| app.contents(ui));
             let position = output
@@ -180,6 +249,7 @@ mod tests {
                 configured,
                 error: None,
                 choice: Arc::new(Mutex::new(None)),
+                appearance: AppearancePanel::default(),
             };
             let output = context.run_ui(egui::RawInput::default(), |ui| app.contents(ui));
             let texts: Vec<_> = output

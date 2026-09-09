@@ -4,6 +4,9 @@ use eframe::egui::{self, Color32};
 #[path = "appearance_paint.rs"]
 mod paint;
 
+#[path = "anime_portrait.rs"]
+mod anime;
+
 #[path = "appearance_scene.rs"]
 mod scene;
 
@@ -25,17 +28,19 @@ pub struct AppearancePanel {
     images: crate::appearance_import::AppearanceImport,
     image_scale: f32,
     animation: PresentationAnimator,
+    portrait: anime::AnimePortrait,
 }
 
 impl Default for AppearancePanel {
     fn default() -> Self {
         Self {
             kind: AppearanceKind::Companion,
-            accent: [129, 178, 247],
+            accent: [154, 133, 184],
             reduced_motion: false,
             images: Default::default(),
             image_scale: 0.95,
             animation: PresentationAnimator::default(),
+            portrait: anime::AnimePortrait::default(),
         }
     }
 }
@@ -98,28 +103,43 @@ impl AppearancePanel {
         self.kind = AppearanceKind::Images;
     }
 
+    #[cfg(test)]
     pub fn show(&mut self, ui: &mut egui::Ui, state: PresentationState, name: &str, height: f32) {
+        self.show_controls(ui);
+        self.show_portrait(ui, state, name, height);
+    }
+
+    pub fn show_controls(&mut self, ui: &mut egui::Ui) {
         self.poll(ui.ctx());
         let previous = self.kind;
         ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.kind, AppearanceKind::Companion, "人物立绘");
-            ui.selectable_value(&mut self.kind, AppearanceKind::Images, "图片角色");
+            ui.selectable_value(&mut self.kind, AppearanceKind::Companion, "内置立绘");
+            ui.selectable_value(&mut self.kind, AppearanceKind::Images, "自选图片");
             ui.selectable_value(&mut self.kind, AppearanceKind::Hidden, "隐藏外形");
-            if self.kind == AppearanceKind::Images {
-                ui.add(egui::Slider::new(&mut self.image_scale, 0.25..=1.0).text("大小"));
-            } else {
-                ui.label("配色");
-                ui.color_edit_button_srgb(&mut self.accent);
-            }
-            ui.checkbox(&mut self.reduced_motion, "减少动态效果");
         });
         if previous != self.kind {
             self.images.keep_selection();
         }
-        if self.kind == AppearanceKind::Images {
-            self.images.controls(ui);
+        ui.add_space(8.0);
+        match self.kind {
+            AppearanceKind::Companion => {
+                ui.weak("已经为你准备好，可以直接开始陪伴。");
+            }
+            AppearanceKind::Images => {
+                self.images.controls(ui);
+                ui.add(egui::Slider::new(&mut self.image_scale, 0.25..=1.0).text("显示大小"));
+            }
+            AppearanceKind::Hidden => {
+                ui.weak("对话和声音会继续保留。");
+            }
         }
-        self.show_portrait(ui, state, name, height);
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("舞台点缀");
+            ui.color_edit_button_srgb(&mut self.accent)
+                .on_hover_text("调整立绘卡片与姓名旁的点缀颜色。人物服装保留原画配色。");
+        });
+        ui.checkbox(&mut self.reduced_motion, "减少动态效果");
     }
 
     pub fn poll(&mut self, context: &egui::Context) {
@@ -147,17 +167,36 @@ impl AppearancePanel {
                 && let Some(pack) = &self.images.current
             {
                 pack.draw(ui.painter(), rect, state, frame, self.image_scale);
-            } else {
+            } else if self
+                .portrait
+                .draw(
+                    ui.painter(),
+                    rect,
+                    state,
+                    frame,
+                    self.reduced_motion,
+                    accent,
+                )
+                .is_err()
+            {
                 paint::draw(ui.painter(), rect, frame, accent);
             }
-            if !self.reduced_motion && state.connected && state.synchronized {
+            if anime::motion_allowed(state, self.reduced_motion) {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_millis(33));
             }
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.strong(name);
-            ui.label(state.label());
-        });
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 24.0),
+            egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Center),
+            |ui| {
+                ui.strong(name);
+                ui.colored_label(
+                    Color32::from_rgb(self.accent[0], self.accent[1], self.accent[2]),
+                    "·",
+                );
+                ui.weak(state.label());
+            },
+        );
     }
 }

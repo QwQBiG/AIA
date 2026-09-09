@@ -14,7 +14,7 @@ mod layout;
 #[path = "app_navigation.rs"]
 mod navigation;
 #[path = "app_theme.rs"]
-mod theme;
+pub(crate) mod theme;
 pub(crate) use theme::configure_appearance;
 
 #[cfg(test)]
@@ -470,75 +470,106 @@ impl DesktopApp {
         self.poll_character(ui.ctx());
         let mut changed = false;
         let mut request_confirm = false;
-        egui::CollapsingHeader::new("角色设定与收藏").default_open(true).show(ui, |ui|
-        {
-            self.show_character_library(ui);
-            ui.add_enabled_ui(!self.persona_apply_pending && !self.confirm_persona, |ui|
-            {
-                if self.character_files.show(ui, &self.persona) { self.persona_dirty = true; }
+        egui::CollapsingHeader::new("角色设定与收藏")
+            .default_open(true)
+            .show(ui, |ui| {
+                self.show_character_library(ui);
+                ui.add_enabled_ui(!self.persona_apply_pending && !self.confirm_persona, |ui| {
+                    if self.character_files.show(ui, &self.persona) {
+                        self.persona_dirty = true;
+                    }
+                });
+                ui.add_enabled_ui(
+                    !self.character_files.is_loading()
+                        && !self.persona_apply_pending
+                        && !self.confirm_persona,
+                    |ui| {
+                        ui.weak("修改后先预览，再确认应用到当前对话。正在回复时请先打断。");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("档案 ID");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.persona.profile_id)
+                                        .desired_width(180.0),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                            ui.label(format!("版本 {}", self.persona.revision));
+                            if ui.button("版本 +1").clicked() {
+                                self.persona.revision = self.persona.revision.saturating_add(1);
+                                changed = true;
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("名称");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.persona.name)
+                                        .desired_width(140.0),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                            ui.label("语气");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.persona.tone)
+                                        .desired_width(140.0),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                        });
+                        ui.label("系统提示词");
+                        if ui
+                            .add(
+                                egui::TextEdit::multiline(&mut self.persona.system_prompt)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(3),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                        ui.label("禁忌（每行一项）");
+                        if ui
+                            .add(
+                                egui::TextEdit::multiline(&mut self.taboos_editor)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(2),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("直播模式");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.persona.live_mode)
+                                        .desired_width(140.0),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                            if ui.button("预览并请求确认").clicked() {
+                                request_confirm = true;
+                            }
+                        });
+                        if self.persona_dirty {
+                            ui.colored_label(ui.visuals().warn_fg_color, "有未确认的角色修改");
+                        }
+                        if self.persona_apply_pending {
+                            ui.weak("正在等待服务确认角色切换……");
+                        }
+                    },
+                );
             });
-            ui.add_enabled_ui(!self.character_files.is_loading() && !self.persona_apply_pending && !self.confirm_persona, |ui|
-            {
-            ui.label("修改角色后必须预览并确认；活动回复期间服务会拒绝切换。开发者可同时观察事件日志。");
-            ui.horizontal(|ui|
-            {
-                ui.label("档案 ID");
-                if ui.text_edit_singleline(&mut self.persona.profile_id).changed()
-                {
-                    changed = true;
-                }
-                ui.label(format!("版本 {}", self.persona.revision));
-                if ui.button("版本 +1").clicked()
-                {
-                    self.persona.revision = self.persona.revision.saturating_add(1);
-                    changed = true;
-                }
-            });
-            ui.horizontal(|ui|
-            {
-                ui.label("名称");
-                if ui.text_edit_singleline(&mut self.persona.name).changed()
-                {
-                    changed = true;
-                }
-                ui.label("语气");
-                if ui.text_edit_singleline(&mut self.persona.tone).changed()
-                {
-                    changed = true;
-                }
-            });
-            ui.label("系统提示词");
-            if ui.text_edit_multiline(&mut self.persona.system_prompt).changed()
-            {
-                changed = true;
-            }
-            ui.label("禁忌（每行一项）");
-            if ui.text_edit_multiline(&mut self.taboos_editor).changed()
-            {
-                changed = true;
-            }
-            ui.horizontal(|ui|
-            {
-                ui.label("直播模式");
-                if ui.text_edit_singleline(&mut self.persona.live_mode).changed()
-                {
-                    changed = true;
-                }
-                if ui.button("预览并请求确认").clicked()
-                {
-                    request_confirm = true;
-                }
-            });
-            if self.persona_dirty
-            {
-                ui.colored_label(egui::Color32::YELLOW, "有未确认的角色修改");
-            }
-            if self.persona_apply_pending
-            {
-                ui.weak("正在等待服务确认角色切换……");
-            }
-            });
-        });
         if changed {
             self.persona_dirty = true;
             self.persona.taboos = self
@@ -577,9 +608,9 @@ impl DesktopApp {
             ui.horizontal_wrapped(|ui| {
                 for item in &self.health {
                     let color = if item.ready {
-                        egui::Color32::from_rgb(80, 200, 140)
+                        theme::SUCCESS
                     } else {
-                        egui::Color32::LIGHT_RED
+                        ui.visuals().error_fg_color
                     };
                     let label = if item.ready { "就绪" } else { "不可用" };
                     ui.colored_label(color, format!("{}：{}", item.component, label))
@@ -599,11 +630,11 @@ impl DesktopApp {
             };
             let color = if item.ready
             {
-                egui::Color32::from_rgb(80, 200, 140)
+                theme::SUCCESS
             }
             else
             {
-                egui::Color32::LIGHT_RED
+                ui.visuals().error_fg_color
             };
             let state = if item.ready { "就绪" } else { "不可用" };
             ui.colored_label(color, format!("{}：{}", item.component, state));
@@ -629,9 +660,9 @@ impl DesktopApp {
             if let Some(safety) = self.health.iter().find(|item| item.component == "safety") {
                 let emergency = safety.detail.contains("emergency stop");
                 let color = if emergency {
-                    egui::Color32::LIGHT_RED
+                    ui.visuals().error_fg_color
                 } else {
-                    egui::Color32::from_rgb(80, 200, 140)
+                    theme::SUCCESS
                 };
                 ui.colored_label(color, format!("自动化安全门：{}", safety.detail));
             } else {
@@ -647,7 +678,7 @@ impl DesktopApp {
             ui.horizontal(|ui|
             {
                 ui.label("执行模式：");
-                ui.colored_label(egui::Color32::from_rgb(80, 200, 140), "dry-run（无副作用）");
+                ui.colored_label(theme::SUCCESS, "dry-run（无副作用）");
             });
             ui.small("真实鼠标、键盘和进程启动不会从桌面界面直接触发。动作必须经过独立插件、白名单、审计和急停。");
             let relevant = self
@@ -671,11 +702,11 @@ impl DesktopApp {
             {
                 let color = if item.ready
                 {
-                    egui::Color32::from_rgb(80, 200, 140)
+                    theme::SUCCESS
                 }
                 else
                 {
-                    egui::Color32::LIGHT_RED
+                    ui.visuals().error_fg_color
                 };
                 let state = if item.ready { "就绪" } else { "不可用" };
                 ui.horizontal(|ui|

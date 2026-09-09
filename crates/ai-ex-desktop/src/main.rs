@@ -6,6 +6,8 @@ mod appearance;
 mod appearance_import;
 mod character_files;
 mod character_library;
+#[cfg(test)]
+mod headless_snapshot;
 mod image_appearance;
 mod memory_panel;
 mod navigation;

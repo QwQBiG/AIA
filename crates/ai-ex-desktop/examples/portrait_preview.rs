@@ -4,7 +4,7 @@ use ai_ex_domain::{ConversationState, Emotion};
 use ai_ex_ui_model::PresentationState;
 use eframe::egui::{self, Color32, Pos2, Rect, pos2, vec2};
 
-#[path = "../src/appearance_paint.rs"]
+#[path = "../src/anime_portrait.rs"]
 mod portrait;
 
 #[path = "../src/headless_snapshot.rs"]
@@ -14,9 +14,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args_os()
         .nth(1)
         .ok_or("provide a new output PNG path")?;
-    let width = 1200;
+    let width = 1600;
     let height = 1000;
     let context = egui::Context::default();
+    let mut portraits: [_; 8] = std::array::from_fn(|_| portrait::AnimePortrait::default());
     let output = context.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
@@ -27,44 +28,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         },
         |ui| {
-            for (index, emotion) in [
-                Emotion::Neutral,
-                Emotion::Happy,
-                Emotion::Sad,
-                Emotion::Angry,
-                Emotion::Surprised,
-                Emotion::Neutral,
-            ]
-            .into_iter()
-            .enumerate()
-            {
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0, Color32::from_rgb(248, 247, 252));
+            for (index, (emotion, activity, time, label)) in cases().into_iter().enumerate() {
                 let state = PresentationState {
                     connected: true,
                     synchronized: true,
-                    activity: if index == 1 {
-                        ConversationState::Speaking
-                    } else {
-                        ConversationState::Idle
-                    },
+                    activity,
                     emotion,
-                    mouth_level: None,
+                    mouth_level: Some(if activity == ConversationState::Speaking {
+                        850
+                    } else {
+                        0
+                    }),
                 };
                 let rect = Rect::from_min_size(
                     pos2(
-                        (index % 3) as f32 * 400.0 + 20.0,
-                        (index / 3) as f32 * 500.0 + 15.0,
+                        (index % 4) as f32 * 400.0 + 20.0,
+                        (index / 4) as f32 * 500.0 + 15.0,
                     ),
-                    vec2(360.0, 470.0),
+                    vec2(360.0, 440.0),
                 );
-                portrait::draw(
-                    ui.painter(),
-                    rect,
-                    state.animate(1.0, index == 5),
-                    if index == 5 {
-                        Color32::from_rgb(209, 142, 158)
-                    } else {
-                        Color32::from_rgb(129, 178, 247)
-                    },
+                portraits[index]
+                    .draw(
+                        ui.painter(),
+                        rect,
+                        state,
+                        state.animate(time, false),
+                        false,
+                        Color32::from_rgb(154, 133, 184),
+                    )
+                    .expect("embedded portrait images are valid");
+                ui.painter().text(
+                    rect.center_bottom() + vec2(0.0, 18.0),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::FontId::proportional(18.0),
+                    Color32::from_rgb(75, 64, 88),
                 );
             }
         },
@@ -79,8 +79,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Portrait preview saved: {}",
         std::path::Path::new(&path).display()
     );
-    println!(
-        "Rows: neutral / happy speaking / sad; angry / surprised / reduced motion with another accent."
-    );
+    println!("Rows: companion / blink / speaking / thinking; happy / sad / angry / surprised.");
     Ok(())
+}
+
+fn cases() -> [(Emotion, ConversationState, f64, &'static str); 8] {
+    use ConversationState::{Idle, Speaking, Thinking};
+    use Emotion::{Angry, Happy, Neutral, Sad, Surprised};
+    [
+        (Neutral, Idle, 1.0, "Companion"),
+        (Neutral, Idle, 0.08, "Blink"),
+        (Neutral, Speaking, 1.0, "Speaking"),
+        (Neutral, Thinking, 1.0, "Thinking"),
+        (Happy, Idle, 1.0, "Happy"),
+        (Sad, Idle, 1.0, "Sad"),
+        (Angry, Idle, 1.0, "Angry"),
+        (Surprised, Idle, 1.0, "Surprised"),
+    ]
 }
